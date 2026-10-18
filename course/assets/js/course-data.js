@@ -206,9 +206,9 @@ LC.course = {
       { id: "ag-8", title: "Starter kit: a server, a skill and a rules file", mins: 12, pre: ["ag-3", "ag-4", "ag-5"], ready: true, colab: "ag-8-starter-kit.ipynb" }
     ]},
     in: { code: "IN", title: "Interpretability", cover: "cover-in.webp", tags: ["interpretability", "sparse autoencoder", "circuits", "probing", "superposition"], lessons: [
-      { id: "in-1", title: "Features & superposition", mins: 10, pre: ["m1-4", "p1-1"] },
-      { id: "in-2", title: "Probing & circuits", mins: 10, pre: ["in-1"] },
-      { id: "in-3", title: "Sparse autoencoders", mins: 10, pre: ["in-2", "p6-4"] }
+      { id: "in-1", title: "Features & superposition", mins: 10, pre: ["m1-4", "p1-1"], ready: true },
+      { id: "in-2", title: "Probing & circuits", mins: 10, pre: ["in-1"], ready: true },
+      { id: "in-3", title: "Sparse autoencoders", mins: 10, pre: ["in-2", "p6-4"], ready: true, colab: "in-3-sparse-autoencoder.ipynb" }
     ]},
     cx: { code: "★", title: "More capstones", cover: "cover-cx.webp", tags: [], lessons: [
       { id: "cap-2", title: "Build a tiny diffusion model", mins: 30, pre: ["g1-3", "p4-2"] },

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="in-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Features &amp; superposition · LLMs, Animated</title>
+<meta name="description" content="Why researchers look inside LLMs, neurons vs features, the linear representation hypothesis, polysemantic neurons, and superposition: how a network stores more sparse features than it has dimensions. With a toy-model playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Features &amp; superposition</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Interpretability</span></div>
+<p class="lede">An LLM's billions of numbers do something useful, but nobody wrote down <em>how</em>. Interpretability tries to read the mechanism back out. The first surprise is that single neurons are usually the wrong thing to look at: models store ideas as <strong>directions</strong>, and they pack in far <strong>more ideas than they have neurons</strong>. That trick is called superposition.</p>
+
+<div class="cover"><img src="../assets/img/cover-in.webp" alt="Illustration: a scientist with a magnifying glass studies a translucent brain-shaped network whose circuits light up, beside a prism splitting a beam into colors." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Give three reasons to look inside a model, and explain the difference between a neuron and a feature.</li>
+    <li>State the linear representation hypothesis and read a feature from an activation with a dot product.</li>
+    <li>Explain superposition: why sparse features let a network store more features than dimensions, and what it costs.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="m1-4.html">M1.4 The decoder-only transformer</a> (layers, the residual stream, activations) and <a href="p1-1.html">P1.1 Vectors &amp; dot products</a> (dot products, cosine similarity, perpendicular vectors). Helpful but optional: <a href="p3-4.html">P3.4 Embeddings</a>, for word vectors.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Researchers look at one neuron in an image model and find it fires strongly for cat faces, for the fronts of cars and for cat legs. What's the most likely explanation?</p>
+    <ol class="q-src">
+      <li>The model is broken and needs retraining</li>
+      <li>The model thinks cats and cars are the same thing</li>
+      <li>The neuron helps represent several unrelated features at once, because the model stores more features than it has neurons</li>
+      <li>It's a measurement error; neurons always mean exactly one thing</li>
+    </ol>
+    <div class="q-explain">That neuron is real (Olah et al., 2020). Neurons like it are called <strong>polysemantic</strong>, and the leading explanation is <strong>superposition</strong>: features are spread across many neurons, and each neuron takes part in several features.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Pick two random directions in a 10,000-dimensional space. Roughly what is the angle between them?</p>
+    <ol class="q-src">
+      <li>About 45°</li>
+      <li>Very close to 90°</li>
+      <li>Close to 0°: random vectors point the same way</li>
+      <li>Anything from 0° to 180° is equally likely</li>
+    </ol>
+    <div class="q-explain">In high dimensions, random directions are almost perpendicular: their cosine is typically within about $\pm 0.01$ of zero. That spare "almost-perpendicular room" is what superposition exploits.</div>
+  </div>
+</section>
+
+<h2>Why look inside, and what to look for</h2>
+<p>For most of deep learning's history, trained networks were treated as black boxes: measure accuracy on a test set and move on. Researchers started opening them up early. Zeiler &amp; Fergus (2014) visualised what each layer of an image classifier responded to, and Chris Olah and colleagues at Google and OpenAI built a whole research programme on it in the journal Distill (Feature Visualization, 2017; "Zoom In", 2020). From 2021, Anthropic's <em>Transformer Circuits</em> thread (Elhage et al., 2021, "A Mathematical Framework for Transformer Circuits") brought the same approach to language models. The goal of this <strong>mechanistic interpretability</strong> is to reverse-engineer the algorithm a network learned, the way you might decompile a program.</p>
+<p>Three reasons people care:</p>
+<ul>
+  <li><strong>Debugging.</strong> When a model gives a wrong or biased answer, behavioural tests (<a href="m4-1.html">M4</a>) tell you <em>that</em> it failed. Looking inside can tell you <em>why</em>: which internal fact or shortcut it used.</li>
+  <li><strong>Safety.</strong> A model could behave well on every test you thought of and still carry a capability or goal you'd want to know about. Reading internal states is one of the few ways to check what a model "knows" beyond what it says.</li>
+  <li><strong>Science.</strong> LLMs are a new kind of object. How do they store facts, do arithmetic, plan a rhyme? Interpretability is how we find out.</li>
+</ul>
+<p>So what should you look at? The obvious unit is the <strong>neuron</strong>: one number in an activation vector, such as one output of an MLP layer (<a href="m1-4.html">M1.4</a>). A <strong>feature</strong> is different: it's a property of the input that the model represents internally, like "this text is in French", "this token is inside a URL" or "the subject is a sports team". The hopeful picture is <strong>one neuron, one feature</strong> (a <em>monosemantic</em> neuron). Some neurons really do look like that. Many don't. In the InceptionV1 image model, neuron 4e:55 fires for cat faces, for the fronts of cars and for cat legs (Olah et al., 2020). Neurons that respond to several unrelated things are called <strong>polysemantic</strong>, and in language models they are common.</p>
+<p class="math-note">How common is still argued about. In October 2026, Nick Cammarata, a co-author of "Zoom In", published an essay with the interpretability company Goodfire arguing that most neurons in a large open model have one main job once you look carefully. Its numbers are preliminary and the debate is ongoing.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What is the difference between a neuron and a feature?</p>
+  <ol class="q-src">
+    <li>They are two names for the same thing</li>
+    <li>A neuron is one coordinate of an activation vector; a feature is a property of the input the model represents, which need not line up with any single neuron</li>
+    <li>Features exist only in image models, neurons only in LLMs</li>
+    <li>A feature is a weight; a neuron is a token</li>
+  </ol>
+  <div class="q-explain">A neuron is a slot in the hardware, so to speak. A feature is a piece of meaning. If each feature used exactly one neuron, reading a model would be easy; polysemantic neurons show it usually doesn't.</div>
+</div></div>
+
+<h2>Features as directions</h2>
+<p>If features aren't neurons, what are they? The leading answer is the <strong>linear representation hypothesis</strong>: a feature is a <strong>direction</strong> in activation space, and how strongly the feature is present is how far the activation points along that direction. An activation vector $h$ is then (approximately) a weighted sum of feature directions:</p>
+$$h \approx \sum_i f_i\, d_i$$
+<p>Here $d_i$ is the unit-length direction of feature $i$, and $f_i \ge 0$ is how active that feature is on this input (mostly zero). To <strong>read</strong> feature $i$, take a dot product (<a href="p1-1.html">P1.1</a>): $r_i = d_i \cdot h$. If the directions were all perpendicular, $r_i$ would recover $f_i$ exactly.</p>
+<p>The first hint came from word vectors. Mikolov et al. (2013) found that in word2vec embeddings, $\text{vec}(\text{king}) - \text{vec}(\text{man}) + \text{vec}(\text{woman})$ lands closest to $\text{vec}(\text{queen})$ (<a href="p3-4.html">P3.4</a>): "male → female" behaves like one direction you can add or subtract. In LLMs, simple linear classifiers can read sentiment, truth-value and even a place's latitude and longitude out of activations (Gurnee &amp; Tegmark, 2023), and Park, Choe &amp; Veitch (2023) gave the hypothesis a formal statement. It is a hypothesis, not a law: Engels et al. (2024) found some features that are genuinely <em>multi-dimensional</em>, such as days of the week and months arranged on circles.</p>
+<p>Notice what the hypothesis doesn't say: nothing forces a feature's direction to line up with a neuron. In the residual stream (<a href="m1-4.html">M1.4</a>) no activation function acts on single coordinates, so the neuron axes aren't special at all; directions can point anywhere. Inside an MLP, the activation function is applied neuron by neuron, which gives the neuron basis some meaning, and that's where monosemantic neurons are most often found.</p>
+
+<figure class="anim wide" data-anim="in-1-directions"></figure>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Under the linear representation hypothesis, how do you measure how strongly a feature is present in an activation $h$?</p>
+  <ol class="q-src">
+    <li>Take the dot product of $h$ with the feature's direction</li>
+    <li>Read the value of the neuron with the same index as the feature</li>
+    <li>Count how many neurons are non-zero</li>
+    <li>Take the length of $h$</li>
+  </ol>
+  <div class="q-explain">A feature is a direction, so its strength is the projection of $h$ onto that direction: $d_i \cdot h$. A single neuron only measures one particular direction, an axis, which usually isn't a feature's.</div>
+</div></div>
+
+<h2>Superposition: more features than dimensions</h2>
+<p>A model with a 4,096-dimensional residual stream can hold at most 4,096 <em>perfectly perpendicular</em> directions. But the world has far more than 4,096 things worth representing: every famous person, programming language, grammatical role and topic. Elhage et al. (2022, "Toy Models of Superposition") showed in a tiny model how networks escape this limit. Their setup takes $n$ input features, squeezes them into $m &lt; n$ dimensions, and asks the network to get them back out:</p>
+$$h = W x, \qquad \hat{x} = \mathrm{ReLU}\big(W^{\top} h + b\big)$$
+<p>Here $x$ holds the $n$ feature values, $W$ is an $m \times n$ matrix whose column $i$ is feature $i$'s direction in the small space, $h$ is the $m$-dimensional hidden activation, $b$ is a bias per feature, and the loss is squared error weighted by each feature's <strong>importance</strong>. The key knob is <strong>sparsity</strong>: how often each feature is zero.</p>
+<ul>
+  <li><strong>Dense features</strong> (all on at once): the model keeps only the $m$ most important features, each in its own perpendicular direction, and ignores the rest. A linear model always does this, the same way PCA (<a href="p6-4.html">P6.4</a>) keeps only the top components.</li>
+  <li><strong>Sparse features</strong> (each rarely on): the model stores <em>more</em> features than dimensions, at angles that overlap a little. Five features in two dimensions arrange themselves as a <strong>pentagon</strong>.</li>
+</ul>
+<p>Superposition works because of the <strong>ReLU and bias</strong>. When feature A is on, every other feature's reading picks up a little <strong>interference</strong> from A. A negative bias plus the ReLU cuts small and negative readings to zero, so if features rarely occur together, the errors are rare and small. The price arrives when several overlapping features are active at once. Try it:</p>
+
+<section class="playground" id="in-1-superposition" aria-labelledby="pgs">
+  <h3 id="pgs">Try it: squeeze five features into two dimensions</h3>
+  <p class="math-note" style="margin:0">Each arrow is one column of $W$, a feature's direction in the 2-D hidden space (f1 is the most important feature, f5 the least). These are real trained solutions of the toy model above, one per sparsity setting, trained in advance with feature importances $1, 0.8, 0.64, 0.51, 0.41$. The bars show the model's output $\hat{x}$ for a test input; grey ticks mark the correct values.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Each feature is on <output data-out="p">5%</output> of the time</span>
+      <input type="range" data-in="p" min="0" max="13" step="1" value="10" aria-label="How often each feature is active">
+    </label>
+    <div class="chips" role="group" aria-label="Test input">
+      <button type="button" class="chip" data-input="one" aria-pressed="true">Test: f1 alone</button>
+      <button type="button" class="chip" data-input="two" aria-pressed="false">Test: f1 + f2 together</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</section>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-in-1.webp" alt="A closet with three hooks where a child hangs six outfits layered at different angles so each can still be pulled out on its own." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A closet has only <strong>three hooks</strong>, but a child has <strong>six outfits</strong>. So she hangs two on each hook, turned at different angles, and can still pull any one out on its own.</p>
+      <p>It works because she only wears <strong>one outfit at a time</strong>. If she needed several at once, the hangers would tangle. Hooks are the model's dimensions; outfits are features; "one at a time" is sparsity.</p>
+      <p class="math-note">Where it breaks: a model has no tidy hooks. Every feature is a direction that overlaps a little with many others, and "pulling one out" is a dot product that always drags a bit of the others along.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">In the toy model, what makes it worthwhile to store more features than dimensions?</p>
+  <ol class="q-src">
+    <li>A larger learning rate</li>
+    <li>Removing the ReLU</li>
+    <li>Sparse features plus the ReLU and bias, which filter out the small interference between overlapping directions</li>
+    <li>Making every feature equally important and always on</li>
+  </ol>
+  <div class="q-explain">With dense features or a purely linear model, the network keeps just the top $m$ features, like PCA. Sparsity means overlapping features rarely fire together, and the nonlinearity cleans up the interference when only one does.</div>
+</div></div>
+
+<h2>Room in high dimensions</h2>
+<p>A pentagon in 2-D is cramped: neighbours overlap with cosine 0.31. Real models have thousands of dimensions, and there the geometry is far kinder. Two <strong>random</strong> directions in $d$ dimensions have a cosine similarity that is typically very close to 0: its spread shrinks like $1/\sqrt{d}$. And the number of directions you can fit with every pair <em>nearly</em> perpendicular (say, all cosines below 0.1) grows <strong>exponentially</strong> with $d$, a consequence of the Johnson–Lindenstrauss lemma (1984). So a residual stream with a few thousand dimensions has room for vastly more than a few thousand almost-perpendicular feature directions, provided the features are sparse enough that only a few are active on any token.</p>
+
+<h3>Worked example</h3>
+<p>Measure it. Draw pairs of random Gaussian vectors, compute their cosine, and average its absolute value:</p>
+<pre><code>import numpy as np
+rng = np.random.default_rng(0)
+for d in [2, 100, 10_000]:
+    a = rng.standard_normal((2000, d))
+    b = rng.standard_normal((2000, d))
+    cos = (a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1))
+    print(d, np.abs(cos).mean().round(3))</code></pre>
+<ol class="steps">
+  <li>$d = 2$: random directions are random angles in a plane, and the average $|\cos|$ is exactly $2/\pi \approx 0.64$. The code prints about 0.64 to 0.65.</li>
+  <li>For large $d$, the average $|\cos|$ is close to $\sqrt{2/(\pi d)} \approx 0.80/\sqrt{d}$.</li>
+  <li>So random directions in 2-D overlap a lot, and superposition there is costly. ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>Typical $|\cos|$ for $d = 100$, using $0.80/\sqrt{d}$ (two decimals): <span class="blank" data-answer="0.08" data-tol="0.005" data-hint="√100 = 10, so 0.80 / 10."></span></li>
+    <li>Typical $|\cos|$ for $d = 10{,}000$ (three decimals): <span class="blank" data-answer="0.008" data-tol="0.0005" data-hint="√10,000 = 100."></span></li>
+    <li>Going from $d = 100$ to $d = 10{,}000$ multiplies the dimension by 100. By how many times does typical interference shrink? <span class="blank" data-answer="10" data-tol="0.01" data-hint="Interference scales like 1/√d, and √100 = 10."></span></li>
+    <li>In the 2-D pentagon, two neighbouring features are 72° apart. Their cosine (two decimals): <span class="blank" data-answer="0.31" data-tol="0.005" data-hint="cos 72° ≈ 0.309."></span></li>
+  </ol>
+</section>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> superposition is the main reason you can't understand an LLM by printing its neurons. Each neuron mixes many features, and each feature is spread over many neurons. To read the model, you need to recover the feature <em>directions</em> themselves. That is what the next two lessons do: probes and patching find directions and components that matter (<a href="in-2.html">IN.2</a>), and sparse autoencoders try to pull out all the features at once by learning an overcomplete set of directions, with sparsity built in (<a href="in-3.html">IN.3</a>).</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why does superposition get easier as the number of dimensions grows?</p>
+  <ol class="q-src">
+    <li>More dimensions make features denser</li>
+    <li>High-dimensional vectors are always exactly perpendicular</li>
+    <li>The ReLU stops working in high dimensions</li>
+    <li>Random directions overlap less (typical cosine shrinks like $1/\sqrt{d}$), and exponentially many nearly perpendicular directions fit</li>
+  </ol>
+  <div class="q-explain">Not <em>exactly</em> perpendicular, but nearly: interference falls like $1/\sqrt{d}$ while the number of almost-orthogonal directions grows exponentially. That's plenty of room for sparse features.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What is superposition, why does a network use it, and when does it break down?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Superposition is storing more features than there are dimensions by giving each feature its own direction, with directions that overlap slightly instead of being perfectly perpendicular. A network does this because there are far more useful features than neurons, and when features are sparse, a ReLU with a negative bias can filter out the small interference when only one is on. It breaks down when several overlapping features are active at once: their interference adds up, giving false readings for features that are off and weak readings for those that are on.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In the toy model of superposition, features are made <em>dense</em> (all on at once) and there are $m = 2$ hidden dimensions. What does the trained model do?</p>
+    <ol class="q-src">
+      <li>Stores all five features as a pentagon</li>
+      <li>Stores only the two most important features, in perpendicular directions, and drops the rest</li>
+      <li>Stores no features at all</li>
+      <li>Stores all features along one shared direction</li>
+    </ol>
+    <div class="q-explain">With dense features, interference would be constant and costly, so the model keeps the top $m$ by importance in perpendicular directions, like PCA. Superposition only pays off when features are sparse.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Feature directions A and B are 72° apart. Only A is on, with strength 1. Reading B by dot product gives about 0.31. What turns that into the correct 0?</p>
+    <ol class="q-src">
+      <li>A ReLU after a bias of about −0.35</li>
+      <li>Normalising $h$ to length 1</li>
+      <li>Reading the neuron with B's index instead</li>
+      <li>Adding a second copy of A</li>
+    </ol>
+    <div class="q-explain">$\max(0, 0.31 - 0.35) = 0$. The bias sets a threshold below which interference is ignored, which is exactly the job the ReLU and bias do in the toy model.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Interleaving with M1.4: where would you expect neuron-aligned (monosemantic) features to be most likely, and why?</p>
+    <ol class="q-src">
+      <li>In the residual stream, because it's the widest vector</li>
+      <li>In the token embedding table, because it has one row per token</li>
+      <li>In the softmax output, because probabilities sum to 1</li>
+      <li>Inside the MLP's hidden layer, because its activation function acts on each neuron separately, which makes the neuron axes special</li>
+    </ol>
+    <div class="q-explain">The residual stream is only ever added to and read by matrix multiplications, so any rotation of it works equally well and its axes mean nothing in particular. An elementwise nonlinearity gives each MLP neuron its own threshold, a reason for features to align with neurons, though superposition still makes many of them polysemantic.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Interleaving with P1.1: you normalise all feature directions to unit length. What does the dot product of two of them equal?</p>
+    <ol class="q-src">
+      <li>The sum of their lengths</li>
+      <li>Always 0</li>
+      <li>The cosine of the angle between them, which is their interference</li>
+      <li>The number of active features</li>
+    </ol>
+    <div class="q-explain">For unit vectors, $a \cdot b = \cos\theta$. That cosine is exactly how much reading one feature picks up when the other is on.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Interpretability looks inside models for <strong>debugging, safety and science</strong>. The unit of meaning is a <strong>feature</strong>, not a neuron.</li>
+    <li><strong>Linear representation hypothesis:</strong> features are directions, $h \approx \sum_i f_i d_i$; read one with a dot product. (Some features, like days of the week, are circles instead.)</li>
+    <li><strong>Polysemantic neurons</strong> respond to several unrelated things, because features don't have to align with neurons.</li>
+    <li><strong>Superposition</strong> (Elhage et al., 2022): with <strong>sparse</strong> features, a network stores more features than dimensions at slightly overlapping angles, and a ReLU with bias filters the interference.</li>
+    <li>In $d$ dimensions random directions have $|\cos| \approx 0.8/\sqrt{d}$, so high-dimensional models have huge room for nearly perpendicular features.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"in-1-a","front":"Neuron vs feature: what's the difference?","back":"A neuron is one coordinate of an activation vector. A feature is a property of the input the model represents (e.g. 'text is French'), usually a direction that need not line up with any single neuron."},
+  {"id":"in-1-b","front":"State the linear representation hypothesis.","back":"Features are directions in activation space: $h \\approx \\sum_i f_i d_i$, with $f_i$ the feature's strength. Read feature $i$ with a dot product $d_i \\cdot h$. Hint: king − man + woman ≈ queen in word2vec (Mikolov et al., 2013)."},
+  {"id":"in-1-c","front":"What is a polysemantic neuron? Give the classic example.","back":"A neuron that responds to several unrelated things. InceptionV1 neuron 4e:55 fires for cat faces, fronts of cars and cat legs (Olah et al., 2020, 'Zoom In')."},
+  {"id":"in-1-d","front":"What is superposition, and what makes it possible?","back":"Storing more features than dimensions using slightly overlapping directions (Elhage et al., 2022). It works when features are sparse (rarely on together) and a ReLU with a negative bias filters the small interference."},
+  {"id":"in-1-e","front":"In the toy model $\\hat x = \\mathrm{ReLU}(W^\\top W x + b)$, what happens with dense vs sparse features ($n=5$, $m=2$)?","back":"Dense: only the 2 most important features are stored, perpendicular (like PCA). Sparse: all 5 are stored as a pentagon, overlapping with cosines 0.31 and −0.81."},
+  {"id":"in-1-f","front":"Typical |cosine| between two random directions in $d$ dimensions?","back":"About $\\sqrt{2/(\\pi d)} \\approx 0.8/\\sqrt d$: 0.64 for $d=2$, 0.08 for $d=100$, 0.008 for $d=10{,}000$. Nearly perpendicular in high dimensions."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/in-1-directions.js"></script>
+<script src="../assets/js/anims/in-1-superposition-playground.js"></script>
+</body>
+</html>

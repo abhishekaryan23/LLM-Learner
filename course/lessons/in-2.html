@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="in-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Probing &amp; circuits · LLMs, Animated</title>
+<meta name="description" content="How researchers test what an LLM represents and uses: linear probes and their caveats, activation patching and causal tracing, the logit and tuned lens, steering vectors, and circuits such as induction heads and the indirect-object circuit in GPT-2.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Probing &amp; circuits</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Interpretability</span></div>
+<p class="lede">Knowing that features are directions is one thing; finding the ones that matter is another. This lesson is the interpretability toolkit: <strong>probes</strong> ask whether information is <em>there</em>, <strong>patching</strong> asks whether it is <em>used</em>, <strong>lenses</strong> and <strong>steering vectors</strong> read and write the residual stream, and <strong>circuits</strong> trace how components pass information to each other.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Train a linear probe in your head, and explain why "decodable" doesn't mean "used".</li>
+    <li>Describe activation patching (clean run, corrupted run, patch, measure) and compute the fraction of an answer it recovers.</li>
+    <li>Explain the logit lens, steering vectors and two classic circuits: induction heads and the indirect-object circuit.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="in-1.html">IN.1 Features &amp; superposition</a>: features as directions, read with a dot product. Helpful but optional: <a href="m1-1.html">M1.1 Attention</a> and <a href="m1-4.html">M1.4 The decoder-only transformer</a> (the residual stream and the unembedding).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A simple classifier can predict, from a layer's activations, whether a sentence's subject is plural. What does that prove?</p>
+    <ol class="q-src">
+      <li>The model uses plurality to choose its next token</li>
+      <li>The model was trained on grammar labels</li>
+      <li>That layer computes plurality and nothing else</li>
+      <li>Only that the information can be read out of that layer; not that the model relies on it</li>
+    </ol>
+    <div class="q-explain">Decodable is not the same as used. Showing that the model <em>uses</em> it takes an intervention: change the representation and see whether the output changes.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">You add a fixed vector to a chatbot's activations at one layer on every token, and its replies become noticeably more upbeat. What is this called?</p>
+    <ol class="q-src">
+      <li>Activation steering (a steering vector)</li>
+      <li>Fine-tuning</li>
+      <li>Prompt engineering</li>
+      <li>Quantization</li>
+    </ol>
+    <div class="q-explain">No weights change and the prompt is the same: you nudge the residual stream along a direction. If features are directions (IN.1), adding a direction should turn a feature up, and often it does.</div>
+  </div>
+</section>
+
+<h2>Probes: is the information there?</h2>
+<p>The oldest tool is the simplest. Alain &amp; Bengio (2016, "Understanding intermediate layers using linear classifier probes") froze a trained network and fitted a small <strong>linear classifier</strong> on each layer's activations to predict a property. If a linear probe succeeds, the property is linearly readable at that layer. For a yes/no property, the probe is logistic regression on the activation vector $h$:</p>
+$$\hat{p} = \sigma\big(w \cdot h + b\big)$$
+<p>Here $w$ is a learned weight vector (a direction in activation space, exactly the kind of direction IN.1 talked about), $b$ a bias, and $\sigma$ the sigmoid that squashes the score into a probability. The LLM itself stays frozen; only $w$ and $b$ are trained, on a labelled dataset of activations.</p>
+<p>Probes found a lot. BERT's layers encode part-of-speech, then syntax, then meaning roughly in the order of a classical NLP pipeline (Tenney et al., 2019), and a "structural probe" recovers parse trees as distances between word vectors (Hewitt &amp; Manning, 2019). A GPT trained only on Othello move sequences turned out to track the board state (Li et al., 2023); with the right framing ("my piece vs their piece" instead of "black vs white") the board was even linearly readable (Nanda et al., 2023). Llama-2 activations linearly encode a place's latitude and longitude and an event's date (Gurnee &amp; Tegmark, 2023).</p>
+<p>But probes have a well-known catch: <strong>decodable ≠ used</strong>.</p>
+<ul>
+  <li><strong>The probe might do the work.</strong> A powerful enough probe can learn a task from almost any representation. Hewitt &amp; Liang (2019) proposed <strong>control tasks</strong>: give the same inputs random labels and see how well the probe does. A good probe has high <strong>selectivity</strong> (real-task accuracy minus control-task accuracy), and simple linear probes tend to be more selective than MLP probes.</li>
+  <li><strong>Correlation, not use.</strong> Information can sit in a layer as a by-product that the model never reads. Removing the probed information and checking whether behaviour changes (Elazar et al., 2021, "amnesic probing") is one way to test use; causal interventions, next, are the general answer.</li>
+</ul>
+
+<h3>Worked example</h3>
+<p>A linear probe predicts "is this statement true?" from layer-16 activations with 91% accuracy. The same probe architecture trained on the same inputs with <em>shuffled</em> labels reaches 58% (chance is 50%, a little memorisation adds the rest).</p>
+<ol class="steps">
+  <li>Selectivity $= 91\% - 58\% = 33$ percentage points.</li>
+  <li>The truth information is clearly there, beyond what the probe can memorise. ✓</li>
+  <li>It still doesn't show that the model <em>uses</em> this direction when it answers.</li>
+</ol>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What does a control task (Hewitt &amp; Liang, 2019) measure?</p>
+  <ol class="q-src">
+    <li>How fast the LLM runs with a probe attached</li>
+    <li>Whether the model uses the probed property</li>
+    <li>How much of the probe's accuracy comes from the probe itself learning the labels, by training it on random labels</li>
+    <li>The accuracy of the LLM on its original task</li>
+  </ol>
+  <div class="q-explain">If a probe scores nearly as well on shuffled labels, its success says little about the representation. Selectivity (real minus control accuracy) separates "the information is there" from "the probe is clever". Whether the model <em>uses</em> it needs an intervention.</div>
+</div></div>
+
+<h2>Activation patching: is it used?</h2>
+<p>To show that a component matters, <em>change it</em> and watch the output. Vig et al. (2020) brought this <strong>causal mediation</strong> idea to transformers, and Meng et al. (2022, "Locating and Editing Factual Associations in GPT", the ROME paper) made it famous as <strong>causal tracing</strong>. Today the general recipe is called <strong>activation patching</strong>:</p>
+<ol class="steps">
+  <li><strong>Clean run:</strong> a prompt the model gets right, e.g. "Eiffel Tower is in" → Paris. Save every internal activation.</li>
+  <li><strong>Corrupted run:</strong> a prompt that changes the answer, e.g. "Big Ben is in" → London. (ROME instead added noise to the subject's embeddings.)</li>
+  <li><strong>Patched run:</strong> run the corrupted prompt again, but overwrite <em>one</em> component, such as one layer's residual stream at one position or one attention head's output, with its value from the clean run.</li>
+  <li><strong>Measure:</strong> how much of the clean answer comes back.</li>
+</ol>
+
+<figure class="anim wide" data-anim="in-2-patching"></figure>
+
+<p>A common score is the fraction recovered, measured on probabilities or, often better, on the <strong>logit difference</strong> between the right and wrong answers:</p>
+$$\text{recovered} = \frac{m_{\text{patched}} - m_{\text{corrupt}}}{m_{\text{clean}} - m_{\text{corrupt}}}$$
+<p>Here $m$ is the chosen metric (e.g. logit of "Paris" minus logit of "London") in each run. 0 means the patch did nothing; 1 means it fully restored the clean behaviour. In GPT-2 XL, Meng et al. found that MLPs in the middle layers, at the <strong>last token of the subject</strong>, were decisive for recalling facts, and they used that location to <em>edit</em> facts (ROME).</p>
+<p>Patching has its own pitfalls. Results depend on how you corrupt and which metric you use (Zhang &amp; Nanda, 2023; Heimersheim &amp; Nanda, 2024). Components can back each other up, so knocking out one may show no effect. And "where patching localises a fact" turned out not to predict the best layer to edit it (Hase et al., 2023). Patching every component of a big model is also expensive, so <strong>attribution patching</strong> approximates all patches at once with gradients (Nanda, 2023; Kramár et al., 2024).</p>
+
+<h3>Worked example</h3>
+<p>Logit difference (Paris − London): clean $4.0$, corrupted $-3.0$, after patching one head $2.6$.</p>
+<ol class="steps">
+  <li>Gap the patch could close: $4.0 - (-3.0) = 7.0$.</li>
+  <li>Gap it did close: $2.6 - (-3.0) = 5.6$.</li>
+  <li>Recovered: $5.6 / 7.0 = 0.8$. That head carries most of the effect. ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>Same clean and corrupted runs; a different patch gives $0.5$. Fraction recovered: <span class="blank" data-answer="0.5" data-tol="0.005" data-hint="(0.5 − (−3.0)) / 7.0 = 3.5 / 7."></span></li>
+    <li>A patch gives $-3.7$. Fraction recovered (it can be negative): <span class="blank" data-answer="-0.1" data-tol="0.005" data-hint="(−3.7 + 3.0) / 7.0."></span></li>
+    <li>A model with 24 layers and a 10-token prompt: how many runs to patch the residual stream at every (layer, position) once? <span class="blank" data-answer="240" data-tol="0.5" data-hint="One run per cell: 24 × 10."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In activation patching, what goes into the patched run?</p>
+  <ol class="q-src">
+    <li>The clean prompt, with one activation taken from the corrupted run</li>
+    <li>The corrupted prompt, with one activation replaced by its value from the clean run</li>
+    <li>A random prompt with all activations zeroed</li>
+    <li>The clean prompt with retrained weights</li>
+  </ol>
+  <div class="q-explain">Start from the run that gets it "wrong" and restore one piece of the "right" run. If the answer comes back, that piece carries the information that made the difference. (Patching the other way round, clean prompt with one corrupted piece, is also used; it tests whether a component is necessary rather than sufficient.)</div>
+</div></div>
+
+<h2>Reading and writing the residual stream</h2>
+<p>Every layer of a decoder-only transformer adds to one running vector, the residual stream, and at the end the model multiplies it by the unembedding matrix to get logits (<a href="m1-4.html">M1.4</a>). In 2020 a blogger writing as nostalgebraist asked: what if you apply that final step <em>early</em>? Take the residual stream after layer $\ell$, apply the final norm and the unembedding, and read off a next-token distribution. This <strong>logit lens</strong> showed GPT-2 forming its guess gradually, often getting the right token several layers before the end.</p>
+<p>The logit lens works poorly on some models, because early layers don't speak the final layer's "language" yet. Belrose et al. (2023, "Eliciting Latent Predictions from Transformers with the Tuned Lens") train a small <strong>affine translator</strong> per layer, a matrix and bias that maps that layer's residual stream to something the unembedding can read. The <strong>tuned lens</strong> gives more reliable layer-by-layer predictions, at the price of training one small map per layer.</p>
+<p>Probes and lenses <em>read</em>. You can also <em>write</em>. If a concept is a direction, adding that direction should turn the concept up:</p>
+<ul>
+  <li><strong>Activation addition</strong> (Turner et al., 2023): run the prompts "Love" and "Hate", take the difference of their activations at one layer, and add a multiple of it while the model writes. GPT-2 XL's text turned noticeably more loving, with no training at all.</li>
+  <li><strong>Representation engineering</strong> (Zou et al., 2023): collect activations for contrasting prompts (honest vs dishonest, harmless vs harmful), find the main direction that separates them, then use it both to read the concept and to steer it.</li>
+  <li>Averaging many contrast pairs gives sturdier vectors (Rimsky et al., 2024, contrastive activation addition), and refusal in many chat models turned out to be mediated largely by a single direction: remove it and the model stops refusing (Arditi et al., 2024).</li>
+</ul>
+<p>Steering is powerful evidence for the linear representation hypothesis, and a practical tool for studying behaviours like sycophancy. It is also blunt: push too hard and fluency drops, and a vector found on one kind of prompt may not transfer to others.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What does the logit lens do?</p>
+  <ol class="q-src">
+    <li>Applies the model's final norm and unembedding to an intermediate layer's residual stream, to see what it would predict at that point</li>
+    <li>Trains a new model to imitate each layer</li>
+    <li>Adds a steering vector to the logits</li>
+    <li>Measures attention patterns between tokens</li>
+  </ol>
+  <div class="q-explain">It reuses the model's own read-out on an early residual stream. The tuned lens improves it by first passing each layer through a small learned affine map.</div>
+</div></div>
+
+<h2>Circuits: how the pieces connect</h2>
+<p>A <strong>circuit</strong> is a set of features and the weights connecting them that together compute something. Olah et al. (2020, "Zoom In: An Introduction to Circuits") argued that you can understand networks this way, one small subgraph at a time. In an image model they traced <strong>curve detectors</strong> built from earlier edge detectors, and a <strong>car detector</strong> assembled from window detectors (expected at the top), car-body detectors (middle) and wheel detectors (bottom).</p>
+<p>Two circuits in language models became textbook examples:</p>
+<ul>
+  <li><strong>Induction heads</strong> (Elhage et al., 2021; Olsson et al., 2022, "In-context Learning and Induction Heads"). Given <code>… Harry Potter … Harry</code>, predict <code>Potter</code>: the pattern [A][B] … [A] → [B]. It takes two attention heads (<a href="m1-1.html">M1.1</a>) in different layers. A <strong>previous-token head</strong> writes "the token before me was A" into each position. The <strong>induction head</strong> then looks for a position whose previous token matches the current token, and copies what came next. Induction heads appear suddenly during training, at the same point as a jump in in-context learning that shows as a bump in the loss curve; Olsson et al. gave causal evidence in small attention-only models and correlational evidence in larger ones.</li>
+  <li><strong>Indirect object identification</strong> (Wang et al., 2022, "Interpretability in the Wild"). In "When Mary and John went to the store, John gave a drink to", GPT-2 small predicts <em>Mary</em>. Using patching, the authors mapped a circuit of about two dozen attention heads in seven roles: heads that notice the name <em>John</em> is repeated, heads that use this to suppress it, and <strong>name mover heads</strong> that copy the remaining name, <em>Mary</em>, to the output.</li>
+</ul>
+<p>Doing this by hand takes researcher-months per behaviour. Automated circuit discovery prunes the model's computational graph down to the edges a task needs (ACDC; Conmy et al., 2023), and attribution patching makes that faster. Since 2025 the frontier has moved to circuits built from <em>features</em> rather than neurons or heads, using sparse dictionaries, which is the subject of <a href="in-3.html">IN.3</a>.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-in-2.webp" alt="A young mechanic with a flashlight opens a robot's back panel and traces one glowing wire from a button to a bulb among many dim wires." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A young mechanic wants to know <strong>why the robot's bulb lights up</strong> when you press its button. She opens the back panel: hundreds of wires.</p>
+      <p>She shines her <strong>flashlight</strong> (a probe: "is there a signal here?"), then <strong>unplugs one wire at a time</strong> and presses the button again (patching: "does the bulb still light?"). The one wire that matters glows from the button to the bulb. That path is a <strong>circuit</strong>.</p>
+      <p class="math-note">Where it breaks: a model's "wires" aren't neatly separate. Many signals share each wire (superposition), several paths can do the same job as backups, and the map you draw is a simplification that explains most, not all, of the behaviour.</p>
+    </div>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters in practice:</strong> these tools are used beyond research papers. Probes on activations are a cheap way to flag things like harmful requests or likely errors. Patching and steering help debug why a model answers the way it does, and steering vectors offer lightweight behaviour control without retraining. And when you read a claim like "the model plans ahead", these are the experiments behind it.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">How does an induction head complete [A][B] … [A] → [B]?</p>
+  <ol class="q-src">
+    <li>It memorises every bigram in the training set</li>
+    <li>It attends to the very first token of the context</li>
+    <li>It uses a single MLP neuron that stores B</li>
+    <li>A previous-token head marks each position with the token before it; the induction head attends to the position after the earlier A and copies B</li>
+  </ol>
+  <div class="q-explain">Two heads compose across layers: one writes "my previous token was A" into position B, and the induction head, sitting at the second A, searches for that mark and copies B forward. It works for token pairs it has never seen, which is why it supports in-context learning.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why isn't a successful probe enough, and how does activation patching fix that?</p>
+  <div class="model-answer"><strong>Model answer:</strong> A probe shows that information can be decoded from a layer, but the model might never use it, and a strong probe can partly learn the task itself. Activation patching intervenes instead: run a corrupted prompt, restore one component's activation from a clean run, and measure how much of the clean answer returns. If restoring it brings the answer back, that component causally carries the information.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Clean logit difference 6.0, corrupted 0.0, patched 1.5. What fraction is recovered, and what does it suggest?</p>
+    <ol class="q-src">
+      <li>0.75; the component carries most of the effect</li>
+      <li>1.5; the patch over-restored it</li>
+      <li>0.25; the component carries part of the effect, and other components carry the rest</li>
+      <li>0; the component is irrelevant</li>
+    </ol>
+    <div class="q-explain">$(1.5 - 0)/(6.0 - 0) = 0.25$. A partial recovery is common: information is often spread across several components.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Interleaving with IN.1: why does adding a "Love − Hate" difference vector to the activations change the text's sentiment?</p>
+    <ol class="q-src">
+      <li>If sentiment is represented as a direction, adding that direction increases the feature's strength in every later read-out</li>
+      <li>It retrains the model's weights toward positive text</li>
+      <li>It changes the prompt's tokens</li>
+      <li>It makes the logits uniform</li>
+    </ol>
+    <div class="q-explain">Under the linear representation hypothesis, $h \approx \sum_i f_i d_i$. Adding $\alpha d_{\text{sentiment}}$ raises that feature's coefficient, and any later layer that reads it with a dot product sees "more love".</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Interleaving with M1.4: the logit lens can be applied after any layer without training. Which architectural fact makes that possible?</p>
+    <ol class="q-src">
+      <li>All layers share the same weights</li>
+      <li>Every layer adds into one residual stream of the same width, which the final norm and unembedding already know how to read</li>
+      <li>The KV cache stores every layer's logits</li>
+      <li>Attention is causal</li>
+    </ol>
+    <div class="q-explain">Because each layer only adds to the residual stream, intermediate states live in the same space as the final one, so the unembedding can be applied early. It isn't perfectly calibrated there, which is what the tuned lens fixes.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In the indirect-object circuit, what do the "name mover" heads do?</p>
+    <ol class="q-src">
+      <li>Detect that a sentence contains two names</li>
+      <li>Move the subject to the start of the sentence</li>
+      <li>Suppress every name in the context</li>
+      <li>Attend to the name that hasn't been repeated and copy it to the output</li>
+    </ol>
+    <div class="q-explain">Earlier heads flag the repeated name (John) and inhibit attention to it; name movers then attend to the remaining name (Mary) and raise its logit.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Linear probes</strong> (Alain &amp; Bengio, 2016) test what is decodable; use control tasks for selectivity, and remember <strong>decodable ≠ used</strong>.</li>
+    <li><strong>Activation patching</strong>: clean run, corrupted run, restore one component, measure recovery. Causal tracing (Meng et al., 2022) located facts at mid-layer MLPs on the last subject token.</li>
+    <li>The <strong>logit lens</strong> reads early residual streams with the unembedding; the <strong>tuned lens</strong> adds a learned affine map per layer.</li>
+    <li><strong>Steering vectors</strong> (Turner et al., 2023; Zou et al., 2023) write a concept direction into the residual stream at inference time.</li>
+    <li><strong>Circuits</strong>: induction heads (previous-token head + induction head) and GPT-2's indirect-object circuit (name movers and friends).</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"in-2-a","front":"What is a linear probe, and what is its main caveat?","back":"A linear classifier $\\sigma(w\\cdot h + b)$ trained on frozen activations to predict a property (Alain & Bengio, 2016). Caveat: decodable ≠ used; the model may never rely on it, and a strong probe can learn the task itself (check with control tasks / selectivity, Hewitt & Liang, 2019)."},
+  {"id":"in-2-b","front":"Describe activation patching in four steps.","back":"(1) Clean run, save activations. (2) Corrupted run that changes the answer. (3) Rerun corrupted, but restore one component from the clean run. (4) Measure recovery: $(m_{patched} - m_{corrupt})/(m_{clean} - m_{corrupt})$."},
+  {"id":"in-2-c","front":"What did causal tracing (Meng et al., 2022) find about factual recall in GPT-2 XL?","back":"Mid-layer MLPs at the last token of the subject were decisive; the fact is then moved by attention to the final token. They used this to edit facts (ROME)."},
+  {"id":"in-2-d","front":"Logit lens vs tuned lens?","back":"Logit lens (nostalgebraist, 2020): apply final norm + unembedding to an intermediate residual stream. Tuned lens (Belrose et al., 2023): first apply a learned affine translator per layer, giving more reliable predictions."},
+  {"id":"in-2-e","front":"What is a steering vector? Name two methods.","back":"A direction added to the residual stream at inference time to turn a concept up or down, with no training. Activation addition (Turner et al., 2023, e.g. 'Love' − 'Hate'); representation engineering (Zou et al., 2023); contrastive activation addition (Rimsky et al., 2024)."},
+  {"id":"in-2-f","front":"How does an induction head work?","back":"For [A][B] … [A] → [B]: a previous-token head writes 'my previous token was A' into position B; the induction head at the second A attends to that position and copies B (Elhage et al., 2021; Olsson et al., 2022)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/in-2-patching.js"></script>
+</body>
+</html>

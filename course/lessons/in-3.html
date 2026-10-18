@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="in-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sparse autoencoders · LLMs, Animated</title>
+<meta name="description" content="Dictionary learning for LLMs: the sparse autoencoder objective, what SAEs found in Claude, GPT-4 and Gemma (Golden Gate Claude, TopK SAEs, Gemma Scope), transcoders and attribution graphs, and the open problems: dark matter, feature splitting, dead latents and evaluation.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Sparse autoencoders</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Interpretability</span></div>
+<p class="lede">If a model stores features in superposition, can we pull them back apart? A <strong>sparse autoencoder</strong> (SAE) tries: it rewrites each dense activation as a combination of a few directions from a huge learned dictionary. Since 2023, SAEs have turned up millions of readable features inside production LLMs, and a famous bridge-obsessed Claude. They also have real limits.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write the SAE objective (reconstruction + L1 sparsity), explain every symbol, and compute it for a small example.</li>
+    <li>Summarise what SAEs found at scale (Anthropic, OpenAI, Google DeepMind) and how features are used for steering and attribution graphs.</li>
+    <li>Name the main limitations: reconstruction error ("dark matter"), feature splitting and absorption, dead latents, and hard evaluation.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="in-2.html">IN.2 Probing &amp; circuits</a> (reading and steering directions, circuits) and <a href="p6-4.html">P6.4 Autoencoders &amp; representation learning</a> (encoder, code, decoder, reconstruction loss). Helpful but optional: <a href="in-1.html">IN.1 Features &amp; superposition</a>, which this lesson tries to undo.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">An LLM's activation has 4,096 numbers. A sparse autoencoder trained on it might have how many latent units?</p>
+    <ol class="q-src">
+      <li>About 30, to compress it</li>
+      <li>Tens of thousands to millions: many more than 4,096, with only a few active at a time</li>
+      <li>Exactly 4,096, one per neuron</li>
+      <li>One, the overall "meaning"</li>
+    </ol>
+    <div class="q-explain">An SAE is <em>overcomplete</em>: wider than its input. Its job isn't compression but untangling superposed features, so it needs room for many more features than dimensions, kept in check by sparsity.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In 2024, Anthropic briefly released a Claude that brought up the Golden Gate Bridge in almost every answer. How was that done?</p>
+    <ol class="q-src">
+      <li>Fine-tuning on bridge photos</li>
+      <li>A hidden system prompt about the bridge</li>
+      <li>Clamping one SAE feature, found in the model's activations, to a high value while it ran</li>
+      <li>Deleting all other landmarks from its training data</li>
+    </ol>
+    <div class="q-explain">The feature was found by a sparse autoencoder trained on Claude 3 Sonnet's activations. Turning it up at inference time steered the model, no training needed.</div>
+  </div>
+</section>
+
+<h2>Dictionary learning: undoing superposition</h2>
+<p>In 1996, neuroscientists Bruno Olshausen and David Field asked what code the visual cortex might use. They trained a <strong>sparse coding</strong> model to describe small patches of natural images as a combination of as few "dictionary" patterns as possible, and the patterns it learned looked like the edge detectors found in real neurons. The general method, <strong>dictionary learning</strong>, assumes each data point $x$ is a sparse combination of directions from a learned dictionary, possibly with more directions than dimensions.</p>
+<p>That is exactly the picture IN.1 painted of LLM activations: $h \approx \sum_i f_i d_i$ with mostly zero $f_i$ and more directions $d_i$ than neurons. In 2022–2023, researchers applied the idea to transformers using a <strong>sparse autoencoder</strong> (Sharkey et al., 2022; Cunningham et al., 2023; Bricken et al., 2023, "Towards Monosemanticity"). It is the autoencoder of <a href="p6-4.html">P6.4</a> turned inside out: the code is much <em>wider</em> than the input, and the constraint is sparsity instead of a narrow bottleneck.</p>
+$$f = \mathrm{ReLU}\big(W_{\text{enc}}(x - b_{\text{dec}}) + b_{\text{enc}}\big), \qquad \hat{x} = W_{\text{dec}} f + b_{\text{dec}}$$
+$$\mathcal{L} = \lVert x - \hat{x} \rVert_2^2 + \lambda \sum_{i=1}^{m} |f_i|$$
+<ul>
+  <li>$x$: one activation vector from the LLM (e.g. the residual stream at one token), dimension $d$.</li>
+  <li>$f$: the $m$ <strong>latents</strong> (candidate features), with $m \gg d$. "Expansion factor" means $m/d$.</li>
+  <li>$W_{\text{enc}}, b_{\text{enc}}$: encoder weights and bias; the ReLU makes every $f_i \ge 0$, and most exactly 0.</li>
+  <li>$W_{\text{dec}}$: its $i$-th column is feature $i$'s <strong>direction</strong> $d_i$, usually kept at unit length. $b_{\text{dec}}$ is a bias (subtracted before encoding, added back after).</li>
+  <li>$\lVert x - \hat{x}\rVert_2^2$: <strong>reconstruction error</strong>, the sum of squared differences.</li>
+  <li>$\lambda \sum |f_i|$: the <strong>L1 sparsity penalty</strong>. Since $f_i \ge 0$, it is just $\lambda$ times the total activation. Bigger $\lambda$ means fewer active latents and worse reconstruction.</li>
+</ul>
+<p>The LLM stays frozen. You run it over a large amount of text, save activations from one layer, and train the SAE on those. (Anthropic's 2024 version also multiplies each $|f_i|$ by its decoder column's length, so the model can't dodge the penalty by shrinking $f$ and growing $W_{\text{dec}}$.)</p>
+
+<figure class="anim wide" data-anim="in-3-sae"></figure>
+
+<h3>Worked example</h3>
+<p>$x = [1.0, -0.5, 0.2]$, the SAE outputs $\hat{x} = [0.9, -0.4, 0.2]$ using latents $f = [0, 1.2, 0, 0.5, 0, 0]$, and $\lambda = 0.01$.</p>
+<ol class="steps">
+  <li>Reconstruction: $(0.1)^2 + (-0.1)^2 + 0^2 = 0.02$</li>
+  <li>Sparsity: $\lambda \sum |f_i| = 0.01 \times (1.2 + 0.5) = 0.017$</li>
+  <li>Loss: $0.02 + 0.017 = 0.037$. Two latents of six are active, an expansion factor of $6/3 = 2$. ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>$x = [0.6, 0.0, -0.8]$, $\hat{x} = [0.5, 0.1, -0.8]$. Reconstruction error: <span class="blank" data-answer="0.02" data-tol="0.001" data-hint="0.1² + 0.1² + 0²."></span></li>
+    <li>Latents $f = [0.9, 0, 0, 0.3, 0, 0.8]$ with $\lambda = 0.05$. Sparsity term: <span class="blank" data-answer="0.1" data-tol="0.001" data-hint="0.05 × (0.9 + 0.3 + 0.8)."></span></li>
+    <li>Total loss: <span class="blank" data-answer="0.12" data-tol="0.001" data-hint="Add the two terms."></span></li>
+    <li>Bricken et al. (2023) trained SAEs on a 512-neuron MLP layer with up to 131,072 latents. Expansion factor: <span class="blank" data-answer="256" data-tol="0.5" data-hint="131,072 / 512."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What happens as you increase the sparsity coefficient $\lambda$ in an SAE?</p>
+  <ol class="q-src">
+    <li>Fewer latents are active per input, and reconstruction error goes up</li>
+    <li>More latents are active, and reconstruction improves</li>
+    <li>The SAE gets narrower</li>
+    <li>Nothing; $\lambda$ only affects training speed</li>
+  </ol>
+  <div class="q-explain">The L1 term charges for every unit of activation, so a larger $\lambda$ buys sparsity at the cost of reconstruction. Choosing $\lambda$ means choosing a point on that trade-off.</div>
+</div></div>
+
+<h2>What SAEs found at scale</h2>
+<p><strong>Towards Monosemanticity</strong> (Bricken et al., 2023) trained SAEs on the 512-neuron MLP layer of a one-layer transformer, using 8 billion activation samples and dictionaries from 512 to 131,072 latents. Their main 4,096-latent run produced features far more interpretable than the neurons: features for DNA sequences, Arabic script, legal language and many more. Bigger dictionaries showed <strong>feature splitting</strong>: one broad feature in a small SAE became several finer ones in a larger SAE.</p>
+<p><strong>Scaling Monosemanticity</strong> (Templeton et al., 2024) took the method to a production model, Claude 3 Sonnet, training SAEs with about 1 million, 4 million and 34 million latents on a middle layer's residual stream. Many features were abstract: the same feature fired for a concept across languages, and even for images of it. Some were safety-relevant, such as features for deception, sycophancy and security vulnerabilities in code. One feature responded to the Golden Gate Bridge. Clamping it to 10 times its maximum activation made the model talk about the bridge constantly, even describing itself as the bridge. Anthropic put this <strong>Golden Gate Claude</strong> online as a 24-hour demo in May 2024.</p>
+<p>Other labs followed, with variations on the recipe:</p>
+<ul>
+  <li><strong>OpenAI</strong> (Gao et al., 2024, "Scaling and evaluating sparse autoencoders") replaced ReLU + L1 with a <strong>TopK</strong> activation: keep only the $k$ largest latents and zero the rest, so sparsity is set directly and nothing is shrunk by a penalty. They found clean scaling laws, very few dead latents, and trained a 16-million-latent SAE on GPT-4 activations over 40 billion tokens.</li>
+  <li><strong>Google DeepMind</strong> released <strong>Gemma Scope</strong> (Lieberum et al., 2024): open <strong>JumpReLU</strong> SAEs (a ReLU with a learned threshold per latent; Rajamanoharan et al., 2024) for every layer and sub-layer of Gemma 2 2B and 9B and some layers of 27B. <strong>Gemma Scope 2</strong> (December 2025) covers the Gemma 3 family from 270M to 27B parameters and adds transcoders.</li>
+  <li>Open tools such as Neuronpedia host feature browsers for many open models, and features are labelled automatically by having an LLM read each feature's top examples (an idea from Bills et al., 2023).</li>
+</ul>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-in-3.webp" alt="A muddy beam of light shines through a prism and splits into many clean colored stripes on the wall, only a few brightly lit at once." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A <strong>muddy beam of light</strong> looks like one brownish colour. Shine it through a <strong>prism</strong> and it spreads into lots of clean stripes on the wall. Only a few stripes are bright at any moment; the rest stay dark.</p>
+      <p>The model's activation is the muddy beam: everything mixed together. The SAE is the prism: it splits the mix into many clean features, and only a few are lit for any one word. Add the bright stripes back together and you get (almost) the beam you started with.</p>
+      <p class="math-note">Where it breaks: a real prism is fixed physics and splits light perfectly. An SAE is <em>learned</em>, so which stripes it finds depends on its size and settings, and adding them back never gives exactly the original beam.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">How does a TopK SAE (Gao et al., 2024) control sparsity?</p>
+  <ol class="q-src">
+    <li>With a larger L1 coefficient</li>
+    <li>By making the dictionary smaller</li>
+    <li>By training on fewer tokens</li>
+    <li>By keeping only the $k$ largest latents for each input and setting the rest to zero</li>
+  </ol>
+  <div class="q-explain">Exactly $k$ latents are active per input, so you set the sparsity directly, and the kept latents aren't shrunk by an L1 penalty.</div>
+</div></div>
+
+<h2>From features to circuits: attribution graphs</h2>
+<p>An SAE explains <em>what</em> one layer represents. To see <em>how</em> the model computes, you need to connect features across layers, the circuit idea of <a href="in-2.html">IN.2</a> with features instead of neurons. A <strong>transcoder</strong> (Dunefsky et al., 2024) helps: instead of reconstructing an MLP's input, it is trained to imitate the MLP itself, mapping its input to its output through a wide, sparse layer of features. A <strong>cross-layer transcoder</strong> lets each feature read from one layer and write to all later layers.</p>
+<p>In March 2025 Anthropic published <strong>circuit tracing</strong> (Ameisen et al., 2025) and applied it to Claude 3.5 Haiku (Lindsey et al., 2025, "On the Biology of a Large Language Model"). They replace the model's MLPs with a cross-layer transcoder, then build an <strong>attribution graph</strong> for one prompt: nodes are the active features, and edges show how much each feature directly pushed each later feature and the output. Hypotheses read off the graph are then checked by intervening on the real model, as in IN.2. Among the findings:</p>
+<ul>
+  <li><strong>Multi-step reasoning:</strong> for "the capital of the state containing Dallas", features for <em>Texas</em> light up in the middle of the computation before <em>Austin</em> is output.</li>
+  <li><strong>Planning:</strong> when writing a rhyming couplet, the model picks candidate rhyme words before writing the line that ends with them.</li>
+  <li><strong>Shared concepts:</strong> many features are language-independent, with language-specific features at the input and output.</li>
+</ul>
+<p>The graphs are partial: they cover the computation the replacement model captures, and the authors report that they give satisfying explanations for only a fraction of the prompts they tried. In May 2025 the method was open-sourced as the <code>circuit-tracer</code> library, with interactive graphs on Neuronpedia for open models.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What does a transcoder learn, compared with an SAE?</p>
+  <ol class="q-src">
+    <li>The same thing, under a different name</li>
+    <li>An SAE reconstructs an activation; a transcoder imitates a layer, mapping the MLP's input to its output through sparse features</li>
+    <li>A transcoder translates between languages</li>
+    <li>A transcoder compresses the model's weights</li>
+  </ol>
+  <div class="q-explain">Because a transcoder's features replace the MLP's computation, you can trace how features at one layer produce features at the next, which is what attribution graphs need.</div>
+</div></div>
+
+<h2>Limits and open problems</h2>
+<p>SAEs changed interpretability, but they are an approximation of the model, not the model itself:</p>
+<ul>
+  <li><strong>Reconstruction error ("dark matter").</strong> $\hat{x}$ never equals $x$ exactly. Substitute the SAE's reconstruction back into the LLM and its next-token loss gets noticeably worse, so some of the computation lives in the error. Engels et al. (2024) found much of that error is predictable from the input, which hints at structure the SAEs miss.</li>
+  <li><strong>Feature splitting and absorption.</strong> The features you get depend on dictionary size: "animal" in one SAE may be "dog", "cat" and "horse" in a bigger one. Worse, a broad feature can have holes where a narrower one "absorbs" it (Chanin et al., 2024), so a "starts with S" latent may stay silent on some S-words.</li>
+  <li><strong>Dead latents.</strong> Some latents never fire, wasting capacity; the share grows with dictionary size. TopK training, auxiliary losses and careful initialisation reduce it.</li>
+  <li><strong>Evaluation is hard.</strong> There is no ground truth for a real model's features. Benchmarks such as SAEBench (Karvonen et al., 2025) score SAEs on proxies like reconstruction, sparsity, probing and how cleanly concepts can be removed, and the proxies don't always agree.</li>
+  <li><strong>Usefulness is debated.</strong> In March 2025 Google DeepMind's interpretability team reported that, for detecting harmful intent in prompts, simple linear probes on raw activations beat probes built on SAE features, and said it would deprioritise basic SAE research. Others continue to find SAEs and transcoders valuable for <em>exploring</em> a model when you don't know what to look for.</li>
+</ul>
+<p>As of 2026 the field uses SAEs, transcoders, probes, patching and steering side by side: dictionaries to discover hypotheses, simpler targeted tools to test and deploy them. Try the central trade-off yourself:</p>
+
+<section class="playground" id="in-3-tradeoff" aria-labelledby="pgt">
+  <h3 id="pgt">Try it: the sparsity–reconstruction trade-off</h3>
+  <p class="math-note" style="margin:0">Synthetic data with a known answer: 64 true feature directions in 32 dimensions, about 3 active per input. Each dot is an SAE with 128 latents trained (in advance, in PyTorch) with a different L1 coefficient $\lambda$. Move the slider to pick one. The strip shows that SAE's latents for one test input that contains three true features.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>L1 coefficient λ = <output data-out="lam">0.2</output></span>
+      <input type="range" data-in="lam" min="0" max="9" step="1" value="5" aria-label="Sparsity coefficient lambda">
+    </label>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</section>
+
+<p>With $\lambda = 0$ the SAE reconstructs almost perfectly but spreads every input over dozens of latents, and none of them matches a true feature. Moderate $\lambda$ recovers all 64 true directions. Very large $\lambda$ hurts reconstruction and starts losing features. Real SAEs face the same dial, just without an answer key.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> SAEs turned "the model has superposition" into a working method for listing millions of a production model's concepts, finding safety-relevant ones, and steering them directly. They have already been used, alongside behavioural evals (<a href="m4-1.html">M4</a>), in experiments that audit a model for a deliberately hidden objective (Marks et al., 2025). They are also a reminder of the field's honesty problem: an explanation is only as good as the share of the model it actually accounts for.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What is meant by an SAE's "dark matter"?</p>
+  <ol class="q-src">
+    <li>Latents that never activate</li>
+    <li>Features about astronomy</li>
+    <li>The part of the activation the SAE fails to reconstruct, which still matters to the model's behaviour</li>
+    <li>The decoder bias</li>
+  </ol>
+  <div class="q-explain">The reconstruction error $x - \hat{x}$. Swapping in $\hat{x}$ for $x$ makes the LLM measurably worse, so the features found don't explain everything the model computes. (Never-firing latents are "dead latents".)</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">How does a sparse autoencoder try to undo superposition, and what is the trade-off it has to manage?</p>
+  <div class="model-answer"><strong>Model answer:</strong> It learns a dictionary with many more directions than the activation has dimensions, and encodes each activation as a sparse, non-negative combination of a few of them; trained on reconstruction error plus an L1 penalty, each direction tends to become one interpretable feature. The trade-off is between sparsity and reconstruction: a stronger penalty gives fewer, cleaner features but leaves more of the activation unexplained, and the unexplained part ("dark matter") may matter to the model.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Interleaving with P6.4: how does an SAE's code differ from a classic autoencoder's bottleneck?</p>
+    <ol class="q-src">
+      <li>It is smaller than the input, to force compression</li>
+      <li>It is much wider than the input, and sparsity (few active latents) does the constraining instead of narrowness</li>
+      <li>It is the same size as the input</li>
+      <li>It has no decoder</li>
+    </ol>
+    <div class="q-explain">A narrow bottleneck would mix features together again. An overcomplete, sparse code gives each feature its own latent, which is the point.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Interleaving with IN.2: you find an SAE feature that seems to mean "French text". What is the strongest evidence it means that to the model?</p>
+    <ol class="q-src">
+      <li>Clamping it high makes the model write French, and zeroing it disrupts French-specific behaviour</li>
+      <li>Its top activating examples are mostly French</li>
+      <li>A linear probe can predict it</li>
+      <li>It has a large decoder norm</li>
+    </ol>
+    <div class="q-explain">Top examples are a good start, but like a probe they are correlational. Interventions (steering and ablation) show the feature is actually used.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">As an SAE's dictionary grows from 4,096 to 131,072 latents, a single "punctuation" feature is replaced by separate features for commas, periods and question marks. What is this called?</p>
+    <ol class="q-src">
+      <li>Dead latents</li>
+      <li>Dark matter</li>
+      <li>Superposition</li>
+      <li>Feature splitting</li>
+    </ol>
+    <div class="q-explain">Bigger dictionaries carve concepts more finely. That's why "the" set of features isn't well defined: it depends on the SAE's size.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">An SAE has $\lambda$ set so high that it reconstructs activations poorly. Swapping its reconstruction into the LLM will most likely…</p>
+    <ol class="q-src">
+      <li>Improve the LLM's loss, since the features are cleaner</li>
+      <li>Leave the LLM's loss unchanged</li>
+      <li>Make the LLM's next-token loss worse, because information the model used has been dropped</li>
+      <li>Delete the SAE's dead latents</li>
+    </ol>
+    <div class="q-explain">Whatever the SAE fails to reconstruct is lost to the later layers. Measuring the loss increase from substituting $\hat{x}$ is one standard way to evaluate an SAE.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>An SAE is <strong>dictionary learning</strong> on activations: $f = \mathrm{ReLU}(W_{\text{enc}}(x - b_{\text{dec}}) + b_{\text{enc}})$, $\hat{x} = W_{\text{dec}} f + b_{\text{dec}}$, loss $\lVert x - \hat{x}\rVert^2 + \lambda \sum |f_i|$, with many more latents than dimensions.</li>
+    <li>At scale: Claude 3 Sonnet (up to ~34M features, Golden Gate Claude), GPT-4 (16M-latent TopK SAE), open Gemma Scope SAEs (JumpReLU) and Gemma Scope 2.</li>
+    <li><strong>Transcoders</strong> and <strong>attribution graphs</strong> connect features across layers into circuits (Anthropic, 2025), checked with interventions.</li>
+    <li>Limits: reconstruction error (<strong>dark matter</strong>), <strong>feature splitting</strong> and absorption, <strong>dead latents</strong>, and no ground truth for evaluation; for some tasks simple probes do better.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 20 minutes, under a minute of CPU: generate data from known sparse features in superposition, train a small SAE with an L1 penalty in PyTorch, check how many true features it recovers by cosine matching, and sweep $\lambda$ to see the sparsity–reconstruction trade-off. Runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="in-3-sparse-autoencoder.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"in-3-a","front":"Write a sparse autoencoder's forward pass and loss.","back":"$f = \\mathrm{ReLU}(W_{enc}(x - b_{dec}) + b_{enc})$, $\\hat x = W_{dec} f + b_{dec}$, $\\mathcal{L} = \\lVert x - \\hat x\\rVert^2 + \\lambda\\sum_i |f_i|$. Latents $m \\gg d$; columns of $W_{dec}$ are feature directions."},
+  {"id":"in-3-b","front":"How does an SAE differ from a classic autoencoder, and why?","back":"Its code is overcomplete (wider than the input) and sparse, not a narrow bottleneck. The goal is to untangle superposed features into separate latents, not to compress."},
+  {"id":"in-3-c","front":"What did Scaling Monosemanticity (Templeton et al., 2024) do?","back":"Trained SAEs with ~1M, 4M and 34M latents on a middle residual-stream layer of Claude 3 Sonnet; found multilingual, multimodal and safety-relevant features. Clamping a Golden Gate Bridge feature to 10× its max gave 'Golden Gate Claude' (May 2024 demo)."},
+  {"id":"in-3-d","front":"TopK vs JumpReLU SAEs?","back":"TopK (Gao et al., 2024, OpenAI; 16M latents on GPT-4): keep the k largest latents, so sparsity is set directly. JumpReLU (Rajamanoharan et al., 2024): ReLU with a learned per-latent threshold; used in Google DeepMind's open Gemma Scope."},
+  {"id":"in-3-e","front":"What is an attribution graph?","back":"A per-prompt graph (Anthropic, 2025) whose nodes are active features of a replacement model (a cross-layer transcoder) and whose edges are their direct effects on later features and the output. Hypotheses from it are checked by intervening on the real model."},
+  {"id":"in-3-f","front":"Name four limitations of SAEs.","back":"Reconstruction error / dark matter (substituting $\\hat x$ hurts the LLM's loss); feature splitting and absorption (features depend on dictionary size); dead latents; evaluation without ground truth (and for some tasks plain probes win)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/in-3-sae.js"></script>
+<script src="../assets/js/anims/in-3-tradeoff-playground.js"></script>
+</body>
+</html>
