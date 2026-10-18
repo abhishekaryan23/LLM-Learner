@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="a1-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Neural audio codecs &amp; audio tokens · LLMs, Animated</title>
+<meta name="description" content="How neural codecs like SoundStream, EnCodec and Mimi turn audio into a few discrete tokens per frame: vector quantization, residual VQ, bitrate arithmetic, and semantic vs acoustic tokens.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Neural audio codecs &amp; audio tokens</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Audio &amp; speech</span></div>
+<p class="lede">Language models generate by picking the next token from a vocabulary. To make them speak or play music, audio must become tokens too. Neural audio codecs do that: they squeeze a second of sound into a few hundred integers and can rebuild it from them. This lesson shows how.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain vector quantization and why codecs stack several codebooks (residual VQ).</li>
+    <li>Compute a codec's bitrate and tokens per second from its frame rate, number of codebooks and codebook size.</li>
+    <li>Tell semantic tokens from acoustic tokens, and say why newer codecs use low frame rates.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> you'll need <a href="a1-1.html">Sound as data (A1.1)</a> for sample rates and why raw audio is too long, and <a href="p6-4.html">Autoencoders &amp; representation learning (P6.4)</a>: a codec is an autoencoder with a discrete bottleneck.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; it primes you for the answer.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why turn audio into <em>discrete</em> tokens rather than keep continuous features?</p>
+    <ol class="q-src">
+      <li>So the same next-token machinery as text LLMs (a softmax over a vocabulary, cross-entropy, sampling) can generate audio</li>
+      <li>Because continuous features can't be stored on disk</li>
+      <li>Because discrete tokens are always higher quality</li>
+      <li>Because GPUs can't multiply floating-point numbers</li>
+    </ol>
+    <div class="q-explain">A finite vocabulary lets a Transformer predict "which token next?" exactly as it does for text. Continuous features need other generators (regression, diffusion or flows).</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A codec produces 75 frames per second; each frame is 8 tokens, each from a codebook of 1,024 entries. What's its bitrate?</p>
+    <ol class="q-src">
+      <li>600 bit/s</li>
+      <li>614 kbit/s</li>
+      <li>6 kbit/s</li>
+      <li>80 kbit/s</li>
+    </ol>
+    <div class="q-explain">1,024 entries need 10 bits. $75 \times 8 \times 10 = 6{,}000$ bit/s. That's EnCodec's 6 kbps setting; you'll derive it below.</div>
+  </div>
+</section>
+
+<h2>Why discrete audio tokens?</h2>
+<p>Classic codecs like MP3 (1990s) and Opus (2012) were hand-designed to fool human ears: throw away what we can't hear, encode the rest compactly. Their bitstreams are great for streaming music but useless as a vocabulary for a model. Meanwhile, generating raw samples one at a time, as WaveNet did in 2016, means 16,000 to 24,000 sequential predictions per second of audio.</p>
+<p>The fix came from learned discrete representations. The <strong>VQ-VAE</strong> (van den Oord et al., 2017) showed an autoencoder could squeeze data through a bottleneck of <em>codebook indices</em>. A <strong>neural audio codec</strong> applies that idea to sound with three parts:</p>
+<ol class="steps">
+  <li><strong>Encoder:</strong> a stack of strided 1-D convolutions turns the waveform into a much shorter sequence of vectors, one per <strong>frame</strong>. At 24 kHz with a total stride of 320 samples, that's $24{,}000 / 320 = 75$ frames per second, one every 13.3 ms.</li>
+  <li><strong>Quantizer:</strong> replaces each frame vector with entries from learned <strong>codebooks</strong>, and outputs their integer indices: the <strong>audio tokens</strong>.</li>
+  <li><strong>Decoder:</strong> mirrors the encoder with upsampling convolutions to rebuild the waveform from the tokens.</li>
+</ol>
+<p>Like the autoencoders of P6.4, it's trained to reconstruct its input, but a plain sample-by-sample error gives muffled audio. So codecs add losses on spectrograms at several resolutions and <strong>adversarial</strong> losses: discriminator networks that try to tell real audio from decoded audio, pushing the decoder to produce crisp, natural-sounding detail.</p>
+<p>Once audio is a sequence of integers, everything from the text world applies: a Transformer can predict the next audio token with a softmax, be trained with cross-entropy, sampled with temperature and top-p, and sped up with a KV cache.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-a1-3.webp" alt="A child's machine turns a long wavy ribbon of sound into a short row of colored bricks; another machine turns the bricks back into the ribbon." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine a machine that eats a very long, wiggly ribbon of sound and spits out a <strong>short row of colored bricks</strong>. There are only so many brick colors, so each brick is easy to write down: "brick number 7, brick number 302…".</p>
+      <p>A second machine reads the bricks and <strong>knits the ribbon back</strong>, almost exactly as it was. Because bricks are easy to count and line up, a storytelling robot that's good at "what comes next?" can learn to lay down new bricks, and the second machine turns them into brand-new sound.</p>
+      <p>Where it breaks: the ribbon that comes back isn't identical. The machines learned to keep what ears notice and drop tiny details, and with fewer bricks per second more is lost.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A codec's encoder has a total stride of 640 samples on 32 kHz audio. How many frames per second does it produce?</p>
+  <ol class="q-src">
+    <li>640</li>
+    <li>50</li>
+    <li>32</li>
+    <li>20</li>
+  </ol>
+  <div class="q-explain">Frame rate $=$ sample rate $/$ total stride $= 32{,}000 / 640 = 50$ frames per second, which is what MusicGen's 32 kHz codec uses (A1.5).</div>
+</div></div>
+
+<h2>Vector quantization and residual VQ</h2>
+<p><strong>Vector quantization (VQ)</strong> keeps a codebook of $K$ learned vectors $c_1, \dots, c_K$. Each frame vector $x$ is replaced by its nearest entry, and only that entry's index is sent:</p>
+$$q(x) = c_{k^*}, \qquad k^* = \arg\min_k \lVert x - c_k \rVert$$
+<p class="math-note">An index into $K$ entries costs $\log_2 K$ bits: 1,024 entries is 10 bits. The decoder looks the index up in the same codebook.</p>
+<p>The trouble is scale. Suppose you want 6 kbit/s at 75 frames per second: that's 80 bits per frame. One codebook with $2^{80}$ entries (about $10^{24}$) is impossible to store or search. The SoundStream authors pointed this out and used the fix below.</p>
+<p><strong>Residual vector quantization (RVQ)</strong> uses several small codebooks in sequence. Quantize $x$ with codebook 1, subtract to get what's left over (the <em>residual</em>), quantize the residual with codebook 2, and so on:</p>
+$$r_0 = x, \qquad c^{(i)} = q_i(r_{i-1}), \qquad r_i = r_{i-1} - c^{(i)}, \qquad \hat{x} = \sum_{i=1}^{Q} c^{(i)}$$
+<p class="math-note">$Q$ is the number of codebooks (quantizer stages); $q_i$ is nearest-neighbour lookup in codebook $i$; $\hat{x}$ is the reconstruction. Eight codebooks of 1,024 entries give the same 80 bits per frame with only $8 \times 1{,}024$ stored vectors. Each stage refines the previous ones, so the first codebook carries the coarse picture and later ones add detail.</p>
+
+<figure class="anim wide" data-anim="a1-3-rvq"></figure>
+
+<h3>Worked example (1-D)</h3>
+<p>Codebook 1 is $\{-1, -0.5, 0, 0.5, 1\}$; codebook 2 is the same divided by 4; codebook 3 divided by 16. Encode $x = 0.83$.</p>
+<ol class="steps">
+  <li>Stage 1: nearest to 0.83 is $1$. Residual $0.83 - 1 = -0.17$.</li>
+  <li>Stage 2 (entries $\pm0.25, \pm0.125, 0$): nearest to $-0.17$ is $-0.125$. Residual $-0.045$.</li>
+  <li>Stage 3 (entries $\pm0.0625, \pm0.03125, 0$): nearest is $-0.03125$. Residual $-0.01375$.</li>
+  <li>Reconstruction $1 - 0.125 - 0.03125 = 0.84375$; the error shrank from 0.17 to 0.045 to 0.014 as stages were added.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>Same codebooks, now $x = -0.37$.</p>
+  <ol class="steps">
+    <li>Stage 1 picks: <span class="blank" data-answer="-0.5" data-tol="0.001" data-hint="Nearest of {−1, −0.5, 0, 0.5, 1} to −0.37."></span></li>
+    <li>Residual after stage 1: <span class="blank" data-answer="0.13" data-tol="0.001" data-hint="−0.37 − (−0.5)."></span></li>
+    <li>Stage 2 picks: <span class="blank" data-answer="0.125" data-tol="0.001" data-hint="Nearest of {−0.25, −0.125, 0, 0.125, 0.25} to 0.13."></span></li>
+    <li>Reconstruction after two stages: <span class="blank" data-answer="-0.375" data-tol="0.001" data-hint="−0.5 + 0.125."></span></li>
+  </ol>
+</section>
+
+<p>One more trick from SoundStream: <strong>quantizer dropout</strong>. During training, randomly use only the first $n$ codebooks. The model learns to reconstruct well from any prefix, so a single trained codec can run at several bitrates by keeping more or fewer codebooks.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">In residual VQ, what does codebook 2 quantize?</p>
+  <ol class="q-src">
+    <li>The original frame vector, independently of codebook 1</li>
+    <li>The next frame in time</li>
+    <li>A random subset of the frame's dimensions</li>
+    <li>The residual: the part of the vector that codebook 1's choice didn't capture</li>
+  </ol>
+  <div class="q-explain">Each stage encodes what earlier stages left over, so the error shrinks stage by stage and the reconstruction is the sum of the chosen entries.</div>
+</div></div>
+
+<h2>SoundStream and EnCodec: the bitrate arithmetic</h2>
+<p><strong>SoundStream</strong> (Zeghidour et al., 2021, Google) put the pieces together: a convolutional encoder and decoder, RVQ with quantizer dropout, and adversarial training, for 24 kHz audio at 3 to 18 kbit/s. In the authors' listening tests, SoundStream at 3 kbit/s beat the classic Opus codec at 12 kbit/s. <strong>EnCodec</strong> (Défossez et al., 2022, Meta) refined the recipe and released the models; its 24 kHz version became the default tokenizer in a wave of research, including VALL-E (A1.4) and MusicGen (A1.5).</p>
+<p>For RVQ codecs the bitrate is simple arithmetic:</p>
+$$\text{bitrate} = f_{\text{frame}} \times Q \times \log_2 K, \qquad \text{tokens per second} = f_{\text{frame}} \times Q$$
+<p class="math-note">$f_{\text{frame}}$ is frames per second, $Q$ the number of codebooks used, $K$ the codebook size.</p>
+
+<h3>Worked example: EnCodec 24 kHz</h3>
+<ol class="steps">
+  <li>75 frames per second; codebooks of 1,024 entries, so 10 bits per token.</li>
+  <li>At its 6 kbps setting it uses $Q = 8$ codebooks: $75 \times 8 \times 10 = 6{,}000$ bit/s.</li>
+  <li>The settings 1.5, 3, 6, 12 and 24 kbps correspond to 2, 4, 8, 16 and 32 codebooks.</li>
+  <li>Compared with 16-bit PCM at 24 kHz (384 kbit/s, A1.1), 6 kbps is 64 times smaller, and it's 600 tokens per second instead of 24,000 samples.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>Kyutai's <strong>Mimi</strong> codec runs at 12.5 frames per second and, as used in Moshi (A1.6), 8 codebooks of 2,048 entries.</p>
+  <ol class="steps">
+    <li>Bits per token: <span class="blank" data-answer="11" data-tol="0.01" data-hint="log₂ 2,048."></span></li>
+    <li>Bitrate in bit/s: <span class="blank" data-answer="1100" data-tol="0.5" data-hint="12.5 × 8 × 11."></span></li>
+    <li>Tokens per second: <span class="blank" data-answer="100" data-tol="0.01" data-hint="12.5 frames × 8 codebooks."></span></li>
+    <li>Tokens for one minute of speech: <span class="blank" data-answer="6000" data-tol="0.5" data-hint="100 per second × 60."></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="a1-3-codec-playground">
+  <h3>Playground: frame rate × codebooks × bits</h3>
+  <p class="math-note" style="margin:0">Pick a codec or set the three knobs. Bars use a log scale: each grid step is 10×. Compare the codec's bitrate with raw PCM, and its tokens per second with raw samples and with text.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr">
+    <label><span>Frame rate = <output data-out="fr">75</output> frames/s</span>
+      <input type="range" data-in="fr" min="5" max="100" step="2.5" value="75">
+    </label>
+    <label><span>Codebooks $Q$ = <output data-out="q">8</output></span>
+      <input type="range" data-in="q" min="1" max="32" step="1" value="8">
+    </label>
+    <label><span>Codebook size $K$ = <output data-out="k">1,024</output></span>
+      <input type="range" data-in="b" min="6" max="14" step="1" value="10" aria-label="Codebook size, as a power of two">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Codec presets" style="margin-top:12px">
+    <button type="button" class="chip" data-p="75,8,10" aria-pressed="false">EnCodec 6 kbps</button>
+    <button type="button" class="chip" data-p="75,32,10" aria-pressed="false">EnCodec 24 kbps</button>
+    <button type="button" class="chip" data-p="50,4,11" aria-pressed="false">MusicGen's 32 kHz codec</button>
+    <button type="button" class="chip" data-p="12.5,8,11" aria-pressed="false">Mimi (Moshi)</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">An RVQ codec runs at 50 frames/s with 1,024-entry codebooks. How many codebooks does it need for 4 kbit/s?</p>
+  <ol class="q-src">
+    <li>8</li>
+    <li>4</li>
+    <li>40</li>
+    <li>10</li>
+  </ol>
+  <div class="q-explain">$4{,}000 / (50 \times 10) = 8$ codebooks. That's 400 tokens per second for a language model to generate.</div>
+</div></div>
+
+<h2>Semantic vs acoustic tokens, and low frame rates</h2>
+<p>Codec tokens are trained to rebuild sound, so they spend most of their bits on <em>acoustic</em> detail: the speaker's timbre, the room, the microphone. That's great for quality but hard for a language model: 600 tokens per second of mostly fine detail, where the words and meaning are spread thinly.</p>
+<p><strong>AudioLM</strong> (Borsos et al., 2022, Google) split the job in two:</p>
+<ul>
+  <li><strong>Semantic tokens:</strong> run a self-supervised speech model (w2v-BERT) and cluster its features with k-means. These tokens capture phonetic content and long-range structure, at a low rate, but can't rebuild the exact voice.</li>
+  <li><strong>Acoustic tokens:</strong> SoundStream codes, which can.</li>
+</ul>
+<p>AudioLM generates in stages: first semantic tokens (what is said, with what structure), then coarse acoustic tokens conditioned on them, then fine acoustic tokens. Given a few seconds of someone speaking, it continued in the same voice with plausible, if often meaningless, speech, and did the same for piano.</p>
+<p>Later codecs fold both kinds into one stream. <strong>Mimi</strong> (Kyutai, 2024, introduced with the Moshi model) runs at only <strong>12.5 frames per second</strong> (80 ms per frame) on 24 kHz audio, at about 1.1 kbit/s, and is fully streaming. Its first codebook is trained to also match features from a self-supervised speech model (WavLM), so it behaves like a semantic token; the remaining codebooks carry acoustic detail. A lower frame rate means fewer autoregressive steps: 12.5 frames per second is getting close to the few tokens per second of text.</p>
+<p class="math-note">As of 2026 the design space is wide: codecs differ in frame rate (roughly 12.5–75 Hz), number of codebooks, whether tokens are split into semantic and acoustic parts, and whether a model uses discrete tokens at all or a continuous latent generated by diffusion or flow matching (A1.4, A1.5). The arithmetic above is how you compare them.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> audio tokens are how speech gets <em>into</em> and <em>out of</em> language models. The codec's frame rate and codebook count set how many positions a minute of speech costs in the context window, and how many steps the model must take to say it. Most of the clever architecture in speech LLMs (codebook delay patterns, small "depth" transformers over codebooks, semantic-first token layouts) exists to handle several tokens per frame without multiplying the sequence length (A1.5, A1.6).</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">In AudioLM, what are semantic tokens good for that acoustic codec tokens aren't?</p>
+  <ol class="q-src">
+    <li>Rebuilding the exact voice and recording conditions</li>
+    <li>Compressing music to the lowest possible bitrate</li>
+    <li>Capturing phonetic content and long-range structure compactly, so generation stays coherent</li>
+    <li>Replacing the decoder</li>
+  </ol>
+  <div class="q-explain">Semantic tokens (clustered self-supervised features) track what's being said; acoustic tokens track how it sounds. AudioLM plans with the first, then renders with the second.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain how a neural audio codec turns audio into tokens, why it uses residual VQ, and how you'd compute its bitrate.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A convolutional encoder turns the waveform into frame vectors (e.g. 75 per second), a quantizer replaces each with codebook indices, and a decoder rebuilds the waveform; it's trained with reconstruction, spectrogram and adversarial losses. Residual VQ quantizes the vector with one small codebook, then quantizes what's left with the next, and so on, which reaches many bits per frame without an impossibly large single codebook. Bitrate is frame rate × number of codebooks × log₂(codebook size), e.g. 75 × 8 × 10 = 6 kbit/s for EnCodec.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">EnCodec 24 kHz at 1.5 kbps uses 2 codebooks. How many tokens per second is that?</p>
+    <ol class="q-src">
+      <li>75</li>
+      <li>150</li>
+      <li>1,500</li>
+      <li>20</li>
+    </ol>
+    <div class="q-explain">$75 \times 2 = 150$ tokens per second, each 10 bits: $150 \times 10 = 1{,}500$ bit/s.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why does SoundStream train with quantizer dropout?</p>
+    <ol class="q-src">
+      <li>To prevent overfitting of the discriminator</li>
+      <li>To make the encoder faster</li>
+      <li>To remove the need for a decoder</li>
+      <li>So one model works at several bitrates, using only the first $n$ codebooks</li>
+    </ol>
+    <div class="q-explain">Training on random prefixes of the codebook stack teaches the decoder to do its best with whatever number of codebooks arrives.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">An autoencoder (P6.4) learns a compact bottleneck. What does a neural codec add to that bottleneck?</p>
+    <ol class="q-src">
+      <li>Quantization: the bottleneck becomes integer indices into learned codebooks</li>
+      <li>Nothing; it's an ordinary autoencoder with a continuous bottleneck</li>
+      <li>A text tokenizer</li>
+      <li>A larger bottleneck than the input</li>
+    </ol>
+    <div class="q-explain">The discrete bottleneck is the whole point: integers can be transmitted at a known bitrate and modelled by a language model.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why is a 12.5 Hz codec like Mimi attractive for a speech language model?</p>
+    <ol class="q-src">
+      <li>It needs no decoder</li>
+      <li>It works only for music</li>
+      <li>Fewer frames per second means fewer autoregressive steps and shorter contexts per minute of speech</li>
+      <li>It stores audio without any loss</li>
+    </ol>
+    <div class="q-explain">At 12.5 frames per second, a minute is 750 frames, versus 4,500 at 75 Hz. That makes long conversations and real-time generation far cheaper.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A neural codec is an <strong>autoencoder with a discrete bottleneck</strong>: conv encoder → codebook indices → conv decoder, trained with reconstruction and adversarial losses.</li>
+    <li><strong>RVQ</strong> quantizes the residual stage by stage: $\hat{x} = \sum_i c^{(i)}$; quantizer dropout gives variable bitrate.</li>
+    <li>Bitrate $= f_{\text{frame}} \times Q \times \log_2 K$: EnCodec 6 kbps $= 75 \times 8 \times 10$; Mimi $\approx 12.5 \times 8 \times 11 = 1.1$ kbps.</li>
+    <li><strong>Semantic</strong> tokens capture content and structure; <strong>acoustic</strong> tokens capture voice and detail. Newer codecs merge both at low frame rates.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"a1-3-a","front":"What are the three parts of a neural audio codec?","back":"A strided-conv encoder (waveform → frame vectors), a quantizer (vectors → codebook indices = audio tokens), and a decoder (tokens → waveform). Trained with reconstruction, multi-scale spectrogram and adversarial losses."},
+  {"id":"a1-3-b","front":"How does residual vector quantization work?","back":"Quantize $x$ with codebook 1, subtract to get the residual, quantize that with codebook 2, and so on. Reconstruction $\\hat{x} = \\sum_i c^{(i)}$. Many small codebooks replace one impossibly large one."},
+  {"id":"a1-3-c","front":"Bitrate and token-rate formulas for an RVQ codec?","back":"bitrate $= f_{\\text{frame}} \\times Q \\times \\log_2 K$; tokens/s $= f_{\\text{frame}} \\times Q$. EnCodec 24 kHz at 6 kbps: 75 × 8 × 10 = 6,000 bit/s, 600 tokens/s."},
+  {"id":"a1-3-d","front":"What is quantizer dropout (SoundStream)?","back":"Training with a random number of the first codebooks, so one model can decode well at several bitrates."},
+  {"id":"a1-3-e","front":"Semantic vs acoustic tokens (AudioLM)?","back":"Semantic: k-means clusters of self-supervised speech features (w2v-BERT): content and structure, can't rebuild the voice. Acoustic: codec (SoundStream) tokens: voice, timbre, detail. AudioLM generates semantic first, then acoustic."},
+  {"id":"a1-3-f","front":"Mimi codec in one card.","back":"Kyutai, 2024 (Moshi): 24 kHz audio → 12.5 frames/s (80 ms), ~1.1 kbps with 8 codebooks; streaming; first codebook distilled toward WavLM features (semantic), the rest acoustic."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/a1-3-rvq.js"></script>
+<script src="../assets/js/anims/a1-3-codec-playground.js"></script>
+</body>
+</html>

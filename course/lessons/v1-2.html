@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="v1-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Contrastive learning &amp; CLIP · LLMs, Animated</title>
+<meta name="description" content="How CLIP learns a shared space for images and text from 400 million captioned images: the N×N similarity matrix, the symmetric InfoNCE loss, temperature, zero-shot classification, ALIGN and SigLIP.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Contrastive learning &amp; CLIP</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Vision</span></div>
+<p class="lede">Labelling millions of images by hand is slow and caps a model at a fixed list of classes. The web already pairs billions of images with text. <strong>CLIP</strong> learns from those pairs with one simple game: <em>which caption goes with which image?</em> The result is a shared space where pictures and words can be compared directly.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain contrastive learning and compute CLIP's symmetric InfoNCE loss for a tiny batch.</li>
+    <li>Predict what the temperature $\tau$ does to the softmax and the loss.</li>
+    <li>Use a CLIP-style model for zero-shot classification, and say where these encoders are used today.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> CLIP's image encoder is usually the Vision Transformer from <a href="v1-1.html">V1.1</a>, and its outputs are embeddings compared with dot products, as in <a href="p3-4.html">Embeddings (P3.4)</a>. Helpful but optional: the cross-entropy loss from <a href="p1-6.html">P1.6</a> and sampling temperature from <a href="m1-5.html">M1.5</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. Being wrong now helps the right answer stick.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You have 400 million images with captions but no class labels. Which training signal can you use?</p>
+    <ol class="q-src">
+      <li>None. Image models need human class labels.</li>
+      <li>Ask the model to output each caption's exact wording, word by word, and nothing else will work</li>
+      <li>Train the model to pick each image's own caption out of a batch of captions</li>
+      <li>Cluster the images and name the clusters by hand</li>
+    </ol>
+    <div class="q-explain">That matching game is contrastive learning, and it is what CLIP does. Generating captions word by word also works, but CLIP's authors found the matching objective several times more compute-efficient for learning transferable features.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">After training on image–caption pairs, how could a model classify a photo into "dog", "cat" or "car" without any extra training?</p>
+    <ol class="q-src">
+      <li>Embed the texts "a photo of a dog/cat/car" and pick the one closest to the photo's embedding</li>
+      <li>It can't. It needs a new classifier trained on labelled examples.</li>
+      <li>Count the pixels of each colour</li>
+      <li>Ask it to generate a caption and search it for keywords</li>
+    </ol>
+    <div class="q-explain">Because images and texts live in one space, class names written as sentences become a ready-made classifier. This is zero-shot classification.</div>
+  </div>
+</section>
+
+<h2>Learning from captions instead of labels</h2>
+<p>ImageNet (Deng et al., 2009) needed years of crowd work to label 1.28 million training images into 1,000 classes. A model trained on it knows exactly those 1,000 classes. Show it a new category, say "electric scooter", and you need new labels and a new classifier.</p>
+<p>Meanwhile, the web is full of images with <strong>alt text and captions</strong>. They're noisy ("IMG_2041", "my weekend!") but there are billions of them, and they describe far more than 1,000 categories. Earlier work learned visual features from text, for example VirTex (Desai &amp; Johnson, 2020) by generating captions, and ConVIRT (Zhang et al., 2020) contrastively on medical images paired with reports. <strong>CLIP</strong> (Radford et al., 2021, OpenAI) scaled the contrastive version to about <strong>400 million</strong> image–text pairs collected from the internet.</p>
+<p>The core idea is <strong>contrastive learning</strong>:</p>
+<ul>
+  <li>Two encoders map each input to a vector: an <strong>image encoder</strong> $f$ (a ViT or ResNet) and a <strong>text encoder</strong> $g$ (a Transformer).</li>
+  <li>A matching image–caption pair is a <strong>positive</strong>: pull their vectors together.</li>
+  <li>Every other pairing in the batch is a <strong>negative</strong>: push those vectors apart.</li>
+</ul>
+<p>The model never has to produce a caption. It only has to recognise which caption belongs to which image, among many. CLIP's authors found this several times more compute-efficient than predicting the caption's words, because the model doesn't waste effort on exact phrasing.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-v1-2.webp" alt="Children play a matching game, pairing photo cards with drawings of the same thing; strings join the right pairs and mismatched cards are pushed apart." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Kids play a <strong>matching game</strong>. On one side are photo cards; on the other, drawings of the same things. The job: tie a <strong>string</strong> from each photo to its drawing.</p>
+      <p>Every time they get a pair right, the two cards are pulled closer. Every wrong pair gets <strong>pushed apart</strong>. After thousands of games, the kids can match a photo to a drawing they've never seen.</p>
+      <p>Where it breaks: CLIP doesn't move cards on a table. It adjusts millions of numbers so that matching pictures and sentences end up as nearby points in a shared space.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In a CLIP batch of $N$ image–caption pairs, how many negatives does each image get?</p>
+  <ol class="q-src">
+    <li>None; only positives are used</li>
+    <li>$N - 1$: every other caption in the batch</li>
+    <li>One, chosen at random</li>
+  </ol>
+  <div class="q-explain">Every caption that isn't the image's own is a negative, so negatives come for free from the batch. With CLIP's batch of 32,768, each image is contrasted against 32,767 captions.</div>
+</div></div>
+
+<h2>One batch, one matrix, one loss</h2>
+<p>Take a batch of $N$ pairs. Encode all images and all captions, scale every vector to length 1, and compare every image with every caption. Step through it:</p>
+
+<figure class="anim wide" data-anim="v1-2-clip"></figure>
+
+<p>Write $s_{ij}$ for the cosine similarity between image $i$ and caption $j$. CLIP's loss is the average of two cross-entropies, one per direction:</p>
+$$\mathcal{L} = \frac{1}{2N}\sum_{i=1}^{N}\big(\ell_i^{\text{img}} + \ell_i^{\text{txt}}\big)$$
+$$\ell_i^{\text{img}} = -\log\frac{e^{s_{ii}/\tau}}{\sum_{j=1}^{N} e^{s_{ij}/\tau}}$$
+$$\ell_i^{\text{txt}} = -\log\frac{e^{s_{ii}/\tau}}{\sum_{j=1}^{N} e^{s_{ji}/\tau}}$$
+<p class="math-note">$\ell_i^{\text{img}}$ is a cross-entropy over a softmax along row $i$ (image $i$ choosing among all captions); $\ell_i^{\text{txt}}$ is one down column $i$ (caption $i$ choosing among all images). The right answer is always the diagonal, $s_{ii}$. $\tau$ is the <strong>temperature</strong>, a learned scalar. This family of losses is called <strong>InfoNCE</strong> (van den Oord et al., 2018); CLIP's is the symmetric version.</p>
+<p>In code it's almost a one-liner: <code>logits = img @ txt.T / tau</code>, then the average of <code>cross_entropy(logits, arange(N))</code> and <code>cross_entropy(logits.T, arange(N))</code>.</p>
+<p>The details from the paper: a batch of <strong>32,768</strong>, an image encoder that was a ResNet or a ViT (the best, ViT-L/14, was fine-tuned at 336 pixels), a 63M-parameter Transformer text encoder, and a temperature initialised at $\tau = 0.07$ and learned, with a floor at $0.01$ (a logit scale of at most 100).</p>
+
+<h3>Worked example</h3>
+<p>Image 1's similarities to captions 1, 2, 3 are $[0.30,\ 0.10,\ 0.20]$; caption 1 is its match. Take $\tau = 0.1$.</p>
+<ol class="steps">
+  <li><strong>Logits</strong> $s/\tau$: $[3,\ 1,\ 2]$.</li>
+  <li><strong>Exponentials:</strong> $e^3 \approx 20.09$, $e^1 \approx 2.72$, $e^2 \approx 7.39$; sum $\approx 30.19$.</li>
+  <li><strong>Softmax:</strong> $[0.665,\ 0.090,\ 0.245]$.</li>
+  <li><strong>Loss for this row:</strong> $-\ln 0.665 \approx 0.408$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same similarities $[0.30,\ 0.10,\ 0.20]$, but now $\tau = 0.05$.</p>
+  <ol class="steps">
+    <li>Logit for the match, $0.30/\tau$: <span class="blank" data-answer="6" data-tol="0.001" data-hint="0.30 / 0.05."></span></li>
+    <li>Softmax probability of the match: <span class="blank" data-answer="0.867" data-tol="0.005" data-hint="Logits are 6, 2, 4: e⁶ ≈ 403.4, e² ≈ 7.39, e⁴ ≈ 54.6. Divide e⁶ by the sum."></span></li>
+    <li>Row loss $-\ln p$: <span class="blank" data-answer="0.143" data-tol="0.005" data-hint="−ln 0.867."></span> (lower than 0.408: a smaller τ rewards a correct ranking more)</li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why does CLIP average a row-wise and a column-wise cross-entropy?</p>
+  <ol class="q-src">
+    <li>To make the loss twice as large</li>
+    <li>Because the matrix is symmetric, so the two are always equal</li>
+    <li>So that each image must pick its caption <em>and</em> each caption must pick its image</li>
+  </ol>
+  <div class="q-explain">The matrix isn't symmetric ($s_{ij}$ compares image $i$ with caption $j$), so the two directions give different losses. Training both makes the space work for image→text and text→image retrieval.</div>
+</div></div>
+
+<h2>Temperature: how sharp is the softmax?</h2>
+<p>Cosine similarities live between −1 and 1, and in practice CLIP's scores for an image are bunched closely together (often within about 0.1 of each other). A softmax over such close numbers would be nearly uniform. Dividing by a small $\tau$ stretches the gaps: $\tau = 0.01$ turns a gap of 0.05 into a logit gap of 5.</p>
+<ul>
+  <li><strong>High $\tau$:</strong> soft, almost uniform probabilities. Mistakes and successes barely change the loss, so learning is slow.</li>
+  <li><strong>Low $\tau$:</strong> sharp, confident probabilities. Correct rankings give near-zero loss, but a confident mistake is punished hard.</li>
+</ul>
+<p>Rather than tuning it, CLIP <strong>learns</strong> $\tau$ (as $\log(1/\tau)$) by gradient descent along with the weights. Try it below, then switch to the batch with one mix-up.</p>
+
+<section class="playground" data-clip-playground aria-labelledby="pg">
+  <h3 id="pg">Try it: temperature and the similarity matrix</h3>
+  <p class="math-note" style="margin:0">Toy cosine similarities for 4 images × 4 captions. Each cell shows a softmax probability; the orange squares are the right answers.</p>
+</section>
+
+<p>Why such huge batches? Each image's softmax runs over all $N$ captions, so a bigger batch gives more, and harder, negatives: in a batch of 32,768, some other caption will probably describe a similar dog. Contrastive methods generally improve with more negatives, which is why CLIP training is spread across hundreds of GPUs that share their embeddings to build the full $N \times N$ matrix.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In the "one mix-up" batch, the loss rises again when $\tau$ gets very small. Why?</p>
+  <ol class="q-src">
+    <li>With a sharp softmax, the cat image puts nearly all its probability on the wrong caption, and $-\log$ of a tiny probability is large</li>
+    <li>Small temperatures make cosine similarities negative</li>
+    <li>The softmax no longer sums to 1</li>
+  </ol>
+  <div class="q-explain">Low $\tau$ means confidence. Confident and right gives near-zero loss; confident and wrong gives a big loss. With mistakes in the batch, the best $\tau$ is somewhere in the middle, which is why it's learned.</div>
+</div></div>
+
+<h2>Zero-shot classification, and CLIP's descendants</h2>
+<p>A trained CLIP is a classifier for <em>any</em> list of classes, built from words:</p>
+<ol class="steps">
+  <li>Write one prompt per class, such as "a photo of a dog", and embed each with the text encoder.</li>
+  <li>Embed the image with the image encoder.</li>
+  <li>Pick the class whose prompt has the highest cosine similarity (or take a softmax for probabilities).</li>
+</ol>
+<p>With no ImageNet training images at all, CLIP's best model reached <strong>76.2%</strong> top-1 zero-shot on ImageNet, matching the original fully supervised ResNet-50. The wording matters: the template "A photo of a {label}." beat the bare class name by about 1.3 points, and averaging the embeddings of 80 templates added about 3.5 more. Zero-shot CLIP was also far more robust than ImageNet-trained models on sketches, renditions and other shifted versions of the same classes.</p>
+<p>It has blind spots. CLIP is weak at counting objects and at spatial relations ("a mug left of a laptop"), and it often treats captions like a bag of words (Yuksekgonul et al., 2023). Web data also carries social biases, which the CLIP paper itself measured.</p>
+<p>The recipe spread quickly:</p>
+<ul>
+  <li><strong>ALIGN</strong> (Jia et al., 2021, Google) used about 1.8 billion noisier image–alt-text pairs with almost no filtering, showing that scale can make up for noise.</li>
+  <li><strong>OpenCLIP</strong> reproduced CLIP in the open, trained on the public <strong>LAION-5B</strong> dataset (Schuhmann et al., 2022).</li>
+  <li><strong>SigLIP</strong> (Zhai et al., 2023) replaced the softmax with a <strong>sigmoid</strong>: every image–caption pair becomes its own yes/no question, $-\log\sigma\big(z_{ij}(t\,s_{ij} + b)\big)$, where $z_{ij} = 1$ on the diagonal and $-1$ elsewhere, $t$ is a learned scale (like $1/\tau$) and $b$ a learned bias. With no normalisation over the whole batch, it is simpler to distribute and works well even at smaller batch sizes.</li>
+</ul>
+
+<div class="why"><strong>Why this matters for LLMs and generators:</strong> CLIP-style encoders are everywhere in 2026. Their <strong>text</strong> encoders condition many image generators (Stable Diffusion 1.x used CLIP's ViT-L/14 text encoder; later models often pair a CLIP encoder with a larger T5 encoder; see <a href="g1-4.html">G1.4</a>). Their <strong>image</strong> encoders are the "eyes" of many multimodal LLMs: LLaVA used CLIP ViT-L/14, and many open models since 2024 use SigLIP-family encoders (<a href="mm-1.html">MM.1</a>). The same embeddings power image search and the filtering of training datasets.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What is the main change SigLIP makes to CLIP's loss?</p>
+  <ol class="q-src">
+    <li>It removes the text encoder</li>
+    <li>It scores each image–caption pair independently with a sigmoid, instead of a softmax over the whole batch</li>
+    <li>It uses only positive pairs</li>
+  </ol>
+  <div class="q-explain">The sigmoid loss treats each pair as a binary match/no-match decision. Negatives still matter (they get label −1), but no row or column normalisation is needed.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain how CLIP is trained from a batch of image–caption pairs, and how it then classifies images it was never labelled for.</p>
+  <div class="model-answer"><strong>Model answer:</strong> An image encoder and a text encoder embed the $N$ images and $N$ captions as unit vectors, and all $N \times N$ cosine similarities (divided by a learned temperature) are scored with cross-entropy along rows and columns so each image picks its own caption and vice versa. To classify, you embed prompts like "a photo of a dog" for each class and pick the one most similar to the image's embedding; no extra training is needed.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In CLIP's $N \times N$ similarity matrix, which entries are the "correct answers" for the cross-entropy?</p>
+    <ol class="q-src">
+      <li>The largest entry in each row, whatever it is</li>
+      <li>The first column</li>
+      <li>All entries above 0.5</li>
+      <li>The diagonal: image $i$ with caption $i$</li>
+    </ol>
+    <div class="q-explain">The pairing in the batch defines the labels: target $i$ for row $i$ and for column $i$. That's why the code uses <code>arange(N)</code> as the targets.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In <a href="m1-5.html">M1.5</a>, lowering the sampling temperature made an LLM's next-token distribution more peaked. What does lowering CLIP's $\tau$ do?</p>
+    <ol class="q-src">
+      <li>The opposite: it flattens the softmax over captions</li>
+      <li>The same thing: logits are divided by $\tau$, so the softmax over captions gets sharper</li>
+      <li>It changes which caption has the highest similarity</li>
+      <li>Nothing, because similarities are already between −1 and 1</li>
+    </ol>
+    <div class="q-explain">It's the same mechanism: softmax of logits divided by a temperature. Dividing never reorders the scores, it only changes how peaked the probabilities are.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why does zero-shot accuracy improve when you use the prompt "a photo of a {label}." instead of the bare label?</p>
+    <ol class="q-src">
+      <li>Training captions are sentences, so a sentence-like prompt lands closer to where matching images were trained to be</li>
+      <li>Longer text always has higher similarity</li>
+      <li>The word "photo" is a special token</li>
+      <li>It doesn't; prompts make no difference</li>
+    </ol>
+    <div class="q-explain">The text encoder learned from web captions, which rarely consist of a single word. Matching that distribution, and disambiguating words like "boxer" or "crane", helps. Averaging many templates helps further.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A team doubles its CLIP batch size from 16k to 32k pairs. What changes for each image's loss term?</p>
+    <ol class="q-src">
+      <li>It gets two positives instead of one</li>
+      <li>Nothing, since the loss is averaged</li>
+      <li>Its softmax runs over twice as many captions, so it faces more (and on average harder) negatives</li>
+      <li>The temperature is halved automatically</li>
+    </ol>
+    <div class="q-explain">More negatives make the matching task harder and the learning signal richer, one reason contrastive models like large batches. SigLIP's sigmoid loss eases the engineering of very large batches.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Contrastive learning</strong> pulls matching pairs together and pushes the rest of the batch apart; no class labels needed.</li>
+    <li>CLIP scores an $N \times N$ cosine-similarity matrix with a <strong>symmetric InfoNCE</strong> loss: cross-entropy on rows and columns, with the diagonal as the target.</li>
+    <li>A learned <strong>temperature</strong> $\tau$ sets how sharp the softmax is: low $\tau$ rewards confident correct matches and punishes confident mistakes.</li>
+    <li>Prompts like "a photo of a dog" turn CLIP into a <strong>zero-shot classifier</strong>; ALIGN scaled the data, SigLIP swapped in a sigmoid loss.</li>
+    <li>CLIP-style encoders are the text side of many image generators and the vision side of many multimodal LLMs.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Python</div>
+    <p>Implement the symmetric InfoNCE loss in NumPy, check it against PyTorch, train two tiny linear "encoders" to align paired toy embeddings, and classify zero-shot by nearest text embedding. About 25 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="v1-2-clip-loss.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"v1-2-a","front":"What is contrastive learning, in one sentence?","back":"Learn embeddings by pulling matching pairs (positives) together and pushing non-matching pairs (negatives) apart, so no class labels are needed."},
+  {"id":"v1-2-b","front":"How is CLIP trained?","back":"On ~400M web image–caption pairs (Radford et al., 2021): an image encoder and a text encoder embed a batch of $N$ pairs, and a symmetric cross-entropy over the $N \\times N$ cosine-similarity matrix makes each image pick its caption and each caption its image."},
+  {"id":"v1-2-c","front":"Write CLIP's loss for row $i$ (image → text).","back":"$-\\log \\dfrac{e^{s_{ii}/\\tau}}{\\sum_j e^{s_{ij}/\\tau}}$, with $s_{ij}$ the cosine similarity of image $i$ and caption $j$. CLIP averages this with the column (text → image) version."},
+  {"id":"v1-2-d","front":"What does CLIP's temperature $\\tau$ do?","back":"Logits are $s/\\tau$. Low $\\tau$ sharpens the softmax (confident: correct matches cost ~0, mistakes cost a lot); high $\\tau$ flattens it. CLIP learns $\\tau$ (init 0.07, floor 0.01)."},
+  {"id":"v1-2-e","front":"How does zero-shot classification with CLIP work?","back":"Embed a prompt per class (\"a photo of a {label}\"), embed the image, and pick the most similar prompt. No labelled training images needed."},
+  {"id":"v1-2-f","front":"How does SigLIP's loss differ from CLIP's?","back":"Each image–caption pair is an independent binary decision with a sigmoid, $-\\log\\sigma(z_{ij}(t s_{ij}+b))$ with $z_{ij}=\\pm1$, instead of a softmax over the batch (Zhai et al., 2023)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/v1-2-clip.js"></script>
+<script src="../assets/js/anims/v1-2-temp-playground.js"></script>
+</body>
+</html>

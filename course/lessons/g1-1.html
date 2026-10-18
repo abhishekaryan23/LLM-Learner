@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="g1-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Variational autoencoders · LLMs, Animated</title>
+<meta name="description" content="What it means to generate data, and the first deep model that did it well: the VAE, its ELBO, the reparameterization trick, why samples are blurry, and VQ-VAE's discrete codes.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Variational autoencoders</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Image generation</span></div>
+<p class="lede">An image generator has one job: produce <em>new</em> pictures that look like they came from the training set. The variational autoencoder (2013) was the first deep model to do this in a principled, trainable way, and two of its ideas, a smooth latent space and discrete image codes, still sit inside today's best image models.</p>
+
+<div class="cover"><img src="../assets/img/cover-g1.webp" alt="Illustration: a row of picture frames going from speckled noise to a crisp painting of a mountain lake at sunset, with a small robot painter beside the last one." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>State the generative-modeling goal and write the VAE's ELBO: reconstruction minus KL.</li>
+    <li>Compute the KL term for a Gaussian code and explain the reparameterization trick.</li>
+    <li>Explain why VAE samples are blurry, what β-VAE changes, and how VQ-VAE turns images into tokens.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> this lesson builds on <a href="p6-4.html">P6.4 Autoencoders &amp; representation learning</a> (encoder, bottleneck, decoder) and <a href="p5-2.html">P5.2 Bayes' rule &amp; latent variables</a> (a hidden $z$ that explains the data $x$, and posteriors). Helpful but optional: <a href="p1-6.html">P1.6 Entropy, cross-entropy &amp; KL</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You train an ordinary autoencoder on faces, then feed its decoder a <em>random</em> code. What do you usually get?</p>
+    <ol class="q-src">
+      <li>A sharp, realistic new face</li>
+      <li>One of the training faces, exactly</li>
+      <li>Often garbage: random codes tend to land in regions the decoder never saw</li>
+      <li>An error, because decoders only accept codes from the encoder</li>
+    </ol>
+    <div class="q-explain">A plain autoencoder only learns to decode the codes its encoder happens to produce, which can be scattered with big gaps between them. The VAE's main fix is to force codes to fill a known region you can sample from.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Samples from a basic VAE trained on photos are famous for being…</p>
+    <ol class="q-src">
+      <li>Blurry</li>
+      <li>Over-sharpened, with ringing artifacts</li>
+      <li>Exact copies of training images</li>
+      <li>Black and white</li>
+    </ol>
+    <div class="q-explain">Blur is the classic VAE weakness. You'll see why: a squared-error reconstruction loss rewards predicting the <em>average</em> of the plausible details.</div>
+  </div>
+</section>
+
+<h2>The goal, and the VAE that reaches it</h2>
+<p><strong>Generative modeling</strong> means learning the distribution $p(x)$ that the training images came from, well enough to <em>draw new samples</em> from it. That is hard because images live in a huge space: a 64×64 colour image is a point in 12,288 dimensions, and almost every point in that space looks like static. Real images occupy a thin, oddly shaped region of it.</p>
+<p>The <strong>latent-variable</strong> idea (P5.2) makes this manageable. Suppose each image $x$ is explained by a short hidden code $z$ (pose, lighting, shape…). Pick a simple distribution for codes, the <strong>prior</strong> $p(z) = \mathcal{N}(0, I)$, and learn a <strong>decoder</strong> $p_\theta(x \mid z)$ that turns a code into an image. Then</p>
+$$p_\theta(x) = \int p_\theta(x \mid z)\, p(z)\, dz$$
+<p>and sampling is easy: draw $z \sim \mathcal{N}(0, I)$, decode. The catch is training. To learn the decoder you need to know which codes explain each training image, the <strong>posterior</strong> $p_\theta(z \mid x)$, and that integral makes it intractable for a neural decoder.</p>
+<p>An ordinary autoencoder (P6.4) dodges the question: its encoder maps each image to one code and the decoder learns to invert it. But nothing makes those codes fill $\mathcal{N}(0,I)$. They can bunch up or scatter with holes, so a random code decodes to junk. In December 2013, <strong>Kingma &amp; Welling</strong> ("Auto-Encoding Variational Bayes"), and independently Rezende, Mohamed &amp; Wierstra (2014), showed how to train an encoder and decoder together so that the codes do fill the prior: the <strong>variational autoencoder</strong>.</p>
+
+<h3>Encoder, decoder and the ELBO</h3>
+<p>A VAE replaces the impossible posterior with a learned guess, the <strong>encoder</strong> $q_\phi(z \mid x)$. For each image it outputs a Gaussian over codes: a mean vector $\mu$ and a standard-deviation vector $\sigma$, so $q_\phi(z \mid x) = \mathcal{N}(\mu, \operatorname{diag}\sigma^2)$. Encoder and decoder are trained together by maximizing the <strong>evidence lower bound</strong> (ELBO):</p>
+$$\log p_\theta(x) \;\ge\; \underbrace{\mathbb{E}_{z \sim q_\phi(z\mid x)}\big[\log p_\theta(x \mid z)\big]}_{\text{reconstruction}} \;-\; \underbrace{\mathrm{KL}\big(q_\phi(z \mid x)\,\|\,p(z)\big)}_{\text{stay near the prior}}$$
+<ul>
+  <li><strong>Reconstruction:</strong> codes drawn from the encoder's Gaussian should decode back to $x$. With a Gaussian decoder this is, up to constants, minus the squared error $\|x - \hat x\|^2$.</li>
+  <li><strong>KL term:</strong> each image's code distribution should stay close to the prior $\mathcal{N}(0, I)$ (KL divergence, P1.6). This is the regularizer that packs codes into the disk you will sample from.</li>
+</ul>
+<p>Why a <em>lower bound</em>? The gap between $\log p_\theta(x)$ and the ELBO is exactly $\mathrm{KL}(q_\phi(z\mid x)\,\|\,p_\theta(z\mid x))$, how far the encoder's guess is from the true posterior. Raising the ELBO both improves the model and makes the encoder a better guesser. Training minimizes the negative ELBO with ordinary gradient descent.</p>
+
+<figure class="anim wide" data-anim="g1-1-vae"></figure>
+
+<p>One snag: the loss contains a <em>sample</em> $z \sim q_\phi$, and you can't backpropagate through "draw a random number". The <strong>reparameterization trick</strong> rewrites the sample as</p>
+$$z = \mu + \sigma \odot \varepsilon, \qquad \varepsilon \sim \mathcal{N}(0, I)$$
+<p>($\odot$ is element-wise multiplication). The randomness now sits in $\varepsilon$, which doesn't depend on any parameter, and $z$ is a plain differentiable function of $\mu$ and $\sigma$. Gradients flow from the decoder, through $z$, into the encoder.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">What does the reparameterization trick achieve?</p>
+  <ol class="q-src">
+    <li>It removes the KL term from the loss</li>
+    <li>It makes the encoder deterministic</li>
+    <li>It replaces the Gaussian prior with a uniform one</li>
+    <li>It moves the randomness into $\varepsilon$, so $z = \mu + \sigma \odot \varepsilon$ can be backpropagated through to $\mu$ and $\sigma$</li>
+  </ol>
+  <div class="q-explain">The encoder is still stochastic, but the sampling step is now outside the path that gradients travel, so the whole model trains end to end with backprop.</div>
+</div></div>
+
+<h2>The KL term, and why samples blur</h2>
+<p>For a diagonal Gaussian code and a standard-normal prior, the KL term has a closed form, summed over the latent dimensions $j$:</p>
+$$\mathrm{KL}\big(\mathcal{N}(\mu, \sigma^2)\,\|\,\mathcal{N}(0, 1)\big) = \tfrac{1}{2}\sum_j \big(\mu_j^2 + \sigma_j^2 - 1 - \log \sigma_j^2\big)$$
+<p>It is zero only when $\mu_j = 0$ and $\sigma_j = 1$. The $\mu^2$ part pulls codes toward the origin; the $\sigma^2 - 1 - \log\sigma^2$ part stops each code from shrinking to a point. Overlapping, fuzzy codes are what make the latent space smooth.</p>
+
+<h3>Worked example</h3>
+<p>A 1-D code with $\mu = 1$ and $\sigma = 0.5$:</p>
+<ol class="steps">
+  <li>$\mu^2 = 1$ and $\sigma^2 = 0.25$</li>
+  <li>$\log \sigma^2 = \ln 0.25 \approx -1.386$</li>
+  <li>$\mathrm{KL} = \tfrac{1}{2}(1 + 0.25 - 1 + 1.386) = \tfrac{1}{2}(1.636) \approx 0.818$ nats</li>
+</ol>
+
+<section class="card" aria-labelledby="fd1">
+  <div class="card-label" id="fd1">Your turn · faded example</div>
+  <p>Two cases, one dimension each. Use $\ln 4 \approx 1.386$.</p>
+  <ol class="steps">
+    <li>$\mu = 0.6$, $\sigma = 1$: KL $=$ <span class="blank" data-answer="0.18" data-tol="0.005" data-hint="With σ = 1 the σ-part is 1 − 1 − ln 1 = 0, so only μ²/2 is left."></span></li>
+    <li>$\mu = 0$, $\sigma = 2$: KL $\approx$ <span class="blank" data-answer="0.807" data-tol="0.01" data-hint="½(0 + 4 − 1 − ln 4) = ½(3 − 1.386)."></span> (too <em>wide</em> is penalized too)</li>
+  </ol>
+</section>
+
+<div class="playground" id="vae-playground">
+  <h3>Playground: walk the latent space</h3>
+  <p class="math-note" style="margin:0">A toy decoder: left–right in $z$ morphs round → star, down–up morphs wide → tall. Blue dots are training codes. Drag the orange dot, or use the sliders.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>$z_1$ = <output data-o="z1">0.9</output></span>
+      <input type="range" data-k="z1" min="-4" max="4" step="0.1" value="0.9" aria-describedby="vae-hint">
+    </label>
+  </div>
+  <div class="pg-controls">
+    <label><span>$z_2$ = <output data-o="z2">0.6</output></span>
+      <input type="range" data-k="z2" min="-4" max="4" step="0.1" value="0.6" aria-describedby="vae-hint">
+    </label>
+  </div>
+  <div class="pg-controls">
+    <div class="pg-buttons">
+      <button type="button" class="btn btn-primary" data-act="sample">Sample z ~ N(0, I)</button>
+      <button type="button" class="btn" data-act="far">Jump far outside</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="vae-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p><strong>Why samples blur.</strong> The squared-error reconstruction asks for the image that is closest <em>on average</em> to every image the code might stand for. If a code is consistent with a strand of hair being slightly left or slightly right, the best squared-error answer is the average of both: a soft smear. Add the noise in $z$ and a decoder that can't afford sharp guesses, and VAE samples come out smooth but blurry, while GANs (G1.2) and diffusion (G1.3) produce crisp detail.</p>
+<p><strong>β-VAE</strong> (Higgins et al., 2017) multiplies the KL term by a weight $\beta$. With $\beta &gt; 1$ the codes are pushed harder toward the prior, which tends to give <em>disentangled</em> axes (one dimension for rotation, one for size…) at the cost of even blurrier reconstructions. Turning $\beta$ <em>down</em> does the opposite, and that is how VAEs are used in modern image models: Stable Diffusion's autoencoder (G1.4) uses only a tiny KL weight, so it reconstructs sharply while keeping its latent space well-behaved.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A code has $\mu = 0$ and $\sigma = 1$ in every dimension. What is its KL to the prior $\mathcal{N}(0, I)$?</p>
+  <ol class="q-src">
+    <li>0, because it <em>is</em> the prior; but then the code carries no information about the image</li>
+    <li>1 per dimension</li>
+    <li>It is undefined</li>
+    <li>Infinite</li>
+  </ol>
+  <div class="q-explain">$\tfrac12(0 + 1 - 1 - \ln 1) = 0$. A code identical to the prior is perfectly "regular" but useless for reconstruction: the two loss terms pull in opposite directions, and training finds the balance.</div>
+</div></div>
+
+<h2>VQ-VAE: discrete codes, and the road to image tokens</h2>
+<p>In 2017, van den Oord, Vinyals &amp; Kavukcuoglu ("Neural Discrete Representation Learning") replaced the Gaussian code with a <strong>discrete</strong> one. The <strong>VQ-VAE</strong> encoder outputs a grid of vectors, and each vector is snapped to the nearest entry of a learned <strong>codebook</strong> (512 vectors in their image experiments). The image becomes a grid of integers, the codebook indices.</p>
+<ul>
+  <li><strong>Quantize:</strong> replace each encoder vector $z_e$ with its nearest codebook vector $e_k$, and remember $k$.</li>
+  <li><strong>Train through the snap:</strong> "nearest" has no gradient, so a <em>straight-through estimator</em> copies the decoder's gradient back to $z_e$ as if the snap were not there. Two extra terms pull codebook vectors toward the encoder outputs and keep the encoder "committed" to its chosen codes.</li>
+  <li><strong>Generate:</strong> train a separate autoregressive model (originally a PixelCNN) on the grids of integers, sample a new grid, decode it.</li>
+</ul>
+<p>Look at that last step again: an image becomes a <strong>sequence of tokens</strong>, and a sequence model learns to write new ones. That is exactly how LLMs treat text. VQ-VAE's descendants carried the idea forward: DALL·E (2021) turned each 256×256 image into a 32×32 grid of 8,192-way tokens and generated them with a 12-billion-parameter transformer (G1.6); VQGAN (Esser et al., 2021) added a GAN loss for sharper decodes; and neural audio codecs turn sound into tokens the same way (A1.3).</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>Imagine describing every drawing in a big box with just <strong>two dials</strong>: one for "how pointy" and one for "how tall". A friend who only hears the dial numbers has to redraw the picture.</p>
+      <p>A VAE plays this game, with one extra rule: your dial settings must be a little <strong>wobbly</strong>, and must mostly stay <strong>near the middle</strong>. Because of the wobble, your friend learns that nearby settings mean nearby drawings. Because of the "stay near the middle" rule, there are no empty corners. So later you can spin the dials to <em>any</em> middle-ish setting and your friend draws a brand-new, sensible picture.</p>
+      <p>Where it breaks: real VAEs use hundreds of dials that nobody chose by hand, and the "friend" hedges on details it isn't sure about, which is why its drawings come out a bit smudgy.</p>
+    </div>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters for modern models:</strong> almost every 2026 image or video generator still has a VAE-style autoencoder at its front door. Latent diffusion (G1.4) runs in a VAE's compressed latent space, and token-based generators, including multimodal LLMs that draw (G1.6), rely on VQ-style tokenizers. The VAE as a stand-alone generator has faded; its parts are everywhere.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What does VQ-VAE's codebook do?</p>
+  <ol class="q-src">
+    <li>It stores whole training images for lookup</li>
+    <li>It replaces the decoder</li>
+    <li>It snaps each encoder vector to its nearest learned entry, turning the image into a grid of integer tokens</li>
+    <li>It adds Gaussian noise to the code</li>
+  </ol>
+  <div class="q-explain">Quantizing to a finite codebook makes the latent discrete. Those integer grids are image <em>tokens</em> that an autoregressive transformer can model, just like text.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What are the two terms of the VAE loss, and what would go wrong if you dropped each one?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The reconstruction term makes codes decode back to the input; the KL term pulls each image's code distribution toward the prior $\mathcal{N}(0, I)$. Drop the KL and you have a plain autoencoder whose codes leave holes, so random samples decode to junk; drop the reconstruction and every code collapses to the prior and carries no information about the image.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which expression is the ELBO that a VAE maximizes?</p>
+    <ol class="q-src">
+      <li>$\mathbb{E}_q[\log p(x\mid z)] + \mathrm{KL}(q(z\mid x)\,\|\,p(z))$</li>
+      <li>$\mathbb{E}_q[\log p(x\mid z)] - \mathrm{KL}(q(z\mid x)\,\|\,p(z))$</li>
+      <li>$\log p(z) - \log q(z \mid x)$, with no expectation</li>
+      <li>$\|x - \hat x\|^2$ alone</li>
+    </ol>
+    <div class="q-explain">Reconstruction <em>minus</em> KL. Adding the KL would reward codes for straying from the prior.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">From P1.6: KL divergence is not symmetric. In the VAE's KL term, which distribution comes first?</p>
+    <ol class="q-src">
+      <li>The prior, $\mathrm{KL}(p(z)\,\|\,q(z\mid x))$</li>
+      <li>The decoder, $\mathrm{KL}(p(x\mid z)\,\|\,p(x))$</li>
+      <li>It doesn't matter, KL is symmetric</li>
+      <li>The encoder, $\mathrm{KL}(q_\phi(z\mid x)\,\|\,p(z))$: the expectation is taken under the encoder's distribution</li>
+    </ol>
+    <div class="q-explain">The ELBO naturally produces $\mathrm{KL}(q\,\|\,p)$, with expectations under $q$, which is the distribution we can sample from. KL is asymmetric, so the order matters.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why are basic VAE samples blurry?</p>
+    <ol class="q-src">
+      <li>The squared-error reconstruction rewards averaging over uncertain details, and the noisy code makes details uncertain</li>
+      <li>The decoder has too many parameters</li>
+      <li>The KL term adds blur filters to the image</li>
+      <li>The encoder downsamples images before the decoder sees them</li>
+    </ol>
+    <div class="q-explain">When several sharp answers are plausible, the squared-error optimum is their average, which looks soft. GANs and diffusion avoid this in different ways.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A β-VAE uses $\beta = 4$. Compared with a standard VAE ($\beta = 1$), you expect…</p>
+    <ol class="q-src">
+      <li>Sharper reconstructions and a messier latent space</li>
+      <li>Exactly the same model</li>
+      <li>Codes pushed harder toward the prior: often more disentangled axes, blurrier reconstructions</li>
+      <li>Discrete codes</li>
+    </ol>
+    <div class="q-explain">$\beta$ weights the KL term. More weight means stronger regularization of the codes and less capacity for detail.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Generative modeling = learn $p(x)$ well enough to <strong>sample</strong> new data; latent-variable models decode simple codes $z \sim \mathcal{N}(0, I)$.</li>
+    <li>VAE loss = negative ELBO: <strong>reconstruction</strong> error + <strong>KL</strong>$(q(z\mid x)\,\|\,\mathcal{N}(0, I))$.</li>
+    <li>The <strong>reparameterization trick</strong> $z = \mu + \sigma \odot \varepsilon$ makes sampling differentiable.</li>
+    <li>VAEs give smooth latent spaces but blurry samples; β trades detail for regularity.</li>
+    <li><strong>VQ-VAE</strong> snaps codes to a codebook, turning images into tokens for transformers.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"g1-1-a","front":"Write the VAE's ELBO and name its two terms.","back":"$\\log p(x) \\ge \\mathbb{E}_{q(z\\mid x)}[\\log p(x\\mid z)] - \\mathrm{KL}(q(z\\mid x)\\,\\|\\,p(z))$: reconstruction minus the KL to the prior."},
+  {"id":"g1-1-b","front":"What is the reparameterization trick?","back":"Sample $z = \\mu + \\sigma \\odot \\varepsilon$ with $\\varepsilon \\sim \\mathcal{N}(0,I)$, so the randomness is outside the gradient path and the encoder can be trained by backprop."},
+  {"id":"g1-1-c","front":"KL of $\\mathcal{N}(\\mu, \\sigma^2)$ to $\\mathcal{N}(0,1)$?","back":"$\\tfrac12(\\mu^2 + \\sigma^2 - 1 - \\log\\sigma^2)$, summed over dimensions. Zero only at $\\mu = 0$, $\\sigma = 1$."},
+  {"id":"g1-1-d","front":"Why does the KL term make a VAE's latent space good for sampling?","back":"It packs every image's code distribution into the prior's region, overlapping with no holes, so random $z \\sim \\mathcal{N}(0,I)$ land where the decoder was trained."},
+  {"id":"g1-1-e","front":"Why are VAE samples blurry, and what does β-VAE change?","back":"Squared-error reconstruction averages over uncertain details. β-VAE weights the KL by β: β > 1 gives more regular (often disentangled) codes and blurrier output."},
+  {"id":"g1-1-f","front":"What is VQ-VAE and why does it matter today?","back":"A VAE whose code vectors are snapped to a learned codebook (van den Oord et al., 2017), turning images into integer tokens that a transformer can model, as in DALL·E and audio codecs."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/g1-toy.js"></script>
+<script src="../assets/js/anims/g1-1-vae.js"></script>
+<script src="../assets/js/anims/g1-1-latent-playground.js"></script>
+</body>
+</html>

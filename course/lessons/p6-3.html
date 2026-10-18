@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p6-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RNNs &amp; LSTMs (and why Transformers won) · LLMs, Animated</title>
+<meta name="description" content="Recurrent networks read a sequence one step at a time. Backprop through time, vanishing and exploding gradients, gradient clipping, LSTM gates and the cell state, GRUs, seq2seq, why Transformers replaced them, and how linear recurrences came back in state-space models.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>RNNs &amp; LSTMs (and why Transformers won)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Classic deep-learning architectures</span></div>
+<p class="lede">Before Transformers, language models read text the way you do: one word at a time, carrying a running memory. That memory is the <strong>hidden state</strong> of a recurrent neural network. This lesson shows why plain RNNs forget, how the LSTM's gated "conveyor belt" fixed it, why attention still won, and why recurrence is making a comeback.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Run an RNN step by hand, and explain unrolling and backpropagation through time.</li>
+    <li>Explain vanishing and exploding gradients with numbers, and what gradient clipping does and doesn't fix.</li>
+    <li>Describe the LSTM's gates and cell state, and give three reasons Transformers replaced RNNs.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p3-1.html">MLPs</a>: an RNN step is one small neural-network layer, applied again and again. Helpful but optional: <a href="p2-3.html">Backpropagation</a>, since backprop through time is the same chain rule on a longer chain.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A gradient is multiplied by 0.9 at each of 50 time steps on its way back. What's left?</p>
+    <ol class="q-src">
+      <li>About 0.45</li>
+      <li>About 0.005</li>
+      <li>About 0.1</li>
+      <li>Exactly 0</li>
+    </ol>
+    <div class="q-explain">$0.9^{50} \approx 0.0052$. Small factors compound fast. That's the <strong>vanishing gradient</strong> problem, and it's why plain RNNs struggle to learn long-range dependencies.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why can a Transformer be trained much faster on GPUs than an RNN of similar size?</p>
+    <ol class="q-src">
+      <li>It has fewer parameters</li>
+      <li>It doesn't need backpropagation</li>
+      <li>It uses smaller vectors</li>
+      <li>It processes all positions of a training sequence in parallel, while an RNN must go step by step</li>
+    </ol>
+    <div class="q-explain">An RNN can't compute step $t$ until step $t-1$ is done. Attention computes every position at once with big matrix multiplies, which is exactly what GPUs are good at.</div>
+  </div>
+</section>
+
+<h2>A network with a memory</h2>
+<p>An MLP (P3.1) takes a fixed-size input. Sentences aren't fixed-size, and their meaning depends on order. The recurrent answer, developed in the 1980s (Jordan, 1986; Elman, 1990, "Finding Structure in Time"), is to read the sequence one element at a time and keep a running summary, the <strong>hidden state</strong> $h_t$:</p>
+$$h_t = \tanh\!\big(W h_{t-1} + U x_t + b\big)$$
+<p>$x_t$ is the input at step $t$ (say, a token's embedding), $h_{t-1}$ is the previous hidden state (a vector of, say, 512 numbers; $h_0$ is usually zeros), $W$ and $U$ are learned weight matrices, $b$ is a bias, and $\tanh$ squashes every entry into $(-1, 1)$. The crucial detail: <strong>the same $W$, $U$ and $b$ are used at every step</strong>. To predict the next token, a language model adds an output layer, $\mathrm{softmax}(V h_t)$ (P3.2). Mikolov et al. (2010) showed such RNN language models beat the n-gram models of the day.</p>
+<p>Draw one copy of the network per time step and you get the <strong>unrolled</strong> RNN: a very deep feed-forward network whose depth equals the sequence length, with all layers sharing one set of weights.</p>
+
+<h3>Worked example</h3>
+<p>A one-number RNN with $W = 0.5$, $U = 1$, $b = 0$, reading the inputs $x = (1, 0, 0)$: a signal, then silence.</p>
+<ol class="steps">
+  <li>$h_1 = \tanh(0.5 \cdot 0 + 1) = \tanh(1) = 0.762$</li>
+  <li>$h_2 = \tanh(0.5 \times 0.762) = \tanh(0.381) = 0.363$</li>
+  <li>$h_3 = \tanh(0.5 \times 0.363) = \tanh(0.182) = 0.180$. The memory of that first input more than halves at every step.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>Same RNN but $W = 0.9$, inputs $(1, 0)$. $h_2 =$ <span class="blank" data-answer="0.595" data-tol="0.004" data-hint="h₁ = tanh(1) = 0.762, then h₂ = tanh(0.9 × 0.762) = tanh(0.686)."></span></li>
+    <li>An RNN with input size 10 and hidden size 20: how many parameters in $W$, $U$ and $b$ together? <span class="blank" data-answer="620" data-tol="0.5" data-hint="W is 20 × 20, U is 20 × 10, b has 20 entries."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">In an unrolled RNN reading 100 tokens, how many different sets of recurrent weights $W$ are there?</p>
+  <ol class="q-src">
+    <li>100, one per step</li>
+    <li>50</li>
+    <li>One, shared by every step</li>
+    <li>It depends on the batch size</li>
+  </ol>
+  <div class="q-explain">Weight sharing across time is what lets an RNN read sequences of any length, just as a CNN shares a filter across positions (P6.1).</div>
+</div></div>
+
+<h2>Backprop through time: vanishing and exploding gradients</h2>
+<p>To train an RNN, unroll it and run ordinary backpropagation through the whole chain. This is <strong>backpropagation through time</strong> (BPTT; Rumelhart, Hinton &amp; Williams, 1986; Werbos, 1990). The gradient that tells step 1 how it affected the loss at step $T$ passes back through every step in between:</p>
+$$\frac{\partial h_T}{\partial h_1} = \prod_{t=2}^{T} \frac{\partial h_t}{\partial h_{t-1}}, \qquad \frac{\partial h_t}{\partial h_{t-1}} = \mathrm{diag}\!\big(\tanh'(\cdot)\big)\, W$$
+<p>The product runs over the $T-1$ steps, and each factor is the same $W$, scaled by tanh's slope (at most 1). For a one-number RNN each factor is just $W \cdot \tanh'$. Multiply the same number many times and it either shrinks or blows up:</p>
+<ul>
+  <li>$0.9^{50} \approx 0.005$: the gradient from 50 steps back <strong>vanishes</strong>. The network can't learn that a word 50 tokens ago mattered.</li>
+  <li>$1.1^{50} \approx 117$: it <strong>explodes</strong>, and one bad update can wreck training.</li>
+</ul>
+<p>For matrices the same thing happens along directions, governed by the size of $W$'s largest eigenvalues. Sepp Hochreiter analysed this in his 1991 diploma thesis, and Bengio, Simard &amp; Frasconi (1994, "Learning Long-Term Dependencies with Gradient Descent is Difficult") showed it is a basic obstacle for gradient-trained RNNs.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-p6-3.webp" alt="Children playing the telephone game: a picture of an apple at the start of the line becomes fuzzier and fainter by the end." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Remember the <strong>telephone game</strong>? The first child sees a picture of an apple and whispers it to the next child, who whispers to the next, and so on.</p>
+      <p>Each child passes on a slightly fuzzier version. By the end of a long line, the apple is <strong>faint and blurry</strong>, or gone. A plain RNN is that line of children: each step passes the memory on through the same squashing, and old things fade.</p>
+      <p class="math-note">Where it breaks: in the game, mistakes are random. In an RNN the fading follows a rule (multiplying by the same weights each step), which is exactly why a better design, the LSTM, can fix it.</p>
+    </div>
+  </div>
+</details>
+
+<p><strong>Gradient clipping</strong> handles explosions (Pascanu, Mikolov &amp; Bengio, 2013): if the gradient's norm $\lVert g \rVert$ exceeds a threshold $c$, rescale it to length $c$:</p>
+$$g \leftarrow g \cdot \frac{c}{\lVert g \rVert} \quad \text{if } \lVert g \rVert > c$$
+<p>The direction is kept and only the step size is capped. For example, $g = (30, 40)$ has norm 50; clipped to $c = 5$ it becomes $(3, 4)$. LLM pretraining still clips the global gradient norm, typically at 1.0 (<a href="m2-3.html">M2.3</a>). But clipping can't <em>enlarge</em> a vanishing gradient: there's no signal left to rescale. That needed a new architecture.</p>
+
+<section class="playground" id="p6-3-vanish" aria-labelledby="pgv">
+  <h3 id="pgv">Try it: how fast does a gradient vanish or explode?</h3>
+  <p class="math-note" style="margin:0">The gradient's size after travelling back $T$ steps, if every step multiplies it by the same factor. Log scale: each grid line is 10,000×. Shaded: below 0.01 (vanishing) and above 100 (exploding).</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+    <label><span>Factor per step = <output data-out="f">0.90</output></span>
+      <input type="range" data-in="f" min="0.5" max="1.5" step="0.01" value="0.9">
+    </label>
+    <label><span>Steps back, $T$ = <output data-out="t">50</output></span>
+      <input type="range" data-in="t" min="5" max="100" step="1" value="50">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Presets" style="margin-top:12px">
+    <button type="button" class="chip" data-f="0.9" data-t="50" aria-pressed="false">0.9 × 50 steps</button>
+    <button type="button" class="chip" data-f="1.1" data-t="50" aria-pressed="false">1.1 × 50 steps</button>
+    <button type="button" class="chip" data-f="0.99" data-t="50" aria-pressed="false">LSTM-like 0.99</button>
+    <button type="button" class="chip" data-clip aria-pressed="false">Clip norm at 5</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</section>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <ol class="steps">
+    <li>Factor 0.5 per step, 10 steps back. Gradient left (3 decimals): <span class="blank" data-answer="0.001" data-tol="0.0002" data-hint="0.5¹⁰ = 1/1024."></span></li>
+    <li>Factor 1.5 per step, 10 steps: <span class="blank" data-answer="57.7" data-tol="0.1" data-hint="1.5¹⁰ ≈ 57.67."></span></li>
+    <li>Gradient $(6, 8)$ clipped to norm $c = 5$. Its first entry becomes: <span class="blank" data-answer="3" data-tol="0.01" data-hint="‖g‖ = 10, so multiply by 5/10."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Gradient clipping fixes which problem?</p>
+  <ol class="q-src">
+    <li>Exploding gradients: it caps the update's size while keeping its direction</li>
+    <li>Vanishing gradients: it boosts tiny gradients back up</li>
+    <li>Both equally</li>
+    <li>Neither; it only speeds up training</li>
+  </ol>
+  <div class="q-explain">Clipping only shrinks gradients whose norm is above the threshold. A vanished gradient carries almost no information about the distant past, and scaling it wouldn't restore it.</div>
+</div></div>
+
+<h2>LSTM: a conveyor belt with gates</h2>
+<p>Hochreiter &amp; Schmidhuber's <strong>long short-term memory</strong> (1997) adds a second state, the <strong>cell state</strong> $c_t$, which is updated by <em>addition</em> instead of being squashed through a matrix every step. Small learned <strong>gates</strong>, each a sigmoid layer $\sigma(\cdot)$ outputting numbers between 0 and 1, decide what to erase, what to write and what to reveal. The modern version, with the forget gate added by Gers, Schmidhuber &amp; Cummins (2000), is:</p>
+$$\begin{aligned}
+f_t &= \sigma(W_f [h_{t-1}, x_t] + b_f) && \text{forget gate}\\
+i_t &= \sigma(W_i [h_{t-1}, x_t] + b_i) && \text{input gate}\\
+\tilde{c}_t &= \tanh(W_c [h_{t-1}, x_t] + b_c) && \text{candidate}\\
+c_t &= f_t \odot c_{t-1} + i_t \odot \tilde{c}_t && \text{cell state}\\
+o_t &= \sigma(W_o [h_{t-1}, x_t] + b_o) && \text{output gate}\\
+h_t &= o_t \odot \tanh(c_t)
+\end{aligned}$$
+<p>$[h_{t-1}, x_t]$ means the two vectors stacked into one, and $\odot$ is element-wise multiplication. The forget gate says how much of each cell entry to keep, the input gate how much of the new candidate to write, and the output gate how much of the cell to show as $h_t$.</p>
+<p>Look at the cell update. Along the cell state, the derivative from one step to the next is just $f_t$ (plus smaller indirect terms through $h$). If the network learns $f_t \approx 1$ for something worth remembering, the signal and its gradient pass through almost untouched: $0.99^{50} \approx 0.61$, versus $0.9^{50} \approx 0.005$. Hochreiter and Schmidhuber called this the "constant error carousel". It's the same trick as the ResNet skip connection (<a href="p6-2.html">P6.2</a>): an additive path for gradients. Highway networks, a direct precursor of ResNets, borrowed the LSTM's gates. A common practice is to initialise the forget-gate bias to 1, so the cell starts out remembering (recommended by Jozefowicz, Zaremba &amp; Sutskever, 2015).</p>
+
+<figure class="anim wide" data-anim="p6-3-unroll"></figure>
+
+<p>The <strong>GRU</strong> (Cho et al., 2014) is a lighter variant with two gates (update and reset) and no separate cell state. It has three weight blocks where an LSTM has four, and often performs about as well. That four-block structure makes an LSTM roughly 4× the parameters of a plain RNN of the same size: with input 10 and hidden 20, $4 \times 620 = 2{,}480$ (PyTorch reports 2,560, because it keeps two bias vectors per gate).</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Which part of the LSTM lets gradients survive over many steps?</p>
+  <ol class="q-src">
+    <li>The tanh on the candidate $\tilde{c}_t$</li>
+    <li>The additive cell-state update, whose step-to-step derivative is the forget gate $f_t$, which can stay close to 1</li>
+    <li>The output gate, which multiplies gradients by 2</li>
+    <li>Having more parameters than a plain RNN</li>
+  </ol>
+  <div class="q-explain">$c_t = f_t \odot c_{t-1} + \ldots$ gives $\partial c_t / \partial c_{t-1} = f_t$. With $f_t \approx 1$ there's nothing to shrink the gradient, unlike $\tanh'(\cdot)W$ in a plain RNN.</div>
+</div></div>
+
+<h2>Seq2seq, attention, and why Transformers won</h2>
+<p>In 2014, LSTMs took over machine translation. Sutskever, Vinyals &amp; Le ("Sequence to Sequence Learning with Neural Networks") used one deep LSTM, the <strong>encoder</strong>, to read an English sentence into its final hidden state, and a second LSTM, the <strong>decoder</strong>, to generate the French translation from that vector, one word at a time. Their 4-layer LSTMs reached a BLEU score of 34.8 on the WMT'14 English→French task; oddly, simply <em>reversing</em> the source sentence helped, because it put the first source words close to the first target words. Cho et al. (2014) proposed the same encoder–decoder idea with GRUs.</p>
+<p>The weak point was obvious: the whole sentence had to squeeze through one fixed-size vector. Bahdanau, Cho &amp; Bengio (2014, "Neural Machine Translation by Jointly Learning to Align and Translate") let the decoder look back at <em>all</em> the encoder's hidden states at every step and take a weighted average of them, with weights computed from how well each state matched what the decoder needed. That is <strong>attention</strong>, born as an add-on to RNNs. Google's production translation system (GNMT; Wu et al., 2016) was an 8-layer LSTM encoder–decoder with attention.</p>
+<p>A year later came the obvious question: if attention does the useful work, do we still need the recurrence? (Lesson <a href="m1-1.html">M1.1</a> picks up the story.)</p>
+
+<h3>Why Transformers won, and the recurrent comeback</h3>
+<p>"Attention Is All You Need" (Vaswani et al., 2017) dropped recurrence entirely. Three advantages decided it:</p>
+<ol class="steps">
+  <li><strong>Parallel training.</strong> An RNN must compute $h_1$, then $h_2$, then $h_3$: $T$ sequential steps per sequence. Self-attention handles all $T$ positions of a training sequence at once with large matrix multiplies, which keeps a GPU busy.</li>
+  <li><strong>Direct long-range paths.</strong> In an RNN, information from token 1 reaches token 500 through 499 steps of squashing. In attention, any token can read any earlier token in <em>one</em> step: the maximum path length is $O(1)$ instead of $O(T)$.</li>
+  <li><strong>Scale.</strong> Because they train efficiently, Transformers could be made much bigger and fed much more data, and they kept improving (<a href="m2-4.html">scaling laws</a>).</li>
+</ol>
+<p>The price: attention compares every pair of tokens, so compute grows as $T^2$, and generation must keep a <strong>KV cache</strong> that grows with every token (<a href="m1-5.html">M1.5</a>). An RNN carries a fixed-size state, however long the text.</p>
+<p>That trade-off brought recurrence back. The trick is to make the recurrence <strong>linear</strong>, with no tanh between steps, e.g. $h_t = A_t h_{t-1} + B_t x_t$. Linear recurrences can be unrolled algebraically and computed in parallel during training (as a convolution or a parallel scan), yet still run step by step with a constant-size state at inference. Structured state-space models (S4; Gu, Goel &amp; Ré, 2021), <strong>Mamba</strong> (Gu &amp; Dao, 2023), RWKV (Peng et al., 2023), linear attention ("Transformers are RNNs", Katharopoulos et al., 2020) and xLSTM (Beck et al., 2024) all follow this line. As of 2026 several production LLMs are <strong>hybrids</strong> that interleave a few attention layers with many such recurrent layers. You'll meet them in <a href="ar-3.html">State-space models &amp; Mamba</a> and <a href="ar-4.html">Hybrid &amp; linear-attention models</a>.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the vocabulary of today's LLMs comes from the RNN era: next-token language modelling, encoder–decoder, attention, gradient clipping, gating. Gates in particular live on: the SwiGLU MLP in most open LLMs (<a href="p3-1.html">P3.1</a>) multiplies one branch by a learned gate, LSTM-style, and Mamba's selective state update is a gated linear recurrence. Whenever you see a long-context model advertise "constant memory per token", you're looking at the RNN's fixed-size state, made trainable at scale.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What makes modern linear recurrences (state-space models such as Mamba) trainable in parallel, unlike a classic RNN?</p>
+  <ol class="q-src">
+    <li>They use attention internally at every step</li>
+    <li>They have no hidden state</li>
+    <li>The step-to-step update has no nonlinearity, so the whole sequence can be computed with a parallel scan or convolution</li>
+    <li>They only work on short sequences</li>
+  </ol>
+  <div class="q-explain">Without tanh between steps, $h_T$ is an explicit sum of terms that can be computed for all positions at once in training, while inference keeps the RNN's constant-size state.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why do plain RNNs struggle with long-range dependencies, how does an LSTM help, and why did Transformers still win?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Backprop through time multiplies one Jacobian per step, roughly $\tanh' \cdot W$, so gradients from far back shrink (or blow up) exponentially, e.g. $0.9^{50} \approx 0.005$. An LSTM carries a cell state updated by addition, $c_t = f_t c_{t-1} + i_t \tilde{c}_t$, so with forget gates near 1 the signal and its gradient pass through almost unchanged. Transformers still won because attention trains on all positions in parallel and connects any two tokens in one step, which let them scale far further; the cost is quadratic attention and a growing KV cache.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In $h_t = \tanh(W h_{t-1} + U x_t + b)$, what does $W$ do?</p>
+    <ol class="q-src">
+      <li>Maps the input token into the hidden space</li>
+      <li>Turns the hidden state into next-token probabilities</li>
+      <li>Mixes the previous hidden state into the new one: it's the recurrent weight matrix</li>
+      <li>Normalizes the hidden state</li>
+    </ol>
+    <div class="q-explain">$U$ handles the input, $W$ the memory. The gradient's repeated product of $W$ (times tanh slopes) is what vanishes or explodes.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">An LSTM's forget gate outputs 0.95 on a cell entry for 40 steps in a row. Roughly how much of that entry's original value (and gradient) survives along the cell state?</p>
+    <ol class="q-src">
+      <li>About 13%</li>
+      <li>About 95%</li>
+      <li>About 0.01%</li>
+      <li>Exactly 0</li>
+    </ol>
+    <div class="q-explain">$0.95^{40} \approx 0.13$. Gates near 1 keep memories for a long time; 0.99 would keep about 67% after 40 steps.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Interleaving with P6.2: which ResNet idea is closest to the LSTM's cell state?</p>
+    <ol class="q-src">
+      <li>Pooling between stages</li>
+      <li>BatchNorm after each conv</li>
+      <li>The bottleneck $1 \times 1$ convs</li>
+      <li>The skip connection: an additive path that carries the signal and its gradient through many steps almost unchanged</li>
+    </ol>
+    <div class="q-explain">$c_t = f_t c_{t-1} + i_t \tilde{c}_t$ and $y = x + F(x)$ are both "keep what you had, add a correction". Highway networks made the link explicit by putting LSTM-style gates on a skip connection.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">During <em>generation</em>, what is one real advantage an RNN (or SSM) still has over a Transformer?</p>
+    <ol class="q-src">
+      <li>It can look at every earlier token directly</li>
+      <li>Its memory per sequence stays a fixed size, while a Transformer's KV cache grows with every token</li>
+      <li>It trains faster on GPUs</li>
+      <li>It never needs a softmax</li>
+    </ol>
+    <div class="q-explain">The RNN's whole past is squeezed into $h_t$. That's a weakness for exact recall but a strength for memory and speed on very long sequences, which is why hybrids are attractive.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>An RNN updates a hidden state with shared weights: $h_t = \tanh(W h_{t-1} + U x_t + b)$. Unrolled, it's a deep net as long as the sequence.</li>
+    <li>Backprop through time multiplies one factor per step, so gradients <strong>vanish</strong> ($0.9^{50} \approx 0.005$) or <strong>explode</strong> ($1.1^{50} \approx 117$). Clipping tames explosions only.</li>
+    <li>The <strong>LSTM</strong> adds a cell state updated by addition and controlled by forget, input and output gates; the GRU is a lighter two-gate cousin.</li>
+    <li>Seq2seq LSTMs plus <strong>attention</strong> (2014) led to the Transformer (2017), which won through parallel training, $O(1)$ paths between tokens, and scale.</li>
+    <li>Linear recurrences (S4, Mamba, RWKV, xLSTM) bring back the fixed-size state with parallel training; hybrids mix them with attention.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in PyTorch</div>
+    <p>Write an RNN step, measure vanishing gradients through time with autograd, implement gradient clipping, and race a vanilla RNN against an LSTM on a "remember the first token" task. Small and fast; runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p6-3-rnn.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p6-3-a","front":"Write the vanilla RNN update and say what's shared across time.","back":"$h_t = \\tanh(W h_{t-1} + U x_t + b)$. The same $W$, $U$, $b$ are used at every step, so the unrolled network is a deep net with tied weights."},
+  {"id":"p6-3-b","front":"Why do gradients vanish or explode in RNNs?","back":"Backprop through time multiplies one Jacobian per step, $\\mathrm{diag}(\\tanh')W$. Repeated factors below 1 shrink exponentially ($0.9^{50} \\approx 0.005$); above 1 they blow up ($1.1^{50} \\approx 117$). Hochreiter 1991; Bengio et al. 1994."},
+  {"id":"p6-3-c","front":"What does gradient clipping do, and what can't it fix?","back":"If $\\lVert g \\rVert > c$, rescale $g$ to norm $c$ (same direction). It stops exploding updates; it cannot recover vanished gradients. LLM training typically clips at 1.0."},
+  {"id":"p6-3-d","front":"Write the LSTM cell-state update and explain why it helps.","back":"$c_t = f_t \\odot c_{t-1} + i_t \\odot \\tilde{c}_t$, with $h_t = o_t \\odot \\tanh(c_t)$. The additive path has derivative $f_t$; with forget gates near 1, signals and gradients survive many steps."},
+  {"id":"p6-3-e","front":"Three reasons Transformers replaced RNNs.","back":"(1) All positions train in parallel instead of $T$ sequential steps. (2) Any two tokens connect in one attention step ($O(1)$ path length). (3) That efficiency let them scale. Cost: $O(T^2)$ attention and a growing KV cache."},
+  {"id":"p6-3-f","front":"How do state-space models like Mamba bring recurrence back?","back":"They use linear recurrences ($h_t = A_t h_{t-1} + B_t x_t$, no tanh between steps), which train in parallel via scans or convolutions but run with a constant-size state at inference."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p6-3-unroll.js"></script>
+<script src="../assets/js/anims/p6-3-vanish-playground.js"></script>
+</body>
+</html>

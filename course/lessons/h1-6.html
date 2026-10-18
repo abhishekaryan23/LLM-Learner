@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="h1-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The AI family tree · LLMs, Animated</title>
+<meta name="description" content="A map of modern AI: discriminative vs generative models, the main architectures (MLP, CNN, RNN, Transformer, GAN, VAE, diffusion, MoE, state-space models), modalities and learning paradigms, with an interactive family map.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>The AI family tree</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of The story of AI</span></div>
+<p class="lede">You've followed AI's story from 1943 to today. This lesson folds it into a map you can carry around: what kind of output a model produces, how it learns, which architecture it uses and which data it handles. Every model you'll meet later in the course has a place on it.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Tell discriminative from generative models, and supervised, self-supervised and reinforcement learning apart.</li>
+    <li>Name the main architecture families, with what each is good at and roughly when it appeared.</li>
+    <li>Place a new model you read about on the map, and find the course lesson that explains it.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="h1-5.html">H1.5 <em>Today's landscape</em></a>: the shifts since 2023 (open weights, MoE, multimodality, reasoning, agents). It helps to have done the whole H1 module, starting at <a href="h1-1.html">H1.1</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A spam filter labels emails "spam" or "not spam". An image generator draws new pictures. Which pair of words describes them?</p>
+    <ol class="q-src">
+      <li>Supervised and unsupervised</li>
+      <li>Discriminative and generative</li>
+      <li>Small and large</li>
+      <li>Symbolic and neural</li>
+    </ol>
+    <div class="q-explain">A discriminative model tells things apart (assigns labels). A generative model produces new data. You'll see why an LLM counts as generative.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">An LLM is pretrained by predicting the next word of web text. Where do the "correct answers" for that training come from?</p>
+    <ol class="q-src">
+      <li>Thousands of human labellers</li>
+      <li>A reward from a game score</li>
+      <li>The text itself: the next word is the answer</li>
+      <li>A smaller model that labels the data</li>
+    </ol>
+    <div class="q-explain">This is self-supervised learning: the data supplies its own targets, which is why it scales to trillions of words.</div>
+  </div>
+</section>
+
+<h2>Two questions: what does it output, and how does it learn?</h2>
+<p>Back in 1958 there was one kind of model: a perceptron that sorted inputs into two classes. Today there are dozens of families, and new names appear every month. Two questions sort most of them.</p>
+<p><strong>1. What does it output?</strong></p>
+<ul>
+  <li>A <strong>discriminative</strong> model maps an input to a label or a number: "cat or dog?", "spam?", "what's the price?". It learns the boundary between classes, like the perceptron's line. Image classifiers and speech-to-text systems are examples.</li>
+  <li>A <strong>generative</strong> model learns what the data itself looks like, well enough to produce <em>new</em> examples: a paragraph, a face, a melody. LLMs are generative: at each step they output a probability for every possible next token and sample one.</li>
+</ul>
+<p>The line is blurry in practice: you can ask a generative LLM to classify an email by having it write "spam". But the question "is it learning to label, or to create?" still tells you a lot about how a model is trained and judged.</p>
+<p><strong>2. Where do its training signals come from?</strong></p>
+<ul>
+  <li><strong>Supervised learning:</strong> humans provide input–answer pairs (photo → "cat"). Accurate but expensive, so datasets stay relatively small. ImageNet (H1.2) is the classic example.</li>
+  <li><strong>Self-supervised learning:</strong> the data provides its own answers. Hide the next word, a masked word, or part of an image, and predict it. Or add noise and learn to remove it. This is how LLMs and diffusion models can learn from billions of examples nobody labelled.</li>
+  <li><strong>Reinforcement learning (RL):</strong> no answers at all, just a <strong>reward</strong> after trying something: points in a game, a passing test, a human thumbs-up. The model learns by trial and error. AlphaGo (2016) and today's reasoning models (H1.5) rely on it.</li>
+</ul>
+<p>A modern chat model uses all three, in order: <strong>self-supervised</strong> pretraining on raw text, <strong>supervised</strong> fine-tuning on example answers, then <strong>RL</strong> from human or automatic feedback (<a href="m2-2.html">M2.2</a>, <a href="m3-1.html">M3.1</a>, <a href="m3-3.html">M3.3</a>; RL from scratch in <a href="rl-1.html">RL.1</a>).</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A model learns to play chess only from wins and losses in games against itself. Which learning paradigm is that?</p>
+  <ol class="q-src">
+    <li>Reinforcement learning</li>
+    <li>Supervised learning</li>
+    <li>Self-supervised learning</li>
+    <li>It isn't learning; it's a hand-written expert system</li>
+  </ol>
+  <div class="q-explain">There are no correct moves given, only a reward at the end of each game. Learning from rewards by trial and error is reinforcement learning, the approach behind AlphaZero (<a href="rl-6.html">RL.6</a>).</div>
+</div></div>
+
+<h2>Architectures: the main families</h2>
+<p>The <strong>architecture</strong> is how a network's layers are wired. Each family builds in a different assumption about the data, called an <strong>inductive bias</strong>. A good assumption lets a model learn from less data; a weaker one needs more data but is more flexible. Watch the families branch off over time:</p>
+
+<figure class="anim wide" data-anim="h1-6-tree"></figure>
+
+<ul>
+  <li><strong>MLP</strong> (multi-layer perceptron, from 1986): layers where every unit connects to every unit in the next. No built-in assumption about the data. It's the "feed-forward" block inside every transformer (<a href="p3-1.html">P3.1</a>).</li>
+  <li><strong>CNN</strong> (1989): assumes nearby pixels matter together and a pattern means the same thing anywhere. Great for images and spectrograms (<a href="p6-1.html">P6.1</a>, <a href="p6-2.html">P6.2</a>).</li>
+  <li><strong>RNN / LSTM</strong> (1990s): assumes data arrives in order and keeps a running memory. Natural for sequences, but slow to train because steps run one after another (<a href="p6-3.html">P6.3</a>).</li>
+  <li><strong>Transformer</strong> (2017): assumes very little; attention learns which positions matter for each other. Hungry for data, but scales superbly and trains in parallel. It now dominates text, and increasingly images, audio and video (<a href="m1-1.html">M1.1</a>).</li>
+  <li><strong>Mixture of experts</strong> (an old idea from 1991, scaled up from 2017): replaces one big MLP block with many experts and a router. Not a separate family so much as a way to make transformers bigger without making each token more expensive (<a href="m5-3.html">M5.3</a>).</li>
+  <li><strong>State-space models</strong> (S4, 2021; Mamba, 2023): recurrent-style layers designed to train in parallel, whose cost grows only linearly with sequence length, versus attention's square. Often mixed with attention layers in "hybrid" models (<a href="ar-3.html">AR.3</a>, <a href="ar-4.html">AR.4</a>).</li>
+</ul>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why do CNNs typically need less training data than transformers for small image tasks?</p>
+  <ol class="q-src">
+    <li>CNNs have more weights</li>
+    <li>Transformers can't process images at all</li>
+    <li>CNNs use reinforcement learning</li>
+    <li>CNNs build in assumptions about images (local patterns, the same pattern anywhere) that transformers must learn from data</li>
+  </ol>
+  <div class="q-explain">That built-in assumption, the inductive bias, is a head start. With enough data, transformers learn such patterns themselves and often overtake CNNs (<a href="v1-1.html">V1.1</a>).</div>
+</div></div>
+
+<h2>The generative families</h2>
+<p>Generative models face a hard task: produce something new that looks like it came from the real data. Five approaches dominate, and you'll meet each one in depth later.</p>
+<ul>
+  <li><strong>Autoregressive</strong> models generate one piece at a time, each conditioned on everything so far: next token, next token, next token. This is how LLMs write. It also works for images and audio once they're turned into tokens (<a href="m1-5.html">M1.5</a>).</li>
+  <li><strong>VAEs</strong> (variational autoencoders, 2013) squeeze data into a small "latent" code and learn to decode codes back into data. Pick a random code, decode it, and you get a new sample. Today they're often used as the compressor inside image generators (<a href="g1-1.html">G1.1</a>).</li>
+  <li><strong>GANs</strong> (2014) pit a generator against a discriminator. They produced the first photo-realistic faces, but are notoriously unstable to train (<a href="g1-2.html">G1.2</a>).</li>
+  <li><strong>Diffusion</strong> models (2015; practical from 2020) learn to remove a little noise at a time, then generate by starting from pure noise and denoising step by step. Since about 2021 they lead image generation and are central to video (<a href="g1-3.html">G1.3</a>, <a href="g1-4.html">G1.4</a>).</li>
+  <li><strong>Flow matching</strong> (2022) learns a smooth path from noise straight to data, so generation needs fewer steps. Several leading image and video models now use it (<a href="g1-5.html">G1.5</a>).</li>
+</ul>
+<p>These families aren't rivals in separate boxes. A typical 2025-era image generator uses a <strong>VAE</strong> to compress images, a <strong>transformer</strong> as its network, and <strong>diffusion or flow matching</strong> as its training objective (<a href="g1-6.html">G1.6</a>).</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-h1-6.webp" alt="A big tree whose trunk is one glowing node. On its branches sit an owl reading a book, a parrot singing, a chameleon painting, a bat listening and a robot playing a board game." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Think of AI as one big tree. The <strong>glowing trunk</strong> is the artificial neuron, plus the trick for teaching it (backprop). Everything grows out of that.</p>
+      <p>On the branches sit different animals, each good at one thing. The <strong>owl reading</strong> is a language model. The <strong>parrot singing</strong> makes speech and music. The <strong>chameleon painting</strong> makes pictures. The <strong>bat listening</strong> understands sounds, like speech recognition. The <strong>robot playing a board game</strong> learns from wins and losses: reinforcement learning.</p>
+      <p>They all drink from the same roots, so they can learn from each other.</p>
+      <p class="math-note">Where it breaks: real branches don't merge, but AI families do. Today one model can read, listen, speak and draw, as if the owl, parrot and chameleon became a single animal.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">How does a diffusion model generate an image?</p>
+  <ol class="q-src">
+    <li>It writes the image one pixel at a time, left to right</li>
+    <li>It starts from pure noise and removes a little noise at each step until an image appears</li>
+    <li>A generator and a discriminator compete</li>
+    <li>It looks up the closest image in its training set</li>
+  </ol>
+  <div class="q-explain">Training teaches it to remove noise; generation runs that in reverse from random noise. Pixel-by-pixel is autoregressive; generator versus discriminator is a GAN.</div>
+</div></div>
+
+<h2>Modalities, and the whole map</h2>
+<p>The last axis is the <strong>modality</strong>: the kind of data. <strong>Text</strong> (language models), <strong>images</strong> (classification, detection, generation), <strong>audio</strong> (speech recognition, speech synthesis, music), <strong>video</strong> (understanding and generation) and <strong>multimodal</strong> models that mix them.</p>
+<p>Modalities used to have their own families: CNNs for images, RNNs for speech and text. Now one trick unifies them: turn everything into <strong>tokens</strong>. Text becomes word pieces; images become patches; audio becomes short chunks or codec tokens; video becomes space-time patches. Once data is a sequence of tokens, the same transformer can read, and generate, any of it. That's why the lanes merged after 2020, and why "multimodal" is now the norm for frontier models.</p>
+<p>Explore the map below. Tap a family to see what it does, when it appeared and which lesson teaches it; use the chips to highlight a modality, a paradigm or generative versus discriminative models.</p>
+
+<div class="playground" id="h1-6-playground">
+  <h3>Playground: the AI family map</h3>
+  <p class="math-note" style="margin:0">Lines show which family grew from which. Orange outlines are mainly generative, blue ones discriminative or both. Highlight:</p>
+  <div class="chips h1-6-filters" role="group" aria-label="Highlight families by kind, modality or learning paradigm" style="margin-top:8px"></div>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="h1-6-detail" aria-live="polite" style="margin-top:12px;padding:12px 14px;border-radius:12px;background:var(--surface-2)"></div>
+</div>
+
+<div class="why"><strong>Why this map matters:</strong> the rest of the course follows it. The language-model track (M1–M5, AR) goes deep on the transformer branch; Beyond text (V1, G1, A1, MM, VD) covers images, generators, audio, multimodal and video; RL and RS cover reinforcement learning and reasoning; SY and AG show how to build with all of it. When a new model appears on <a href="../whats-new.html">What's new</a>, ask the four questions: what does it output, how does it learn, what architecture, which modalities?</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What lets one transformer handle text, images, audio and video?</p>
+  <ol class="q-src">
+    <li>A separate transformer is hand-designed for each modality</li>
+    <li>Images and audio are first described in words by a person</li>
+    <li>Each modality is turned into a sequence of tokens (word pieces, image patches, audio chunks), which attention can process in the same way</li>
+    <li>Transformers convert everything into pixels</li>
+  </ol>
+  <div class="q-explain">Tokens are the common currency. Patches and audio tokens get embeddings just like words do (<a href="v1-1.html">V1.1</a>, <a href="a1-3.html">A1.3</a>, <a href="vd-1.html">VD.1</a>).</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Place a chat LLM like ChatGPT on the map: output type, learning paradigms, architecture and modality.</p>
+  <div class="model-answer"><strong>Model answer:</strong> It's a generative, autoregressive model (it predicts the next token). It's trained with self-supervised pretraining, then supervised fine-tuning, then reinforcement learning from feedback. Its architecture is a decoder-only transformer, often with mixture-of-experts layers. It handles text and, in many current versions, images and audio too.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which pairing of family and inductive bias is right?</p>
+    <ol class="q-src">
+      <li>Transformer: assumes nearby pixels belong together</li>
+      <li>CNN: assumes data arrives in time order</li>
+      <li>RNN: assumes nothing about the data</li>
+      <li>CNN: local patterns that mean the same thing wherever they appear</li>
+    </ol>
+    <div class="q-explain">CNNs build in locality and "same pattern anywhere". RNNs assume order. Transformers assume the least and learn relationships with attention.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A model is trained to fill in randomly masked patches of photos, with no human labels. What is it?</p>
+    <ol class="q-src">
+      <li>Self-supervised</li>
+      <li>Supervised</li>
+      <li>Reinforcement learning</li>
+      <li>Not machine learning</li>
+    </ol>
+    <div class="q-explain">The hidden patches are the targets, taken from the data itself. That's self-supervised learning, as in masked autoencoders (<a href="v1-3.html">V1.3</a>).</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which family is mainly generative?</p>
+    <ol class="q-src">
+      <li>A CNN image classifier</li>
+      <li>A spam filter</li>
+      <li>A GAN</li>
+      <li>A speech-to-text system</li>
+    </ol>
+    <div class="q-explain">A GAN's generator creates new images. The other three map an input to a label or a transcript, which is discriminative.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">From H1.5: where does mixture of experts sit on the map?</p>
+    <ol class="q-src">
+      <li>It's a new modality, alongside text and images</li>
+      <li>It's an architectural variation, usually inside transformers: a router sends each token to a few expert MLPs</li>
+      <li>It's a learning paradigm, like reinforcement learning</li>
+      <li>It's a type of generative model that replaces diffusion</li>
+    </ol>
+    <div class="q-explain">MoE changes how the MLP blocks are wired, adding capacity without adding much compute per token. It's used in many large LLMs, such as Mixtral and DeepSeek-V3.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Discriminative</strong> models label; <strong>generative</strong> models create (LLMs are generative).</li>
+    <li>Training signals: <strong>supervised</strong> (human labels), <strong>self-supervised</strong> (the data labels itself), <strong>reinforcement learning</strong> (rewards). Chat LLMs use all three.</li>
+    <li>Architectures: MLP (1986), CNN (1989), RNN/LSTM (1990s), Transformer (2017), plus MoE and state-space models. Each builds in a different <strong>inductive bias</strong>.</li>
+    <li>Generators: autoregressive, VAE, GAN, diffusion, flow matching, often combined in one system.</li>
+    <li>Turning every modality into <strong>tokens</strong> let transformers unify text, images, audio and video.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"h1-6-a","front":"Discriminative vs generative model: what's the difference? Give an example of each.","back":"Discriminative: maps input to a label or value (spam filter, image classifier). Generative: learns the data well enough to create new examples (LLM, image generator)."},
+  {"id":"h1-6-b","front":"Supervised, self-supervised and reinforcement learning: where does each get its training signal?","back":"Supervised: human-provided answers. Self-supervised: targets hidden in the data itself (next token, masked patch, added noise). RL: rewards from trial and error."},
+  {"id":"h1-6-c","front":"What is an inductive bias? Give the bias of a CNN, an RNN and a transformer.","back":"An assumption built into the architecture. CNN: local patterns, same pattern anywhere. RNN: sequential order with a running memory. Transformer: very little; attention learns relationships, so it needs more data."},
+  {"id":"h1-6-d","front":"Name five families of generative models.","back":"Autoregressive (LLMs, one token at a time), VAEs (2013), GANs (2014), diffusion (2015; DDPM 2020), flow matching (2022). Modern systems often combine them."},
+  {"id":"h1-6-e","front":"Why could one transformer architecture take over text, images, audio and video?","back":"Every modality can be turned into a sequence of tokens (word pieces, image patches, audio or video tokens), and attention processes any token sequence the same way."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/h1-timeline-kit.js"></script>
+<script src="../assets/js/anims/h1-6-tree.js"></script>
+<script src="../assets/js/anims/h1-6-map-playground.js"></script>
+</body>
+</html>

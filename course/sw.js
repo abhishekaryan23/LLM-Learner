@@ -1,6 +1,6 @@
 /* Offline support: pages are network-first (fresh when online, cached when not);
    static assets are stale-while-revalidate. Bump VERSION to drop old caches entirely. */
-var VERSION = "llmc-v3";
+var VERSION = "llmc-v4";
 var CORE = [
   "./", "./index.html", "./review.html", "./manifest.webmanifest",
   "./assets/css/main.css", "./assets/js/course-data.js", "./assets/js/app.js", "./assets/js/learn.js",

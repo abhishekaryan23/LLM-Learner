@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="rl-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Policy gradients &amp; REINFORCE · LLMs, Animated</title>
+<meta name="description" content="Optimize a policy directly: the objective J(θ), the log-derivative trick, the policy gradient theorem, REINFORCE by hand with a softmax policy, baselines for variance, and why it maps straight onto LLM tokens.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Policy gradients &amp; REINFORCE</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Reinforcement learning</span></div>
+<p class="lede">Q-learning learns values and acts greedily on them. <strong>Policy-gradient</strong> methods skip the middleman: they adjust the policy's own parameters by gradient ascent on expected reward. The simplest version, <strong>REINFORCE</strong>, fits in one line, and it is the ancestor of the algorithms that post-train LLMs today.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write the objective $J(\theta)$ and derive its gradient with the log-derivative trick.</li>
+    <li>Compute a REINFORCE update by hand for a softmax policy.</li>
+    <li>Explain why REINFORCE is noisy, why a baseline helps, and how it all applies to an LLM's tokens.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="rl-1.html">Agents, environments &amp; rewards</a> (RL.1): policies $\pi(a \mid s)$, episodes and returns $G_t$; and <a href="p2-2.html">Gradient descent</a> (P2.2): here we climb instead of descend. Helpful but optional: <a href="p3-2.html">Softmax</a> (P3.2), the policy we differentiate below.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model sampled an answer and got a high reward. Without knowing <em>why</em> it was good, what is a sensible update?</p>
+    <ol class="q-src">
+      <li>Copy the reward into the model's weights</li>
+      <li>Make that sampled answer more likely, in proportion to how good the reward was</li>
+      <li>Make every possible answer more likely</li>
+      <li>Do nothing until you know the true best answer</li>
+    </ol>
+    <div class="q-explain">That's REINFORCE in a sentence: push up the log-probability of what you did, scaled by how well it went. Do it over many samples and good behaviour accumulates.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">An LLM writes a 3-token answer with token probabilities 0.5, 0.4 and 0.1. What is the probability of the whole answer?</p>
+    <ol class="q-src">
+      <li>1.0</li>
+      <li>0.1, the smallest one</li>
+      <li>0.02</li>
+      <li>0.33, the average</li>
+    </ol>
+    <div class="q-explain">Multiply: $0.5 \times 0.4 \times 0.1 = 0.02$. In log space that's a <em>sum</em> of log-probs, which is why policy gradients for text are sums over tokens.</div>
+  </div>
+</section>
+
+<h2>Why learn the policy directly?</h2>
+<p>Value-based methods like Q-learning (RL.3) pick actions with $\arg\max_a Q(s,a)$. That gets awkward fast. With continuous actions (a robot joint's torque) there's no finite list to max over. With a huge discrete action set, like an LLM's 100k-token vocabulary at every step, learning a separate Q-value for each is wasteful. And sometimes the best behaviour is deliberately <em>random</em> (think rock-paper-scissors), which an argmax can't express.</p>
+<p>So in 1992 Ronald Williams proposed something more direct in <em>Simple statistical gradient-following algorithms for connectionist reinforcement learning</em>: give the policy its own parameters $\theta$, so $\pi_\theta(a \mid s)$ is a neural network that outputs action probabilities, and adjust $\theta$ to increase expected return. He called the family <strong>REINFORCE</strong>.</p>
+<p>The quantity to maximize is the <strong>objective</strong>, the expected return of trajectories $\tau = (s_0, a_0, r_1, s_1, a_1, \dots)$ produced by running the policy:</p>
+$$J(\theta) = \mathbb{E}_{\tau \sim \pi_\theta}\big[\,G(\tau)\,\big]$$
+<p>$G(\tau)$ is the trajectory's total (discounted) return. We want $\nabla_\theta J$ so we can do <strong>gradient ascent</strong>, $\theta \leftarrow \theta + \alpha \nabla_\theta J$: the same rule as gradient descent (P2.2) with the sign flipped, because we're climbing reward rather than descending a loss.</p>
+<p>The catch: $\theta$ affects $J$ only through <em>which</em> trajectories get sampled, and sampling isn't differentiable. Nor is the environment: we can't backpropagate through a game engine or a reward model's judgement of a whole essay.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why can't we just backpropagate the reward through the environment to get $\nabla_\theta J$?</p>
+  <ol class="q-src">
+    <li>Rewards are always zero</li>
+    <li>Neural networks can't output probabilities</li>
+    <li>Gradient ascent only works for losses</li>
+    <li>The parameters affect the reward only through sampled actions and the environment's response, neither of which we can differentiate</li>
+  </ol>
+  <div class="q-explain">Sampling a discrete action has no useful derivative, and the environment is a black box. The log-derivative trick (next) gets a gradient anyway.</div>
+</div></div>
+
+<h2>The log-derivative trick and the policy gradient</h2>
+<p>Write the expectation as a sum over trajectories, $J = \sum_\tau p_\theta(\tau)\,G(\tau)$, and use one identity from calculus, $\nabla p = p\,\nabla \log p$ (because $\nabla \log p = \nabla p / p$):</p>
+$$\nabla_\theta J = \sum_\tau \nabla_\theta p_\theta(\tau)\, G(\tau) = \sum_\tau p_\theta(\tau)\, \nabla_\theta \log p_\theta(\tau)\, G(\tau) = \mathbb{E}_{\tau \sim \pi_\theta}\big[\, G(\tau)\, \nabla_\theta \log p_\theta(\tau) \,\big]$$
+<p>An expectation is something we can estimate by <em>sampling</em>: run the policy, compute $G\,\nabla \log p$, average. Now look inside $\log p_\theta(\tau)$. A trajectory's probability is a product of the policy's choices and the environment's responses, so its log is a sum:</p>
+$$\log p_\theta(\tau) = \log p(s_0) + \sum_t \Big[\log \pi_\theta(a_t \mid s_t) + \log P(s_{t+1} \mid s_t, a_t)\Big]$$
+<p>The environment terms don't depend on $\theta$, so their gradient is zero. <strong>We never need a model of the environment.</strong> Only the policy's own log-probabilities remain. Using the fact that an action can't affect rewards that came before it, each action is credited only with the return <em>from then on</em>, $G_t$. That gives the <strong>REINFORCE estimator</strong>:</p>
+$$\nabla_\theta J \approx \sum_{t} \nabla_\theta \log \pi_\theta(a_t \mid s_t)\; G_t$$
+<p>$\nabla_\theta \log \pi_\theta(a_t \mid s_t)$, the <strong>score function</strong>, is the direction in parameter space that makes action $a_t$ more likely; $G_t$ says how much to go that way, and in which direction. The general form, with the true $Q^\pi(s_t,a_t)$ in place of the sampled $G_t$, is the <strong>policy gradient theorem</strong> (Sutton, McAllester, Singh &amp; Mansour, 1999).</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In the derivation, why do the environment's transition probabilities $P(s_{t+1} \mid s_t, a_t)$ drop out?</p>
+  <ol class="q-src">
+    <li>They don't depend on $\theta$, so their log has zero gradient</li>
+    <li>They are always equal to 1</li>
+    <li>REINFORCE assumes a deterministic environment</li>
+    <li>They cancel against the rewards</li>
+  </ol>
+  <div class="q-explain">$\log p_\theta(\tau)$ is a sum, and only the $\log \pi_\theta$ terms involve $\theta$. That's why policy gradients are <strong>model-free</strong>.</div>
+</div></div>
+
+<h2>REINFORCE by hand</h2>
+<p>Take the simplest possible policy: one state (a prompt) and three actions (answer tokens), with a <strong>softmax over logits</strong>, $\pi_\theta(a) = e^{\theta_a} / \sum_b e^{\theta_b}$. For a softmax, the score function has a neat closed form:</p>
+$$\frac{\partial \log \pi_\theta(a)}{\partial \theta_b} = \mathbb{1}[b = a] - \pi_\theta(b)$$
+<p>In words: the sampled action's logit goes up by $1 - \pi(a)$, every other logit goes down by its own probability. (It's the same gradient as cross-entropy in P3.2, with the opposite sign.)</p>
+
+<figure class="anim wide" data-anim="rl-4-reinforce"></figure>
+
+<h3>Worked example</h3>
+<p>Logits $\theta = (0, 0, 0)$ for (Paris, Lyon, Nice), so $\pi = (1/3, 1/3, 1/3)$. Learning rate $\alpha = 0.5$.</p>
+<ol class="steps">
+  <li>Sample Paris; the verifier gives $G = +1$.</li>
+  <li>Score function: $(1 - \tfrac13,\ -\tfrac13,\ -\tfrac13) = (+0.667, -0.333, -0.333)$.</li>
+  <li>Update: $\theta \leftarrow \theta + 0.5 \times 1 \times (+0.667, -0.333, -0.333) = (0.333, -0.167, -0.167)$.</li>
+  <li>New probabilities: $\pi = (0.452, 0.274, 0.274)$. Paris went from 0.33 to 0.45.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>From $\theta = (0.333, -0.167, -0.167)$, $\pi = (0.452, 0.274, 0.274)$, the policy now samples <strong>Lyon</strong> and gets $G = -1$. $\alpha = 0.5$.</p>
+  <ol class="steps">
+    <li>Score-function component for Lyon's own logit, $1 - \pi(\text{Lyon})$: <span class="blank" data-answer="0.726" data-tol="0.003" data-hint="1 − 0.274."></span></li>
+    <li>Change to Lyon's logit, $\alpha \times G \times$ that: <span class="blank" data-answer="-0.363" data-tol="0.003" data-hint="0.5 × (−1) × 0.726."></span></li>
+    <li>Change to Paris's logit, $\alpha \times G \times (0 - \pi(\text{Paris}))$: <span class="blank" data-answer="0.226" data-tol="0.003" data-hint="0.5 × (−1) × (−0.452). Two negatives."></span></li>
+    <li>Lyon's new logit: <span class="blank" data-answer="-0.53" data-tol="0.003" data-hint="−0.167 + (−0.363)."></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">After the update $\pi = (0.529, 0.178, 0.293)$: a bad sample pushes its own probability down and spreads it over the alternatives.</p>
+</section>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-rl-4.webp" alt="A child practising free throws, surrounded by ghost outlines of different throwing styles; the styles that went in are drawn bolder and the misses fade away." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A child is practising free throws. Every throw is a little different: higher, softer, a bit to the left. Nobody tells them the perfect technique.</p>
+      <p>After each throw they just notice: <strong>in</strong> or <strong>out</strong>? The styles that went in get <strong>a bit bolder</strong> in their memory, so they use them more. The ones that missed <strong>fade away</strong>.</p>
+      <p>Throw after throw, the good style becomes the habit. The habit is the <strong>policy</strong>; making successful styles bolder is the <strong>policy gradient</strong>.</p>
+      <p class="math-note">Where it breaks: the child can see <em>why</em> a throw missed. REINFORCE can't: it only gets one score for the whole attempt and must find out by trial, over many attempts, which parts mattered.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A softmax policy has $\pi = (0.7, 0.2, 0.1)$. It samples action 1 (probability 0.7). What is the score-function component for action 3's logit?</p>
+  <ol class="q-src">
+    <li>$+0.9$</li>
+    <li>$-0.1$</li>
+    <li>$+0.3$</li>
+    <li>$0$</li>
+  </ol>
+  <div class="q-explain">For a non-sampled action $b$, $\partial \log \pi(a) / \partial \theta_b = -\pi(b) = -0.1$. The sampled action's own component would be $1 - 0.7 = +0.3$.</div>
+</div></div>
+
+<h2>High variance, and the baseline fix</h2>
+<p>REINFORCE is <strong>unbiased</strong>: on average its estimate points exactly along $\nabla J$. But a single estimate can be wildly off. It multiplies the score function by a return that sums many random rewards, and it credits <em>every</em> action in an episode with the same outcome, including the bad moves in a game that happened to be won. Learning needs many samples and small steps.</p>
+<p>A second problem shows up when all rewards are positive, say rewards between 0.6 and 1.0. Then every sampled action gets pushed <em>up</em>; only the sizes differ, and the useful signal ("this one was better than that one") is buried in noise.</p>
+<p>The fix is a <strong>baseline</strong> $b(s)$ subtracted from the return:</p>
+$$\nabla_\theta J \approx \sum_t \nabla_\theta \log \pi_\theta(a_t \mid s_t)\,\big(G_t - b(s_t)\big)$$
+<p>It doesn't bias the gradient, because the score function averages to zero: $\mathbb{E}_{a \sim \pi}[\nabla \log \pi(a)] = \sum_a \pi(a)\,\frac{\nabla \pi(a)}{\pi(a)} = \nabla \sum_a \pi(a) = \nabla 1 = 0$. So subtracting any $b$ that doesn't depend on the action changes nothing on average, but a good choice shrinks the variance a lot. With rewards 1.0 and 0.6 and baseline $b = 0.8$, the updates become $+0.2$ and $-0.2$: one answer goes up, the other goes down.</p>
+<p>The best simple baseline is the state's value, $b(s) = V(s)$, which turns $G_t - b$ into "how much better than usual did this go?". That quantity is the <strong>advantage</strong>, and learning $V$ alongside the policy is the next lesson's actor-critic. The notebook measures the variance drop directly.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why doesn't subtracting a baseline $b(s)$ bias the policy gradient?</p>
+  <ol class="q-src">
+    <li>Because $b$ is always zero on average</li>
+    <li>Because the baseline is learned with a separate optimizer</li>
+    <li>Because $\mathbb{E}_{a \sim \pi}[\nabla \log \pi(a \mid s)] = 0$, so $b(s)$ times it also averages to zero</li>
+    <li>It does bias it, but only slightly</li>
+  </ol>
+  <div class="q-explain">The score function has zero mean under the policy. As long as $b$ doesn't depend on the action taken, the extra term vanishes in expectation, while the variance can drop a lot.</div>
+</div></div>
+
+<h2>From actions to tokens</h2>
+<p>Everything above transfers to a language model with almost no change. The policy $\pi_\theta$ is the LLM. The "action" is a whole <strong>response</strong> $y = (y_1, \dots, y_T)$ to a prompt $x$, generated token by token, so its log-probability is a sum of token log-probs:</p>
+$$\log \pi_\theta(y \mid x) = \sum_{t=1}^{T} \log \pi_\theta(y_t \mid x, y_{&lt;t}) \quad\Rightarrow\quad \nabla_\theta \log \pi_\theta(y \mid x) = \sum_{t=1}^{T} \nabla_\theta \log \pi_\theta(y_t \mid x, y_{&lt;t})$$
+<p>With a single reward $R(x,y)$ at the end (from a reward model or a verifier), REINFORCE says: sample responses, and nudge up every token of each response in proportion to $R - b$. In code this is just a weighted next-token loss, $-(R - b)\sum_t \log \pi_\theta(y_t \mid \dots)$, the same log-probs you computed in pretraining, now weighted by how good the whole response was.</p>
+<p>REINFORCE-style methods are genuinely used for LLMs. <strong>RLOO</strong> ("REINFORCE leave-one-out"; Ahmadian et al., 2024) samples several responses per prompt and uses the mean reward of the <em>others</em> as each one's baseline. <strong>GRPO</strong> (<a href="m3-5.html">M3.5</a>) uses the group mean too, normalized by the group's standard deviation, inside a PPO-style clipped update. PPO itself (next lesson and <a href="m3-3.html">M3.3</a>) adds a learned value baseline and limits how far each update may move.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> every RL method used to post-train language models, from RLHF with PPO to GRPO on verifiable maths, is a refinement of the REINFORCE gradient: <em>raise the log-probability of sampled responses in proportion to their advantage</em>. The refinements are about the baseline (value model, group mean, leave-one-out) and about step size (clipping, KL to a reference). When a reasoning model "learns to think longer" (<a href="rs-3.html">RS.3</a>), this is the gradient doing it.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">An LLM response has token log-probs $-0.5, -1.0, -0.3$ and gets advantage $R - b = +2$. Which tokens does REINFORCE push up?</p>
+  <ol class="q-src">
+    <li>All three, each by the gradient of its own log-prob scaled by the same $+2$</li>
+    <li>Only the least likely token</li>
+    <li>Only the last token, which earned the reward</li>
+    <li>None, because the log-probs are negative</li>
+  </ol>
+  <div class="q-explain">$\nabla \log \pi(y) = \sum_t \nabla \log \pi(y_t)$, all multiplied by the one advantage. Assigning credit to particular tokens is what value models and process rewards (<a href="rs-4.html">RS.4</a>) try to improve on.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain the REINFORCE update in plain words, and why a baseline helps.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Sample an episode with the current policy, then for every action taken, move the parameters along $\nabla \log \pi_\theta(a_t \mid s_t)$, the direction that makes that action more likely, scaled by the return that followed it; good outcomes get reinforced and bad ones suppressed. Subtracting a baseline such as the average or expected return leaves the gradient unbiased but cuts its variance, because actions are now judged as better or worse than usual instead of all being pushed the same way.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which expression is the REINFORCE estimate of the policy gradient?</p>
+    <ol class="q-src">
+      <li>$\sum_t \nabla_\theta Q(s_t, a_t)$</li>
+      <li>$\sum_t \nabla_\theta \log \pi_\theta(a_t \mid s_t)\, G_t$</li>
+      <li>$\sum_t \nabla_\theta G_t$</li>
+      <li>$\nabla_\theta \max_a \pi_\theta(a \mid s)$</li>
+    </ol>
+    <div class="q-explain">Score function times return-to-go, summed over the episode. Returns can't be differentiated directly; the log-derivative trick moves the gradient onto $\log \pi_\theta$.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Connect to P2.2: in code, frameworks minimize losses. What loss gives the REINFORCE update?</p>
+    <ol class="q-src">
+      <li>$+\,G \sum_t \log \pi_\theta(a_t \mid s_t)$</li>
+      <li>$(G - \pi_\theta)^2$</li>
+      <li>The cross-entropy between $\pi_\theta$ and the uniform distribution</li>
+      <li>$-\,G \sum_t \log \pi_\theta(a_t \mid s_t)$, with $G$ treated as a constant</li>
+    </ol>
+    <div class="q-explain">Gradient <em>descent</em> on $-G \log \pi$ is gradient <em>ascent</em> on $G \log \pi$. The return is a fixed weight (no gradient flows through it).</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">All rewards in a batch are between 5 and 6. Without a baseline, what happens to the probability of each sampled response?</p>
+    <ol class="q-src">
+      <li>The worst ones are pushed down</li>
+      <li>Nothing changes</li>
+      <li>All are pushed up, just by slightly different amounts, so learning is slow and noisy</li>
+      <li>Only the best one moves</li>
+    </ol>
+    <div class="q-explain">Every weight is positive, so every sample is reinforced. Subtracting a baseline of about 5.5 makes the below-average ones go down, which is the signal you want.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Connect to RL.3: what is a key advantage of policy gradients over Q-learning for an LLM?</p>
+    <ol class="q-src">
+      <li>They adjust the token probabilities directly, with no argmax over a 100k-token vocabulary and no Q-value per token to learn</li>
+      <li>They need no samples</li>
+      <li>They never have high variance</li>
+      <li>They require a model of the environment</li>
+    </ol>
+    <div class="q-explain">The LLM already <em>is</em> a stochastic policy over tokens. Policy gradients improve it in place; Q-learning would need values for every token in every context.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Policy gradients maximize $J(\theta) = \mathbb{E}_{\tau \sim \pi_\theta}[G(\tau)]$ by gradient <strong>ascent</strong> on the policy's own parameters.</li>
+    <li>The <strong>log-derivative trick</strong> gives $\nabla J = \mathbb{E}[G\,\nabla \log p_\theta(\tau)]$; environment terms drop out, so no model is needed.</li>
+    <li><strong>REINFORCE</strong> (Williams, 1992): $\nabla J \approx \sum_t \nabla \log \pi_\theta(a_t \mid s_t)\,G_t$. For a softmax, the score is one-hot minus the probabilities.</li>
+    <li>It's unbiased but <strong>high-variance</strong>; a <strong>baseline</strong> $b(s)$ cuts variance without adding bias.</li>
+    <li>For LLMs, a response's log-prob is the <strong>sum of token log-probs</strong>, so every token is pushed by the response's advantage.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Implement a softmax policy and its score function in NumPy, train it with REINFORCE on a bandit with and without a baseline, measure how much the baseline shrinks the gradient's variance, and train a tiny 3-token "LLM" with sequence-level rewards. About 20 minutes.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="rl-4-reinforce.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"rl-4-a","front":"What objective do policy-gradient methods maximize?","back":"$J(\\theta) = \\mathbb{E}_{\\tau \\sim \\pi_\\theta}[G(\\tau)]$, the expected return of trajectories generated by the parameterized policy, by gradient ascent $\\theta \\leftarrow \\theta + \\alpha \\nabla J$."},
+  {"id":"rl-4-b","front":"State the log-derivative trick and what it buys.","back":"$\\nabla p = p\\,\\nabla \\log p$, so $\\nabla \\mathbb{E}_p[G] = \\mathbb{E}_p[G\\,\\nabla \\log p]$: a gradient you can estimate by sampling. Environment terms in $\\log p(\\tau)$ don't depend on $\\theta$, so no model is needed."},
+  {"id":"rl-4-c","front":"Write the REINFORCE gradient estimate.","back":"$\\nabla_\\theta J \\approx \\sum_t \\nabla_\\theta \\log \\pi_\\theta(a_t|s_t)\\,G_t$ (Williams, 1992). With a baseline: replace $G_t$ by $G_t - b(s_t)$."},
+  {"id":"rl-4-d","front":"Score function of a softmax policy?","back":"$\\partial \\log \\pi(a) / \\partial \\theta_b = \\mathbb{1}[b=a] - \\pi(b)$: the sampled action's logit gets $1-\\pi(a)$, every other logit gets $-\\pi(b)$."},
+  {"id":"rl-4-e","front":"Why is a baseline unbiased, and why use one?","back":"$\\mathbb{E}_{a\\sim\\pi}[\\nabla \\log \\pi(a|s)] = \\nabla \\sum_a \\pi(a|s) = 0$, so subtracting $b(s)$ changes nothing on average. It reduces variance, e.g. pushing below-average samples down instead of everything up."},
+  {"id":"rl-4-f","front":"How does REINFORCE apply to an LLM response?","back":"$\\log \\pi(y|x) = \\sum_t \\log \\pi(y_t|x, y_{\\lt t})$, so the gradient is a sum over tokens, each scaled by the response's advantage $R - b$. RLOO and GRPO are variants with group-based baselines."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/rl-4-reinforce.js"></script>
+</body>
+</html>

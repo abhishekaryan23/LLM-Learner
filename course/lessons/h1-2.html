@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="h1-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The deep-learning breakthrough (2006–2014) · LLMs, Animated</title>
+<meta name="description" content="How neural networks came back: convolutional nets and LSTMs, the SVM years, layer-wise pretraining, GPUs and ImageNet, AlexNet in 2012, word2vec, GANs and ResNet.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>The deep-learning breakthrough (2006–2014)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of The story of AI</span></div>
+<p class="lede">By 1990 backprop could train networks with hidden layers. Yet for almost twenty years most researchers preferred other methods. This lesson is about why, and about the three ingredients (depth, data and GPUs) that turned neural networks into the dominant approach by 2012.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain why neural networks lost ground in the 1990s and 2000s, and what convolutional nets and LSTMs added.</li>
+    <li>Name the three ingredients behind AlexNet's 2012 win, with its result.</li>
+    <li>Place word2vec, GANs, VGG, GoogLeNet and ResNet on the timeline, and say what each one introduced.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="h1-1.html">H1.1 <em>From perceptrons to backprop</em></a>: what a perceptron is, why hidden layers matter and what backpropagation does.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In 2012 a neural network called AlexNet won a big image-recognition contest. Roughly how did its error compare with the runner-up's?</p>
+    <ol class="q-src">
+      <li>About the same, slightly lower</li>
+      <li>About 2% lower in relative terms</li>
+      <li>Higher, but it was much faster</li>
+      <li>About 40% lower: 15.3% versus 26.2%</li>
+    </ol>
+    <div class="q-explain">AlexNet's top-5 error was 15.3%, against 26.2% for the next-best entry. A gap that size in one year is why 2012 is called the start of the deep-learning era.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which hardware made training big neural networks practical around 2009–2012?</p>
+    <ol class="q-src">
+      <li>Graphics cards (GPUs), built for video games</li>
+      <li>Quantum computers</li>
+      <li>Faster hard drives</li>
+      <li>Supercomputers built only for AI</li>
+    </ol>
+    <div class="q-explain">GPUs do thousands of simple multiplications at once, which is exactly what neural networks need. Researchers began using gaming graphics cards to train networks many times faster.</div>
+  </div>
+</section>
+
+<h2>Neural nets in the wilderness (1989–2005)</h2>
+<p>Backprop's 1986 revival brought real successes. In <strong>1989</strong>, Yann LeCun and colleagues at Bell Labs trained a <strong>convolutional neural network</strong> to read handwritten ZIP codes. Its key trick: instead of one weight per pixel, a small <strong>filter</strong> (say 5×5 weights) slides across the whole image, looking for the same pattern everywhere, such as an edge or a curve. That means far fewer weights to learn, and a "7" is recognised wherever it sits. The refined <strong>LeNet-5</strong> (1998) was built into commercial systems that read handwritten bank cheques; by some estimates they processed over 10% of US cheques around 2000.</p>
+<p>For sequences like speech or text, researchers used <strong>recurrent networks</strong> (RNNs), which read one item at a time and carry a memory forward. They hit a wall: the learning signal shrinks (or explodes) as backprop carries it back through many time steps. This is the <strong>vanishing gradient</strong> problem, analysed by Sepp Hochreiter (1991) and Yoshua Bengio and colleagues (1994). In <strong>1997</strong>, Hochreiter and Jürgen Schmidhuber's <strong>LSTM</strong> (long short-term memory) added a protected memory line with learned "gates", so information and gradients could survive over long stretches.</p>
+<p>Still, most of the field moved on. <strong>Support vector machines</strong> (Cortes and Vapnik, 1995) found the boundary with the widest margin between classes. Their training had one best answer that could be computed reliably, they came with neat theory, and on the small datasets of the time they usually matched or beat neural nets with far less fiddling. Neural networks were slow to train, needed lots of data that didn't exist yet, and were hard to get working. Researchers from that time recall that neural-network papers were often turned away from major conferences.</p>
+
+<figure class="anim wide" data-anim="h1-2-timeline"></figure>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What problem was the LSTM (1997) designed to fix?</p>
+  <ol class="q-src">
+    <li>Images being too large to fit in memory</li>
+    <li>The perceptron's failure on XOR</li>
+    <li>Gradients vanishing as backprop carries them back through many time steps of a recurrent network</li>
+    <li>Support vector machines being too slow</li>
+  </ol>
+  <div class="q-explain">Plain RNNs forget: the training signal fades over long sequences. LSTM's gated memory line lets it travel much further. You'll build one in <a href="p6-3.html">P6.3 <em>RNNs &amp; LSTMs</em></a>.</div>
+</div></div>
+
+<h2>Three ingredients: depth, data and GPUs (2006–2011)</h2>
+<p>A small group kept going, notably Geoffrey Hinton in Toronto, Yann LeCun in New York and Yoshua Bengio in Montreal (later called the "godfathers of deep learning"). Three things came together.</p>
+<p><strong>1. A way to train deep networks (2006).</strong> Networks with many layers were notoriously hard to train from random weights. Hinton, Simon Osindero and Yee-Whye Teh showed in 2006 that a <strong>deep belief net</strong> could be trained by <strong>pretraining one layer at a time</strong> on unlabelled data, then fine-tuning the whole stack with backprop. Bengio's group showed similar gains with stacked autoencoders. The specific recipe was soon replaced by simpler ones, but it proved depth could work, and "deep learning" became the field's name.</p>
+<p><strong>2. Hardware (around 2009).</strong> Training is mostly multiplying big grids of numbers, and graphics cards (<strong>GPUs</strong>), built to shade millions of pixels for games, do thousands of such multiplications in parallel. In 2009 Rajat Raina, Anand Madhavan and Andrew Ng reported training deep networks up to about 70 times faster on a GPU than on a CPU. NVIDIA's CUDA (2007) had made GPUs programmable for general maths.</p>
+<p><strong>3. Data (2009).</strong> Fei-Fei Li's team released <strong>ImageNet</strong> (Deng et al., 2009): eventually over 14 million photos labelled with more than 20,000 categories, mostly by crowd workers on Amazon Mechanical Turk. From 2010 an annual contest, ILSVRC, asked programs to sort about 1.2 million training images into 1,000 classes.</p>
+<p>Speech recognition moved first: from 2009 to 2012, deep networks cut error rates substantially at Microsoft, Google, IBM and Toronto, and quickly went into products. Vision was next.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why are GPUs such a good fit for neural networks?</p>
+  <ol class="q-src">
+    <li>They have more memory than any CPU</li>
+    <li>Training is mostly huge numbers of independent multiplications, and GPUs do thousands of them in parallel</li>
+    <li>They were designed specifically for AI</li>
+    <li>They run backprop in a single step</li>
+  </ol>
+  <div class="q-explain">GPUs were built for graphics, which is also massively parallel arithmetic. The match was a happy accident. Today's AI chips are descendants of that idea.</div>
+</div></div>
+
+<h2>AlexNet: the 2012 moment</h2>
+<p>In the 2012 ImageNet contest, Alex Krizhevsky, Ilya Sutskever and Geoffrey Hinton entered <strong>AlexNet</strong>, a convolutional network much like LeNet but far bigger: 8 learned layers (5 convolutional, 3 fully connected) and about <strong>60 million weights</strong>, trained on two consumer GPUs for about a week. The contest's main score is <strong>top-5 error</strong>: the share of images where the right label is <em>not</em> among the model's five best guesses. AlexNet scored <strong>15.3%</strong>; the runner-up, built on hand-designed image features, scored <strong>26.2%</strong>.</p>
+<p>Beyond scale, AlexNet popularised tricks that are still standard:</p>
+<ul>
+  <li><strong>ReLU</strong> activations, $\text{relu}(z) = \max(0, z)$: keep positive values, zero out negative ones. Unlike S-shaped curves, ReLU doesn't flatten out for large inputs, so gradients stay healthy and training ran several times faster.</li>
+  <li><strong>Dropout</strong>: during training, randomly switch off half of the units in some layers, so the network can't rely on any single one. It reduces <strong>overfitting</strong> (memorising the training images).</li>
+  <li><strong>Data augmentation</strong>: random crops and flips create more training variety for free.</li>
+</ul>
+
+<h3>Worked example</h3>
+<p>How big was the jump? Compare errors with a <strong>relative reduction</strong>: the drop divided by the old value.</p>
+<ol class="steps">
+  <li>Drop: $26.2 - 15.3 = 10.9$ percentage points.</li>
+  <li>Relative reduction: $10.9 / 26.2 \approx 0.42$, so AlexNet made about <strong>42% fewer</strong> top-5 mistakes than the runner-up.</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<p>The 2014 winner (GoogLeNet) scored 6.7% top-5 error; the 2015 winner (ResNet) scored 3.6%.</p>
+<ol class="steps">
+  <li>Drop in percentage points: <span class="blank" data-answer="3.1" data-tol="0.05" data-hint="6.7 − 3.6."></span></li>
+  <li>Relative reduction, in % (round to the nearest whole number): <span class="blank" data-answer="46" data-tol="1" data-hint="3.1 / 6.7, times 100."></span></li>
+</ol>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Imagine learning to name animals from flashcards. With ten cards and a teacher who can show you one card a minute, you won't get far. Now someone gives you <strong>a million cards</strong> (ImageNet) and a machine that flips <strong>thousands of cards a second</strong> (a GPU), and you have a much bigger brain to fill (a deep network).</p>
+    <p>The way of learning hadn't changed much since 1986. What changed was having enough cards, a fast enough flipper, and a brain big enough to use them.</p>
+    <p class="math-note">Where it breaks: a child needs a handful of examples to learn "cat". Networks in 2012 needed thousands per category, and that hunger for data never fully went away.</p>
+  </div>
+</details>
+
+<p class="math-note">You'll build convolutions in <a href="p5-4.html">P5.4 <em>Convolution</em></a> and <a href="p6-1.html">P6.1 <em>CNNs</em></a>, meet ReLU in <a href="p3-1.html">P3.1 <em>MLPs</em></a>, and overfitting in <a href="p2-4.html">P2.4 <em>Overfitting &amp; data splits</em></a>.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What does dropout do during training?</p>
+  <ol class="q-src">
+    <li>Randomly switches off units so the network can't lean on any single one, which reduces overfitting</li>
+    <li>Removes the hardest images from the training set</li>
+    <li>Drops the learning rate when the loss stops falling</li>
+    <li>Deletes unused weights after training to shrink the model</li>
+  </ol>
+  <div class="q-explain">Each training step sees a randomly thinned network, a bit like training many networks that share weights. At test time all units are used.</div>
+</div></div>
+
+<h2>After AlexNet: words, fakes and very deep nets (2013–2015)</h2>
+<p>Within three years deep learning spread far beyond image classification.</p>
+<ul>
+  <li><strong>word2vec</strong> (Tomas Mikolov et al., Google, 2013) learned a vector for every word by predicting nearby words in billions of words of text. Directions in that space carried meaning: the vector arithmetic king − man + woman lands near queen. Learned word vectors, <strong>embeddings</strong>, are still the first layer of every LLM (<a href="p3-4.html">P3.4</a>).</li>
+  <li><strong>Variational autoencoders</strong> (Kingma and Welling, 2013) and <strong>GANs</strong> (Ian Goodfellow et al., 2014) made networks <em>generate</em> images, not just label them. A GAN trains two networks against each other: a generator makes fakes, a discriminator tries to spot them, and each pushes the other to improve (<a href="g1-1.html">G1.1</a>, <a href="g1-2.html">G1.2</a>).</li>
+  <li><strong>Deeper vision nets.</strong> VGG (Simonyan and Zisserman, 2014) stacked 16–19 layers of small 3×3 filters. GoogLeNet (Szegedy et al., 2014) used 22 layers and won with 6.7% top-5 error. Then <strong>ResNet</strong> (Kaiming He et al., 2015) added <strong>skip connections</strong>: each block outputs $x + F(x)$, its input plus a learned correction, so very deep stacks stay trainable. Its 152-layer version won with <strong>3.6%</strong> (<a href="p6-2.html">P6.2</a>).</li>
+</ul>
+<p>That 3.6% is below the roughly 5.1% measured for one trained person on the same task (Russakovsky et al., 2015). Treat "superhuman" with care, though: that's one annotator on one benchmark, and models still made mistakes no person would.</p>
+<p>Meanwhile, the same ingredients reached other areas. DeepMind's <strong>DQN</strong> learned Atari games from pixels (2013, in <em>Nature</em> in 2015), and <strong>AlphaGo</strong> beat Go champion Lee Sedol in March 2016 by combining deep networks with reinforcement learning and search (<a href="rl-3.html">RL.3</a>, <a href="rl-6.html">RL.6</a>). In language, recurrent networks were about to be stretched to their limit, which is the next lesson.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the 2012 lesson, that a simple method plus much more data and compute beats clever hand-design, is the same bet behind LLM scaling (<a href="m2-4.html">M2.4 <em>Scaling laws</em></a>). And two pieces from this era sit inside every transformer: learned <strong>embeddings</strong> at the input and ResNet-style <strong>residual connections</strong> around every block (<a href="m1-4.html">M1.4</a>).</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">What did ResNet's skip connections change?</p>
+  <ol class="q-src">
+    <li>They let the network skip images it found too hard</li>
+    <li>They replaced convolutions with attention</li>
+    <li>They let a network generate new images</li>
+    <li>Each block adds a learned correction to its input ($x + F(x)$), so networks with 100+ layers stay trainable</li>
+  </ol>
+  <div class="q-explain">With the identity path, a block can at worst learn to do nothing, and gradients have a direct route back through the stack. Every transformer block uses the same trick.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Backprop was known in 1986. Why did the deep-learning breakthrough wait until 2012?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Deep networks need far more data and computation than existed in the 1990s, and were hard to train. By 2012, ImageNet supplied over a million labelled training images, GPUs made training many times faster, and tricks like ReLU and dropout made big networks train well. AlexNet combined them and cut the error by about 40%.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Why did support vector machines beat neural networks on most tasks through the 2000s?</p>
+    <ol class="q-src">
+      <li>Neural networks couldn't represent non-linear boundaries</li>
+      <li>SVM training reliably found one best answer and worked well on the small datasets of the time, while neural nets were slow, data-hungry and fiddly</li>
+      <li>SVMs ran on GPUs and neural networks didn't</li>
+      <li>Backprop had not been invented yet</li>
+    </ol>
+    <div class="q-explain">With little data and slow computers, a reliable, well-understood method won. Neural nets needed the data and compute that only arrived around 2009–2012.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What makes a convolutional layer different from a fully connected one?</p>
+    <ol class="q-src">
+      <li>It has no weights</li>
+      <li>It only works on text</li>
+      <li>A small filter of shared weights slides across the image, detecting the same pattern at every position</li>
+      <li>It processes pixels one at a time, carrying a memory forward</li>
+    </ol>
+    <div class="q-explain">Weight sharing means far fewer parameters and built-in "same pattern anywhere" behaviour. Carrying a memory forward describes a recurrent network instead.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Put these in order: AlexNet, LSTM, ImageNet released, ResNet, LeCun's first convolutional net for ZIP codes.</p>
+    <ol class="q-src">
+      <li>Convolutional net (1989) → LSTM (1997) → ImageNet (2009) → AlexNet (2012) → ResNet (2015)</li>
+      <li>LSTM → convolutional net → AlexNet → ImageNet → ResNet</li>
+      <li>Convolutional net → ImageNet → LSTM → ResNet → AlexNet</li>
+      <li>ImageNet → convolutional net → LSTM → AlexNet → ResNet</li>
+    </ol>
+    <div class="q-explain">1989, 1997, 2009, 2012, 2015. AlexNet needed ImageNet to exist first.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">From H1.1: AlexNet is a deep stack of layers. What made it possible, in principle, to train its hidden layers at all?</p>
+    <ol class="q-src">
+      <li>Rosenblatt's perceptron rule</li>
+      <li>Hand-written expert-system rules</li>
+      <li>Minsky and Papert's proof about XOR</li>
+      <li>Backpropagation, which gives every weight its share of the error</li>
+    </ol>
+    <div class="q-explain">The perceptron rule can't train hidden units because they have no target. Backprop (popularised in 1986) can, and AlexNet was trained with backprop and gradient descent, just on GPUs and far more data.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Convolutional nets</strong> (LeCun, 1989; LeNet-5, 1998) share a small filter across the image. <strong>LSTMs</strong> (1997) fight vanishing gradients in sequences.</li>
+    <li>In the 1990s and 2000s <strong>SVMs</strong> and other methods dominated; neural nets lacked data and compute.</li>
+    <li>Three ingredients: <strong>depth</strong> (layer-wise pretraining, 2006, then better tricks), <strong>GPUs</strong> (around 2009) and <strong>ImageNet</strong> (2009).</li>
+    <li><strong>AlexNet</strong> (2012): 15.3% vs 26.2% top-5 error, with ReLU, dropout and two GPUs. Vision switched to deep learning.</li>
+    <li>Then word2vec (2013), VAEs and GANs (2013–2014), VGG and GoogLeNet (2014), and <strong>ResNet</strong> (2015) with skip connections.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"h1-2-a","front":"What did LeNet (1989/1998) and LSTM (1997) each introduce?","back":"LeNet: convolutional networks, small shared filters sliding over an image, trained with backprop (it read cheques). LSTM: a gated memory line so recurrent nets can learn over long sequences despite vanishing gradients."},
+  {"id":"h1-2-b","front":"Why did neural networks lose ground to SVMs in the 1990s–2000s?","back":"Too little data and compute; neural nets were slow and fiddly to train. SVMs trained reliably to one best answer and did well on small datasets."},
+  {"id":"h1-2-c","front":"What were the three ingredients of the deep-learning breakthrough?","back":"Ways to train deep networks (layer-wise pretraining in 2006, later ReLU, dropout and better initialisation), GPUs for fast parallel maths (around 2009), and big labelled data (ImageNet, 2009)."},
+  {"id":"h1-2-d","front":"AlexNet (2012): result and key tricks?","back":"15.3% top-5 error on ImageNet vs 26.2% for the runner-up (about 42% fewer mistakes). About 60M weights, two GPUs, ReLU, dropout and data augmentation."},
+  {"id":"h1-2-e","front":"What did word2vec, GANs and ResNet contribute (2013–2015)?","back":"word2vec: word vectors whose directions carry meaning (king − man + woman ≈ queen). GANs: generator vs discriminator to create images. ResNet: skip connections, $x + F(x)$, making 152-layer nets trainable (3.6% top-5 error)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/h1-timeline-kit.js"></script>
+<script src="../assets/js/anims/h1-2-timeline.js"></script>
+</body>
+</html>

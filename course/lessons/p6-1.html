@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p6-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>CNNs: filters, pooling &amp; receptive fields · LLMs, Animated</title>
+<meta name="description" content="Convolutional networks from LeNet to VGG: filters shared across the image, parameter counts, pooling, receptive fields that grow with depth, and the edges-to-objects feature hierarchy.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>CNNs: filters, pooling &amp; receptive fields</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Classic deep-learning architectures</span></div>
+<p class="lede">An MLP treats an image as a long, structureless list of numbers. A <strong>convolutional neural network</strong> (CNN) instead slides small learned filters across the picture, reusing the same few weights everywhere. That one idea took computer vision from reading zip codes to beating every hand-built system, and convolutions still sit inside today's image, audio and video models.</p>
+
+<div class="cover"><img src="../assets/img/cover-p6.webp" alt="Illustration: a museum hall with three machines on pedestals: shrinking square filter layers, a looping chain of cells, and an hourglass-shaped network." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Count the parameters of a convolutional layer with channels, and compare it with a dense layer on the same image.</li>
+    <li>Explain what max and average pooling do, and compute a receptive field through a stack of layers.</li>
+    <li>Describe the edges → textures → parts → objects hierarchy and place LeNet-5, AlexNet and VGG on the timeline.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p3-1.html">MLPs</a> (a layer is weights, a bias and a nonlinearity) and <a href="p5-4.html">Convolution</a> (sliding a kernel over a signal, stride, padding and the output-size formula). This lesson stacks those convolutions into a network.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A 3×3 convolutional layer reads a 224×224 RGB image and outputs 64 feature maps. Roughly how many parameters does it have?</p>
+    <ol class="q-src">
+      <li>About 150 million</li>
+      <li>About 3 million</li>
+      <li>About 1,800</li>
+      <li>About 64</li>
+    </ol>
+    <div class="q-explain">Each of the 64 filters has $3 \times 3 \times 3 = 27$ weights plus a bias, so $64 \times 28 = 1{,}792$. The image size doesn't appear at all, because the same filter is reused at every position.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You stack three 3×3 convolutions (stride 1). How large a patch of the input image can one unit in the third layer "see"?</p>
+    <ol class="q-src">
+      <li>3×3</li>
+      <li>7×7</li>
+      <li>9×9</li>
+      <li>27×27</li>
+    </ol>
+    <div class="q-explain">Each extra 3×3 layer widens the view by 2 pixels: 3, then 5, then 7. You'll watch it grow in the animation below.</div>
+  </div>
+</section>
+
+<h2>Why images broke the MLP</h2>
+<p>In 1959 and 1962, David Hubel and Torsten Wiesel recorded single neurons in the cat visual cortex. Each "simple cell" responded to an edge at one orientation in one small patch of the visual field; "complex cells" responded to the same edge anywhere in a slightly larger patch. Kunihiko Fukushima turned that into a layered model, the <strong>Neocognitron</strong> (1980). Yann LeCun and colleagues then trained such a network end to end with backpropagation to read handwritten zip codes (LeCun et al., 1989), which led to <strong>LeNet-5</strong> (LeCun, Bottou, Bengio &amp; Haffner, 1998), later used to read the amounts on bank cheques.</p>
+<p>Why not just use an MLP (P3.1)? Count. A 224×224 colour image is $224 \times 224 \times 3 = 150{,}528$ numbers. A dense layer from that image to a modest 1,000 hidden units needs $150{,}528 \times 1{,}000 + 1{,}000 \approx 150.5$ million parameters, for <em>one</em> layer, and it would have to learn "a vertical edge" separately at every one of the 50,176 pixel positions.</p>
+<p>A convolutional layer makes two assumptions about images instead:</p>
+<ul>
+  <li><strong>Local connectivity:</strong> each output looks only at a small patch (say 3×3), because nearby pixels are what form edges and textures.</li>
+  <li><strong>Weight sharing:</strong> the same filter slides over every position, because an edge is an edge wherever it appears.</li>
+</ul>
+<p>The payoff is huge. A 3×3 conv layer with 64 filters on the same image has just $1{,}792$ parameters, yet it produces 64 full-size feature maps, $224 \times 224 \times 64 \approx 3.2$ million outputs. A dense layer with that many outputs would need about <strong>483 billion</strong> weights. Weight sharing also gives <strong>translation equivariance</strong>: shift the image and the feature maps shift with it.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Which two assumptions let a convolutional layer use so few parameters?</p>
+  <ol class="q-src">
+    <li>Each output looks at a small patch, and the same filter is reused at every position</li>
+    <li>Images are grayscale, and pixels are independent</li>
+    <li>Only the centre of the image matters, and colours can be averaged</li>
+    <li>Filters are fixed by hand, so nothing needs to be learned</li>
+  </ol>
+  <div class="q-explain">Local connectivity plus weight sharing. The filter weights are still learned by gradient descent; they're just shared across all positions.</div>
+</div></div>
+
+<h2>Conv layers and pooling</h2>
+<p>Real images and feature maps have <strong>channels</strong>: 3 for RGB, then 64, 128, … as the network deepens. A filter in a conv layer always spans <em>all</em> input channels: a "3×3 filter" on a 64-channel input is really a $3 \times 3 \times 64$ block of weights. Its output at one position is the dot product of that block with the input patch, plus a bias. Each filter produces one output channel (one <strong>feature map</strong>), so a layer with $C_{out}$ filters outputs $C_{out}$ channels.</p>
+$$\text{params} = k \cdot k \cdot C_{in} \cdot C_{out} \;+\; C_{out}$$
+<p>Here $k$ is the kernel's height and width, $C_{in}$ the number of input channels, $C_{out}$ the number of filters (output channels), and the final $C_{out}$ counts one bias per filter. The output's height and width follow the formula from <a href="p5-4.html">P5.4</a>, $\lfloor (n + 2p - k)/s \rfloor + 1$ for input size $n$, padding $p$ and stride $s$, and <em>don't</em> change the parameter count. After the convolution comes a nonlinearity (ReLU, as in P3.1), applied to every number.</p>
+
+<h3>Worked example</h3>
+<p>The second block of a VGG-style network: a 3×3 conv from 64 channels to 128 channels.</p>
+<ol class="steps">
+  <li>Weights per filter: $3 \times 3 \times 64 = 576$</li>
+  <li>All filters: $576 \times 128 = 73{,}728$</li>
+  <li>Plus 128 biases: $73{,}856$ parameters ✓</li>
+  <li>With padding 1 and stride 1, a $112 \times 112 \times 64$ input becomes $112 \times 112 \times 128$.</li>
+</ol>
+<p>LeNet-5's first layer is the tiny version: six $5 \times 5$ filters on a one-channel $32 \times 32$ image, so $5 \cdot 5 \cdot 1 \cdot 6 + 6 = 156$ parameters and an output of $28 \times 28 \times 6$ (no padding).</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A small CNN takes a $32 \times 32 \times 3$ image. Layer 1 is a $5 \times 5$ conv with 16 filters; layer 2 is a $3 \times 3$ conv with 32 filters.</p>
+  <ol class="steps">
+    <li>Parameters in layer 1: <span class="blank" data-answer="1216" data-tol="0.5" data-hint="5 · 5 · 3 · 16 weights, plus 16 biases."></span></li>
+    <li>Layer 2's filters each span how many input channels? <span class="blank" data-answer="16" data-tol="0.5" data-hint="Layer 1 produced one channel per filter."></span></li>
+    <li>Parameters in layer 2: <span class="blank" data-answer="4640" data-tol="0.5" data-hint="3 · 3 · 16 · 32 weights, plus 32 biases."></span></li>
+  </ol>
+</section>
+
+<h3>Pooling: shrink the map, keep the signal</h3>
+<p>Classic CNNs alternate conv layers with <strong>pooling</strong> layers. A pooling layer slides a small window (usually $2 \times 2$ with stride 2) over each channel separately and replaces the window by one number:</p>
+<ul>
+  <li><strong>Max pooling</strong> keeps the largest value: "was this feature present anywhere in the window?"</li>
+  <li><strong>Average pooling</strong> keeps the mean: "how much of this feature is there, on average?"</li>
+</ul>
+<p>Pooling has <strong>no parameters</strong>. A $2 \times 2$, stride-2 pool halves the height and the width, so it cuts the numbers in a feature map by 4 and makes later layers cheaper. It also buys a little tolerance to small shifts: if an edge moves by one pixel but stays inside the same window, the max doesn't change.</p>
+
+<h3>Worked example: pooling</h3>
+<p>Take one $4 \times 4$ channel, with rows $[1, 3, 2, 0]$, $[4, 2, 1, 1]$, $[0, 1, 5, 6]$ and $[2, 2, 7, 8]$. Split it into four $2 \times 2$ windows:</p>
+<ol class="steps">
+  <li>Top-left window $\{1, 3, 4, 2\}$: max 4, average 2.5</li>
+  <li>Top-right $\{2, 0, 1, 1\}$: max 2, average 1</li>
+  <li>Bottom-left $\{0, 1, 2, 2\}$: max 2, average 1.25</li>
+  <li>Bottom-right $\{5, 6, 7, 8\}$: max 8, average 6.5. So max pooling gives the $2 \times 2$ map $[4, 2]$, $[2, 8]$.</li>
+</ol>
+<p>Modern designs often drop separate pooling layers and use a <strong>stride-2 convolution</strong> to downsample instead, so the network learns how to shrink. And instead of flattening the last feature map into huge dense layers (AlexNet and VGG put most of their parameters there), most CNNs since GoogLeNet (2014) end with <strong>global average pooling</strong>: average each channel over the whole map, giving one number per channel (Lin et al., 2013, "Network in Network").</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A $56 \times 56 \times 128$ feature map goes through a $2 \times 2$ max pool with stride 2. What comes out?</p>
+  <ol class="q-src">
+    <li>$56 \times 56 \times 64$</li>
+    <li>$28 \times 28 \times 128$</li>
+    <li>$28 \times 28 \times 64$</li>
+    <li>$112 \times 112 \times 128$</li>
+  </ol>
+  <div class="q-explain">Pooling works on each channel separately, so the channel count stays 128, and stride 2 halves height and width.</div>
+</div></div>
+
+<h2>Receptive fields grow with depth</h2>
+<p>The <strong>receptive field</strong> of a unit is the patch of the <em>input image</em> that can influence it. In the first layer it's just the kernel, $3 \times 3$. But a second-layer unit reads a $3 \times 3$ patch of first-layer units, each of which saw its own $3 \times 3$ patch, and those patches overlap. Watch it grow:</p>
+
+<figure class="anim wide" data-anim="p6-1-receptive"></figure>
+
+<p>For a stack of $L$ stride-1 layers with kernel size $k$, the receptive field is $1 + L(k-1)$. Strides and pooling make it grow faster: every layer after a stride-$s$ step adds $(k-1)$ times the product of all earlier strides. In symbols, with $j$ the running product of strides ("jump") before the current layer:</p>
+$$r \leftarrow r + (k - 1)\cdot j, \qquad j \leftarrow j \cdot s$$
+<p>starting from $r = 1$ and $j = 1$. Here $r$ is the receptive field so far (in input pixels), $k$ and $s$ are the current layer's kernel size and stride, and $j$ is how many input pixels one step in the current feature map spans.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Imagine a tall building full of detectives looking at a big painting. Each detective on the ground floor looks through a tiny window at just a few dabs of paint and shouts "I see a line!" or "I see red!"</p>
+    <p>Each detective on the next floor doesn't look at the painting at all. They listen to a few ground-floor detectives standing side by side, so they learn about a <strong>bigger piece</strong>: "a corner!" One floor higher, a detective hears about corners and curves and says "an eye!". At the top, someone says "a cat!"</p>
+    <p class="math-note">Where it breaks: real filters aren't hand-assigned jobs like "find red". They are learned, and many respond to blends of things that are hard to name.</p>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>conv 3×3 (stride 1) → max pool 2×2 (stride 2) → conv 3×3 → conv 3×3.</p>
+<ol class="steps">
+  <li>conv: $r = 1 + 2 \cdot 1 = 3$, $j$ stays 1</li>
+  <li>pool ($k = 2$, $s = 2$): $r = 3 + 1 \cdot 1 = 4$, then $j = 2$</li>
+  <li>conv: $r = 4 + 2 \cdot 2 = 8$</li>
+  <li>conv: $r = 8 + 2 \cdot 2 = 12$. Without the pool, three convs would only reach 7.</li>
+</ol>
+<p>Run the same rule through all 13 conv and 5 pooling layers of VGG-16 and the last conv layer's units each see a $196 \times 196$ patch: almost the whole $224 \times 224$ image. In practice the <strong>effective</strong> receptive field is smaller: pixels near the centre reach a unit through many more paths than pixels at the edge, so the influence is roughly Gaussian (Luo et al., 2016).</p>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <ol class="steps">
+    <li>Two stacked 5×5 convs, stride 1. Receptive field: <span class="blank" data-answer="9" data-tol="0.5" data-hint="1 + L(k − 1) with L = 2, k = 5."></span></li>
+    <li>conv 3×3 with <em>stride 2</em>, then two 3×3 convs with stride 1. Receptive field: <span class="blank" data-answer="11" data-tol="0.5" data-hint="First layer: r = 3, then j = 2. Each later 3×3 layer adds 2 · 2 = 4."></span></li>
+    <li>Weights in three stacked 3×3 layers with $C$ channels in and out, as a multiple of $C^2$ (ignore biases): <span class="blank" data-answer="27" data-tol="0.5" data-hint="Each layer has 3 · 3 · C · C = 9C² weights."></span> (a single 7×7 layer with the same receptive field has $49C^2$)</li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">VGG replaced big 7×7 filters with stacks of three 3×3 filters. Which is <em>not</em> a benefit of that swap?</p>
+  <ol class="q-src">
+    <li>Fewer weights: $27C^2$ instead of $49C^2$</li>
+    <li>Three nonlinearities instead of one, so the stack can compute more complex functions</li>
+    <li>A larger receptive field than the 7×7 layer</li>
+    <li>The same 7×7 receptive field</li>
+  </ol>
+  <div class="q-explain">Three 3×3 layers see exactly 7×7, the same as one 7×7 layer. The gains are fewer weights and more nonlinearity (Simonyan &amp; Zisserman, 2014).</div>
+</div></div>
+
+<h2>From edges to objects: LeNet, AlexNet, VGG</h2>
+<p>What do the layers learn? Zeiler &amp; Fergus (2014, "Visualizing and Understanding Convolutional Networks") projected the activations of a trained ImageNet CNN back into pixel space and found a clear <strong>feature hierarchy</strong>:</p>
+<ol class="steps">
+  <li><strong>Layer 1:</strong> oriented edges and colour blobs, much like Hubel and Wiesel's simple cells.</li>
+  <li><strong>Layers 2–3:</strong> corners, curves, then repeated textures and patterns (mesh, fur, text-like stripes).</li>
+  <li><strong>Layer 4:</strong> object parts, such as dog faces and bird legs.</li>
+  <li><strong>Layer 5:</strong> whole objects, recognised across different poses.</li>
+</ol>
+<p>Small receptive fields can only see edges; large ones can see objects. The hierarchy is the receptive-field story, learned.</p>
+<p>Three networks mark the path:</p>
+<ul>
+  <li><strong>LeNet-5 (1998):</strong> about 60,000 parameters; conv → subsample → conv → subsample → fully connected, on $32 \times 32$ digits.</li>
+  <li><strong>AlexNet (Krizhevsky, Sutskever &amp; Hinton, 2012):</strong> about 60 million parameters, five conv layers plus three dense ones, trained on two GPUs with ReLU, dropout and data augmentation. It won the ImageNet challenge (ILSVRC-2012) with a top-5 error of 15.3%, against 26.2% for the runner-up. That gap is usually taken as the start of the deep-learning era.</li>
+  <li><strong>VGG (Simonyan &amp; Zisserman, 2014):</strong> 16–19 layers, using nothing but 3×3 convs and 2×2 pools. VGG-16 has about 138 million parameters, most of them in its final dense layers. It took second place in ILSVRC-2014 classification behind GoogLeNet, and its plain design made it a favourite backbone.</li>
+</ul>
+<p>Going much deeper than VGG made training <em>worse</em>, not better. Fixing that is the next lesson, <a href="p6-2.html">ResNets &amp; normalization</a>.</p>
+
+<div class="why"><strong>Where CNNs live today:</strong> Vision Transformers (<a href="v1-1.html">V1.1</a>) took over much of image recognition after 2020, and their very first step, cutting the image into patches and projecting each one, is usually implemented as a convolution whose stride equals its kernel size. Modernised CNNs such as ConvNeXt (Liu et al., 2022) remain competitive. The U-Net (Ronneberger et al., 2015), a CNN that downsamples and then upsamples, was the denoiser in most image diffusion models before diffusion transformers (<a href="g1-3.html">G1.3</a>). Convolutions also front speech models (Whisper's encoder begins with two 1-D convs, <a href="a1-2.html">A1.2</a>) and run inside neural audio codecs (<a href="a1-3.html">A1.3</a>) and Mamba-style sequence layers (<a href="ar-3.html">AR.3</a>).</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In Zeiler &amp; Fergus's visualisations, why do early layers show edges and later layers show object parts?</p>
+  <ol class="q-src">
+    <li>Later units have much larger receptive fields, so they can combine earlier features into bigger patterns</li>
+    <li>Later layers use bigger kernels than early ones</li>
+    <li>Engineers hand-designed the later filters to look for objects</li>
+    <li>Pooling removes all the edges before the later layers</li>
+  </ol>
+  <div class="q-explain">With small kernels everywhere (as in VGG), a deeper unit's view is assembled from many smaller views, so it can respond to larger structures built from the features below.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does a CNN need far fewer parameters than an MLP on images, and how does a deep CNN still manage to recognise whole objects?</p>
+  <div class="model-answer"><strong>Model answer:</strong> A conv layer connects each output only to a small local patch and reuses the same filter at every position, so its parameter count is $k \cdot k \cdot C_{in} \cdot C_{out} + C_{out}$, independent of the image size. Stacking layers (plus pooling or strides) makes each unit's receptive field grow, so deeper units combine edges into textures, parts and finally whole objects.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">How many parameters does a 1×1 conv from 256 channels to 64 channels have, with biases?</p>
+    <ol class="q-src">
+      <li>320</li>
+      <li>16,448</li>
+      <li>147,520</li>
+      <li>It depends on the image size</li>
+    </ol>
+    <div class="q-explain">$1 \cdot 1 \cdot 256 \cdot 64 + 64 = 16{,}448$. A 1×1 conv mixes channels at each pixel without looking at neighbours: it's a small dense layer applied at every position. ResNet's bottleneck blocks (next lesson) use them to shrink and re-grow channels.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What does a 2×2 max-pooling layer learn during training?</p>
+    <ol class="q-src">
+      <li>One weight per window position</li>
+      <li>A separate weight for each channel</li>
+      <li>The best window size</li>
+      <li>Nothing: it has no parameters</li>
+    </ol>
+    <div class="q-explain">Pooling is a fixed operation. Gradients pass through it (for max pooling, only to the input that was largest), but there is nothing to update.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">conv 3×3 → conv 3×3 → max pool 2×2 (stride 2) → conv 3×3, all convs with stride 1. What is the final receptive field?</p>
+    <ol class="q-src">
+      <li>7</li>
+      <li>8</li>
+      <li>10</li>
+      <li>12</li>
+    </ol>
+    <div class="q-explain">$r$: 3, 5, then the pool adds 1 (to 6) and sets $j = 2$, then the last conv adds $2 \times 2 = 4$: 10.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Interleaving with P3.1: a conv layer is "a dense layer with constraints". Which constraints?</p>
+    <ol class="q-src">
+      <li>Most weights are forced to zero (only a local patch connects), and the remaining weights are tied across positions</li>
+      <li>All weights must be positive</li>
+      <li>There is no nonlinearity after a conv layer</li>
+      <li>Each output connects to every input with its own unique weight</li>
+    </ol>
+    <div class="q-explain">Write a conv as a big matrix multiply and you get a sparse matrix whose rows repeat the same few weights, shifted. It's still followed by a nonlinearity like ReLU, just as in an MLP.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Conv layers use <strong>local connectivity</strong> and <strong>weight sharing</strong>: parameters $= k \cdot k \cdot C_{in} \cdot C_{out} + C_{out}$, whatever the image size.</li>
+    <li>Each filter spans all input channels and produces one output channel (feature map).</li>
+    <li><strong>Pooling</strong> (max or average) downsamples each channel with no parameters; stride-2 convs and global average pooling are the modern variants.</li>
+    <li>Stacked layers grow the <strong>receptive field</strong>: $1 + L(k-1)$ at stride 1, faster after strides. Three 3×3 layers see 7×7 with fewer weights than one 7×7.</li>
+    <li>LeNet-5 (1998) → AlexNet (2012) → VGG (2014): deeper nets, small filters, learned edges → textures → parts → objects.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in PyTorch</div>
+    <p>Count conv parameters, compute output sizes and receptive fields, then build a small CNN and train it on a synthetic shapes dataset generated in the notebook, to over 90% accuracy in under a minute on a CPU. Free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p6-1-cnn.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p6-1-a","front":"Parameter count of a conv layer with kernel $k$, $C_{in}$ input and $C_{out}$ output channels?","back":"$k \\cdot k \\cdot C_{in} \\cdot C_{out} + C_{out}$ (one bias per filter). The image size doesn't appear, because each filter is shared across all positions."},
+  {"id":"p6-1-b","front":"What two assumptions make CNNs efficient on images?","back":"Local connectivity (each output looks at a small patch) and weight sharing (the same filter at every position), which also gives translation equivariance."},
+  {"id":"p6-1-c","front":"Max vs average pooling: what do they do, and how many parameters do they have?","back":"Each slides a window (often 2×2, stride 2) over every channel and keeps the max or the mean, halving height and width. Neither has parameters."},
+  {"id":"p6-1-d","front":"Receptive field of $L$ stacked $k \\times k$ stride-1 conv layers? And the general rule?","back":"$1 + L(k-1)$, e.g. three 3×3 layers see 7×7. In general, $r \\leftarrow r + (k-1)\\,j$ and $j \\leftarrow j \\cdot s$ layer by layer, starting from $r = j = 1$."},
+  {"id":"p6-1-e","front":"What feature hierarchy did Zeiler & Fergus (2014) find in a trained CNN?","back":"Layer 1: edges and colour blobs. Layers 2–3: corners, textures, patterns. Layer 4: object parts. Layer 5: whole objects across poses."},
+  {"id":"p6-1-f","front":"LeNet-5, AlexNet, VGG: year and one key fact each.","back":"LeNet-5 (1998): ~60k params, digits and cheques. AlexNet (2012): ~60M params, GPUs + ReLU + dropout, ILSVRC-2012 top-5 error 15.3% vs 26.2%. VGG (2014): 16–19 layers of only 3×3 convs, ~138M params."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p6-1-receptive.js"></script>
+</body>
+</html>

@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="g1-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Flow matching &amp; rectified flow · LLMs, Animated</title>
+<meta name="description" content="Flow matching and rectified flow: straight-line paths from noise to data, regressing a velocity, Euler sampling, reflow, and the consistency and distillation methods behind 1–4 step image generators.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Flow matching &amp; rectified flow</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Image generation</span></div>
+<p class="lede">Diffusion walks from noise to data along a winding road. Flow matching asks a simpler question: <strong>what if each training example travelled in a straight line?</strong> The answer is a cleaner objective, used by Stable Diffusion 3 and many 2025–26 image and video models, and a path toward generating images in a handful of steps.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write the flow-matching interpolation and its velocity target, and compute both for a pair of points.</li>
+    <li>Sample with Euler steps and explain why one step fails on the plain model.</li>
+    <li>Explain reflow, consistency models and distillation as routes to 1–4 step generation.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> this lesson builds on <a href="g1-3.html">G1.3 Diffusion from scratch</a> (noising, noise prediction, the probability-flow ODE and DDIM). Helpful but optional: <a href="p1-4.html">P1.4 Gradients</a> (velocity as a direction field) and <a href="g1-4.html">G1.4 Latent diffusion &amp; guidance</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. Wrong guesses help the right answer stick.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">You may move a point from A to B in one big step, following the direction you face at A. When does that land exactly on B?</p>
+    <ol class="q-src">
+      <li>When the path from A to B is a straight line</li>
+      <li>Always</li>
+      <li>Only when A and B are close to the origin</li>
+      <li>Never</li>
+    </ol>
+    <div class="q-explain">One step only follows the starting direction. On a straight path that's enough; on a curved one you overshoot or cut the corner. That's the core of this lesson.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Some 2024–26 image models generate in 1 to 4 steps instead of 25–50. Usually that's because…</p>
+    <ol class="q-src">
+      <li>They are much smaller networks</li>
+      <li>They skip the text encoder</li>
+      <li>They were distilled or straightened from a many-step model, so each step can cover more ground</li>
+      <li>They generate at lower resolution and upscale</li>
+    </ol>
+    <div class="q-explain">Few-step models are typically trained from a slower teacher (reflow, consistency distillation, adversarial distillation) so their paths can be crossed in a few jumps.</div>
+  </div>
+</section>
+
+<h2>From noise to data along a path</h2>
+<p>G1.3 ended with an idea from Song et al. (2021): a diffusion model also defines a deterministic <strong>ODE</strong>, a velocity field that carries noise smoothly onto data. Models that generate by integrating an ODE are called <strong>continuous normalizing flows</strong> (Chen et al., 2018, "Neural ODEs"), but they used to be expensive to train, because every training step simulated the ODE.</p>
+<p>In 2022, three groups independently found a <em>simulation-free</em> way to train such a flow: <strong>flow matching</strong> (Lipman et al.), <strong>rectified flow</strong> (Liu, Gong &amp; Liu, "Flow Straight and Fast") and <strong>stochastic interpolants</strong> (Albergo &amp; Vanden-Eijnden). The simplest version picks a noise sample $x_0 \sim \mathcal{N}(0, I)$ and a data sample $x_1$, and joins them with a straight line:</p>
+$$x_t = (1 - t)\,x_0 + t\,x_1, \qquad t \in [0, 1]$$
+<p>At $t = 0$ you're at the noise, at $t = 1$ at the data. Moving along this line at constant speed means the <strong>velocity</strong> is the same everywhere on it:</p>
+$$\frac{dx_t}{dt} = x_1 - x_0$$
+<p>Generation then means solving the ODE $\frac{dx}{dt} = v_\theta(x, t)$ from a fresh noise sample at $t = 0$ to $t = 1$, where $v_\theta$ is a network trained to predict that velocity. One warning before you read papers: conventions differ. Stable Diffusion 3 (Esser et al., 2024) runs time the other way, with $t = 0$ at the data and $t = 1$ at the noise. The math is identical with $t$ flipped.</p>
+
+<figure class="anim wide" data-anim="g1-5-paths"></figure>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In flow matching with $x_t = (1-t)\,x_0 + t\,x_1$, what velocity does a single training pair ask the network to predict?</p>
+  <ol class="q-src">
+    <li>The noise $x_0$ alone</li>
+    <li>The constant $x_1 - x_0$, pointing from the noise to the data</li>
+    <li>$x_t$ itself</li>
+    <li>A velocity that grows with $t$</li>
+  </ol>
+  <div class="q-explain">A straight line at constant speed has a constant velocity: end minus start. Diffusion's per-pair path is an arc, so its direction keeps changing.</div>
+</div></div>
+
+<h2>Training and sampling</h2>
+<p>The flow-matching loss is plain regression, just like DDPM's:</p>
+$$\mathcal{L}_{\text{FM}} = \mathbb{E}_{t,\,x_0,\,x_1}\Big[\big\|\,v_\theta(x_t, t) - (x_1 - x_0)\big\|^2\Big]$$
+<ol class="steps">
+  <li>Sample a data point $x_1$, a noise point $x_0 \sim \mathcal{N}(0, I)$ and a time $t$ (uniform in $[0,1]$ is the simplest; SD3 favoured middle times with a logit-normal distribution).</li>
+  <li>Form $x_t = (1-t)\,x_0 + t\,x_1$.</li>
+  <li>Predict $v_\theta(x_t, t)$, compare with $x_1 - x_0$, take a gradient step.</li>
+</ol>
+<p>A subtle point: many different pairs pass through the same $x_t$, each wanting a different velocity, so no network can match them all. The loss is minimized by the <strong>average</strong>: $v^*(x, t) = \mathbb{E}[x_1 - x_0 \mid x_t = x]$. Lipman et al. and Liu et al. proved that following this average velocity field still carries the whole noise distribution onto the whole data distribution. You get a valid generator, but its paths are no longer the straight training lines; they bend where lines cross, as the animation showed.</p>
+<p>Flow matching and diffusion are close relatives: with Gaussian noise, both learn the same kind of object and can be converted into each other. They differ in the path between noise and data and in how the loss weights different times. Flow matching's appeal is simplicity: no noise schedule to design, one line of interpolation, one regression target.</p>
+
+<h3>Worked example</h3>
+<p>Noise $x_0 = (0.4, -1.2)$, data $x_1 = (1.0, 0.5)$, at $t = 0.25$:</p>
+<ol class="steps">
+  <li>$x_t = 0.75\,(0.4, -1.2) + 0.25\,(1.0, 0.5) = (0.30, -0.90) + (0.25, 0.125) = (0.55, -0.775)$</li>
+  <li>Target velocity: $x_1 - x_0 = (0.6, 1.7)$</li>
+  <li>Check: one Euler step of size $1 - t = 0.75$ with that velocity lands at $(0.55 + 0.45,\; -0.775 + 1.275) = (1.0, 0.5) = x_1$. On a straight path, one step is exact.</li>
+</ol>
+
+<section class="card" aria-labelledby="fd1">
+  <div class="card-label" id="fd1">Your turn · faded example</div>
+  <p>Noise $x_0 = (-0.8, 0.6)$, data $x_1 = (1.2, 0.2)$, at $t = 0.5$.</p>
+  <ol class="steps">
+    <li>First component of $x_t$: <span class="blank" data-answer="0.2" data-tol="0.005" data-hint="0.5 × (−0.8) + 0.5 × 1.2."></span></li>
+    <li>First component of the target velocity $x_1 - x_0$: <span class="blank" data-answer="2" data-tol="0.005" data-hint="1.2 − (−0.8)."></span></li>
+    <li>After an Euler step of $\Delta t = 0.25$, the first component is <span class="blank" data-answer="0.7" data-tol="0.005" data-hint="0.2 + 0.25 × 2.0."></span></li>
+  </ol>
+</section>
+
+<h3>Sampling with Euler steps</h3>
+<p>To sample, start at $x_0 \sim \mathcal{N}(0, I)$ and repeat the simplest ODE solver, an <strong>Euler step</strong>, from $t = 0$ to $t = 1$:</p>
+$$x_{t + \Delta t} = x_t + \Delta t \; v_\theta(x_t, t)$$
+<p>With $N$ steps, $\Delta t = 1/N$ and you make $N$ network calls. If the paths were perfectly straight, $N = 1$ would be exact. They aren't. At $t = 0$ the noise tells you nothing about which data point you'll end up at, so the average velocity is $v^*(x_0, 0) = \mathbb{E}[x_1] - x_0$: one step sends <em>every</em> sample to the mean of the data. That is the toy version of the blurry "average image" one-step models produce. Try it:</p>
+
+<div class="playground" id="fm-playground">
+  <h3>Playground: how many steps?</h3>
+  <p class="math-note" style="margin:0">100 samples from the exact flow-matching velocity of the toy data, integrated with $N$ Euler steps. Blue lines trace 12 of the paths.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Euler steps N = <output>4</output></span>
+      <input type="range" min="1" max="32" step="1" value="4" aria-describedby="fm-hint">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Step presets" style="margin-top:12px">
+    <button type="button" class="chip" data-n="1" aria-pressed="false">1</button>
+    <button type="button" class="chip" data-n="2" aria-pressed="false">2</button>
+    <button type="button" class="chip" data-n="4" aria-pressed="false">4</button>
+    <button type="button" class="chip" data-n="8" aria-pressed="false">8</button>
+    <button type="button" class="chip" data-n="16" aria-pressed="false">16</button>
+    <button type="button" class="chip" data-n="32" aria-pressed="false">32</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="fm-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p>On this toy, a handful of steps gets most of the way and 16 or so is indistinguishable from the exact flow. Real image models use better solvers than Euler (Heun's method, DPM-Solver-style multistep methods) and typically 20–50 steps for full-quality flow or diffusion sampling, though the right number depends on the model.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why does a single Euler step from pure noise send every sample to the mean of the data?</p>
+  <ol class="q-src">
+    <li>At $t = 0$ the noise carries no information about the destination, so the learned (average) velocity is $\mathbb{E}[x_1] - x_0$</li>
+    <li>Because Euler steps always shrink toward the origin</li>
+    <li>Because the network is undertrained</li>
+    <li>Because the data distribution has only one mode</li>
+  </ol>
+  <div class="q-explain">The best guess of the destination from pure noise is the data mean. Following that one direction all the way lands everything there. Later steps, once $x_t$ has begun to commit, can split samples apart.</div>
+</div></div>
+
+<h2>Fewer steps: reflow, consistency and distillation</h2>
+<p>The paths bend because training pairs were <em>random</em>: any noise point might be paired with any image, so lines cross. Liu et al. proposed <strong>reflow</strong>: after training, run the flow from many noise samples $z$ and record where each one ends, $\hat x = \text{ODE}(z)$. Then retrain on the new pairs $(z, \hat x)$. These pairs come from non-crossing flow trajectories, so their straight lines cross far less, and the retrained "2-rectified flow" has much straighter paths. In the ideal limit one Euler step reaches the data. Reflow can be repeated, though each round costs a full data-generation pass and can slowly accumulate errors.</p>
+<p>InstaFlow (Liu et al., 2023) used reflow plus distillation to make a one-step version of Stable Diffusion. More broadly, the rectified-flow objective went mainstream: Esser et al. (2024) compared diffusion and flow formulations at scale and built <strong>Stable Diffusion 3</strong> on rectified flow with logit-normal time sampling; Black Forest Labs describes its FLUX.1 models (2024) as rectified-flow transformers; and many open image and video models released in 2025–26 report flow-matching objectives. Details of closed models are often not published.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-g1-5.webp" alt="Two paper boats cross a pond from scattered bubbles to a flower-shaped arrangement: one takes a wiggly path, the other a straight current and arrives first." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Two paper boats start among scattered bubbles and must reach the flower shape on the other side of the pond. The first boat follows a <strong>wiggly</strong> current: it has to be nudged again and again, or it misses.</p>
+      <p>The second boat rides a <strong>straight</strong> current. Point it once, let go, and it arrives first. Flow matching tries to build straight currents, and reflow straightens wiggly ones, so the boat needs fewer nudges (steps).</p>
+      <p>Where it breaks: real boats can all cross straight to their own spot. A model's currents come from averaging, so where many boats' routes cross, the current bends, and only extra work (reflow) untangles them.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Even fewer steps: consistency and distillation</h3>
+<p>Straighter paths are one route to speed. Others train a fast "student" from a slow "teacher":</p>
+<ul>
+  <li><strong>Progressive distillation</strong> (Salimans &amp; Ho, 2022): train a student to do in one step what the teacher does in two; repeat, halving the step count each round.</li>
+  <li><strong>Consistency models</strong> (Song, Dhariwal, Chen &amp; Sutskever, 2023): learn a function $f_\theta(x_t, t)$ that maps <em>any</em> point on an ODE trajectory straight to the trajectory's clean end point. Points on the same trajectory must map to the same output (self-consistency), which allows 1–2 step sampling. Latent Consistency Models (Luo et al., 2023) brought this to Stable Diffusion with 2–4 steps.</li>
+  <li><strong>Adversarial distillation</strong> (ADD, Sauer et al., 2023; G1.2): a discriminator keeps 1–4 step outputs sharp, as in SDXL Turbo.</li>
+</ul>
+<p>These few-step models made near-real-time image generation practical. The usual price is some loss of diversity or fine detail compared with the full sampler, and less flexibility with classifier-free guidance; how much depends heavily on the method and model.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> it's the same engineering pressure as in text. LLM decoding is sequential, one token per forward pass, and speculative decoding (M5.5) and distillation (M5.2) exist to cut the number of expensive sequential passes. Few-step image generators do the same for denoising steps, often with the same teacher–student recipe.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What does a consistency model learn?</p>
+  <ol class="q-src">
+    <li>A velocity field to integrate with many Euler steps</li>
+    <li>A map from any point on an ODE trajectory directly to that trajectory's clean end point</li>
+    <li>A discriminator for real vs fake images</li>
+    <li>A better noise schedule</li>
+  </ol>
+  <div class="q-explain">If every point on a trajectory maps to the same end point, you can jump from pure noise to an image in one call (or refine with a second).</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why do flow-matching models still need several sampling steps even though they are trained on straight lines, and what does reflow do about it?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Training pairs noise with random data points, so the straight training lines cross, and at each point the network can only learn the average velocity; the resulting flow paths bend, and big Euler steps cut the corners (one step lands everything on the data mean). Reflow re-pairs each noise sample with the end point the current flow actually reaches and retrains, which makes the paths much straighter so a few steps, ideally one, suffice.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which is the flow-matching training loss (with $x_t = (1-t)x_0 + t x_1$)?</p>
+    <ol class="q-src">
+      <li>$\|\varepsilon - \varepsilon_\theta(x_t, t)\|^2$ with $x_t = \sqrt{\bar\alpha_t}x_1 + \sqrt{1-\bar\alpha_t}\varepsilon$</li>
+      <li>$-\log D(G(z))$</li>
+      <li>$\|v_\theta(x_t, t) - (x_1 - x_0)\|^2$</li>
+      <li>$\|x_1 - x_0\|^2$ alone</li>
+    </ol>
+    <div class="q-explain">Regress the network's velocity onto the straight-line velocity. The first option is DDPM's loss; the second is a GAN generator loss.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A flow model is sampled with 4 Euler steps from $t = 0$ to $t = 1$. How many network evaluations does that take, and what is $\Delta t$?</p>
+    <ol class="q-src">
+      <li>4 evaluations, $\Delta t = 0.25$</li>
+      <li>1 evaluation, $\Delta t = 1$</li>
+      <li>8 evaluations, $\Delta t = 0.125$</li>
+      <li>1000 evaluations, $\Delta t = 0.001$</li>
+    </ol>
+    <div class="q-explain">Each Euler step calls the network once. (With classifier-free guidance, each step needs two calls, so 8 in total.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">From G1.3: DDIM made diffusion sampling faster without retraining. How does it relate to this lesson?</p>
+    <ol class="q-src">
+      <li>DDIM is a GAN</li>
+      <li>DDIM straightens paths by re-pairing noise and data</li>
+      <li>DDIM is a consistency model</li>
+      <li>DDIM is a deterministic ODE-style sampler, the same kind of solver you use for a flow model; both trade more steps for accuracy</li>
+    </ol>
+    <div class="q-explain">DDIM integrates the diffusion model's probability-flow ODE with big deterministic jumps. Flow models are sampled the same way, with Euler or better solvers; reflow and distillation are what change the model so fewer steps suffice.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which statement about Stable Diffusion 3 is right?</p>
+    <ol class="q-src">
+      <li>It is a GAN</li>
+      <li>It is trained with a rectified-flow objective (Esser et al., 2024), with time running from data at $t = 0$ to noise at $t = 1$</li>
+      <li>It generates images one pixel at a time</li>
+      <li>It uses no text encoder</li>
+    </ol>
+    <div class="q-explain">SD3 uses rectified flow with logit-normal time sampling, and a transformer backbone you'll meet in G1.6. Watch the reversed time convention when reading its paper.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Flow matching joins noise and data with straight lines, $x_t = (1-t)x_0 + t x_1$, and regresses the velocity $x_1 - x_0$.</li>
+    <li>The learned field is the <strong>average</strong> velocity; because random pairs cross, its paths curve, so sampling still needs several ODE steps.</li>
+    <li>One Euler step from noise lands on the data mean; more steps follow the curves.</li>
+    <li><strong>Reflow</strong> re-pairs noise with flow end points to straighten paths; consistency models and (adversarial) distillation reach 1–4 steps.</li>
+    <li>Rectified flow underlies SD3 and, per their makers, FLUX.1 and many 2025–26 open image and video models.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Train a flow-matching model on the two-moons toy in PyTorch, then sample it with 1, 4, 16 and 64 Euler steps and measure the difference. Trains in well under a minute on a CPU.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="g1-5-flow-matching.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"g1-5-a","front":"Flow matching: interpolation and velocity target?","back":"$x_t = (1-t)\\,x_0 + t\\,x_1$ (noise $x_0$, data $x_1$); target velocity $x_1 - x_0$; loss $\\|v_\\theta(x_t,t) - (x_1 - x_0)\\|^2$."},
+  {"id":"g1-5-b","front":"How do you sample a flow-matching model?","back":"Start at $x_0 \\sim \\mathcal{N}(0,I)$ and integrate $dx/dt = v_\\theta(x,t)$ from 0 to 1, e.g. Euler: $x \\leftarrow x + \\Delta t\\, v_\\theta(x,t)$; one network call per step."},
+  {"id":"g1-5-c","front":"Why are learned flow paths curved even though training lines are straight?","back":"Random pairs make lines cross; regression learns the average velocity $\\mathbb{E}[x_1 - x_0 \\mid x_t]$, whose trajectories bend. One step from noise lands on the data mean."},
+  {"id":"g1-5-d","front":"What is reflow?","back":"Run the trained flow to pair each noise sample with its own end point, then retrain on those pairs (Liu et al., 2022). Fewer crossings → straighter paths → fewer steps."},
+  {"id":"g1-5-e","front":"What does a consistency model learn?","back":"A map from any point on an ODE trajectory to its clean end point, with self-consistency along trajectories, enabling 1–2 step generation (Song et al., 2023)."},
+  {"id":"g1-5-f","front":"Which major models use rectified flow / flow matching?","back":"Stable Diffusion 3 (Esser et al., 2024), FLUX.1 per Black Forest Labs, and many 2025–26 open image and video models. SD3 runs time from data (t = 0) to noise (t = 1)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/g1-toy.js"></script>
+<script src="../assets/js/anims/g1-5-paths.js"></script>
+<script src="../assets/js/anims/g1-5-steps-playground.js"></script>
+</body>
+</html>

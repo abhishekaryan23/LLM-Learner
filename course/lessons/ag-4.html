@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ag-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agent Skills: expertise loaded on demand · LLMs, Animated</title>
+<meta name="description" content="Agent Skills: folders of instructions, scripts and references that an agent loads only when a task needs them. The SKILL.md format, progressive disclosure in three levels, writing descriptions that trigger, how skills compare with MCP, rules files and fine-tuning, and how to use them safely.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<style>
+  .kit-table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: .97rem; }
+  .kit-table th, .kit-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .kit-table th { font: 600 .82rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+  .kit-table td:first-child { font-weight: 650; }
+  @media (max-width: 600px) {
+    .kit-table thead { display: none; }
+    .kit-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .kit-table td { display: block; border: 0; padding: 2px 0; }
+    .kit-table td[data-l]::before { content: attr(data-l) " · "; font-weight: 600; color: var(--ink-2); }
+  }
+  .code-cap { font-size: .9rem; color: var(--ink-2); margin: 14px 0 4px; font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Agent Skills: expertise loaded on demand</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of The agent toolkit</span></div>
+<p class="lede">Your team has ways of doing things: how a slide deck should look, how contracts get checked, how release notes are written. An Agent Skill packs one of those into a folder that an agent can pick up exactly when it needs it, and ignore the rest of the time.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe what a skill is (a folder with a <code>SKILL.md</code> plus optional scripts, references and assets) and write a valid one.</li>
+    <li>Explain progressive disclosure in three levels and estimate the tokens it saves.</li>
+    <li>Choose between a skill, an MCP server, a rules file and fine-tuning, and write a description that triggers at the right time.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="ag-2.html">AG.2 Context engineering</a>: skills are a context-engineering technique, built on progressive disclosure. Helpful but optional: <a href="ag-3.html">AG.3 MCP</a>, for the comparison near the end.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">An agent has 40 skills installed. At the start of a session, what does it load from them?</p>
+    <ol class="q-src">
+      <li>All 40 skills in full</li>
+      <li>Nothing at all until the user names a skill</li>
+      <li>A random sample of 5 skills</li>
+      <li>Just each skill's name and short description</li>
+    </ol>
+    <div class="q-explain">Only the name and description of each skill, roughly 100 tokens apiece, are loaded up front. The full instructions load only when a task matches. That is <strong>progressive disclosure</strong>.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Your company has a strict 12-step process for reviewing supplier contracts, used a few times a week. Where should it live for a coding or office agent?</p>
+    <ol class="q-src">
+      <li>In a skill, loaded only when someone asks for a contract review</li>
+      <li>In the system prompt of every conversation</li>
+      <li>In an MCP server's tool description</li>
+      <li>In the model's weights, via fine-tuning</li>
+    </ol>
+    <div class="q-explain">A procedure needed only sometimes is exactly what skills are for. Putting it in every prompt wastes context on the many tasks that have nothing to do with contracts.</div>
+  </div>
+</section>
+
+<h2>What a skill is: a folder of know-how</h2>
+<p>General-purpose agents know a lot, but not <em>your</em> way of doing things. Before skills, teams had two bad options: paste the same long instructions into the chat every time, or pile every procedure into the system prompt, where they crowd the context on every task (<a href="ag-2.html">AG.2</a>).</p>
+<p>Anthropic introduced <strong>Agent Skills</strong> on 16 October 2025, for its Claude apps, Claude Code and API, and on 18 December 2025 published the format as an open standard at <strong>agentskills.io</strong> so that skills work across products. Since then a growing number of agents have added support; as of 2026 that reportedly includes coding agents such as OpenAI Codex, Gemini CLI, GitHub Copilot and Cursor, though how each one finds and uses skills varies, so check its documentation.</p>
+<p>A skill is just a <strong>folder</strong>. The only required file is <code>SKILL.md</code>:</p>
+<pre><code>contract-review/
+├── SKILL.md        required: metadata + instructions
+├── scripts/        optional: code the agent can run
+├── references/     optional: docs it reads when needed
+└── assets/         optional: templates, images, data</code></pre>
+<p><code>SKILL.md</code> starts with a few lines of YAML “frontmatter” between <code>---</code> markers, then plain Markdown instructions:</p>
+<p class="code-cap">contract-review/SKILL.md</p>
+<pre><code>---
+name: contract-review
+description: Reviews NDAs and supplier contracts against our
+  legal checklist and drafts redline comments. Use when the user
+  asks to review, check or mark up a contract, NDA or agreement,
+  even if they don't mention the checklist.
+license: Proprietary
+metadata:
+  owner: legal-ops
+  version: "1.3"
+---
+
+# Contract review
+
+## Steps
+1. Identify the contract type (NDA, supplier, licence).
+2. Read the matching checklist: references/nda-checklist.md
+   or references/supplier-checklist.md.
+3. Check every clause against it. Quote the clause and mark it
+   OK, RISK or MISSING.
+4. Run scripts/redline.py on the file to produce a marked-up copy.
+5. Reply with a table of findings, most serious first.
+
+## Never
+- Give a final legal opinion. Recommend counsel for any RISK item.</code></pre>
+<p>The rules for the two required fields are short. <strong><code>name</code></strong>: up to 64 characters, lowercase letters, digits and hyphens only, matching the folder name. <strong><code>description</code></strong>: up to 1,024 characters, saying <em>what</em> the skill does and <em>when</em> to use it. Optional fields include <code>license</code>, <code>compatibility</code> (environment needs such as “requires Python and internet access”), <code>metadata</code>, and an experimental <code>allowed-tools</code> list of pre-approved tools.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Which of these is a valid skill <code>name</code> under the open standard?</p>
+  <ol class="q-src">
+    <li><code>Contract_Review</code></li>
+    <li><code>-contract-review</code></li>
+    <li><code>contract-review</code></li>
+    <li><code>contract--review</code></li>
+  </ol>
+  <div class="q-explain">Names use lowercase letters, digits and single hyphens, can't start or end with a hyphen, and must match the folder name. Uppercase, underscores and double hyphens are not allowed.</div>
+</div></div>
+
+<h2>Progressive disclosure: three levels of loading</h2>
+<p>The clever part of skills is not the folder; it is <strong>when</strong> each part enters the context window. The standard describes three levels:</p>
+<ol class="steps">
+  <li><strong>Level 1, always:</strong> at start-up the agent loads only each skill's <code>name</code> and <code>description</code>, about 100 tokens per skill. Just enough to know when a skill might be relevant.</li>
+  <li><strong>Level 2, when relevant:</strong> when a task matches a description, the agent reads that skill's whole <code>SKILL.md</code>. The standard recommends keeping it under about 5,000 tokens (and under 500 lines).</li>
+  <li><strong>Level 3, only as needed:</strong> the instructions point to extra files (a checklist, an API reference) that the agent opens only if this task needs them, and to scripts that it <em>runs</em>. A script's code doesn't need to enter the context at all; only its output does.</li>
+</ol>
+<p>Because level 3 is read from disk on demand, Anthropic notes that the amount of material you can bundle into a skill is effectively unbounded.</p>
+
+<figure class="anim wide" data-anim="ag-4-levels"></figure>
+
+<h3>Worked example</h3>
+<p>An agent has <strong>40 skills</strong> installed. Each has about 100 tokens of metadata and a 2,000-token <code>SKILL.md</code>.</p>
+<ol class="steps">
+  <li>Level 1 for all of them: $40 \times 100 = 4{,}000$ tokens, always loaded.</li>
+  <li>A task uses one skill: $4{,}000 + 2{,}000 = 6{,}000$ tokens.</li>
+  <li>Loading every <code>SKILL.md</code> up front instead: $40 \times 2{,}000 = 80{,}000$ tokens, before a single reference file, on every task. That is over 13 times more, and most of it irrelevant to any one task.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>A team installs 25 skills with about 80 tokens of metadata each and 3,000-token <code>SKILL.md</code> files. Answer in thousands of tokens.</p>
+  <ol class="steps">
+    <li>Level 1 for all 25 skills: <span class="blank" data-answer="2" data-tol="0.01" data-hint="25 × 80 = 2,000 tokens."></span> thousand tokens</li>
+    <li>One task that activates one skill: <span class="blank" data-answer="5" data-tol="0.01" data-hint="Level 1 plus one SKILL.md: 2 + 3."></span> thousand tokens</li>
+    <li>Every <code>SKILL.md</code> loaded up front: <span class="blank" data-answer="75" data-tol="0.01" data-hint="25 × 3,000."></span> thousand tokens</li>
+  </ol>
+</section>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ag-4.webp" alt="A chef robot sees only the tabs of a recipe-card box and pulls out just the pancake card it needs." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A robot chef has a <strong>box of recipe cards</strong>. It doesn't read every card every morning. It only looks at the <strong>tabs</strong> on top: “pancakes”, “soup”, “birthday cake”.</p>
+      <p>When someone asks for pancakes, it pulls out <strong>just the pancake card</strong> and follows it. If the card says “see the syrup card”, it grabs that one too. All the other cards stay in the box.</p>
+      <p class="math-note">Where it breaks: a chef chooses by reading a one-word tab, but an agent chooses by reading a whole sentence of description, and it can misjudge. A badly written tab means the right card never comes out.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A skill includes a 3,000-line Python script that the instructions tell the agent to run. How much of the script's code enters the context window when the agent runs it?</p>
+  <ol class="q-src">
+    <li>All 3,000 lines</li>
+    <li>None necessarily: the agent runs it and reads only the output</li>
+    <li>The first 500 lines</li>
+    <li>It depends on the model's size</li>
+  </ol>
+  <div class="q-explain">That is a big advantage of bundling scripts: deterministic work happens in code, and only the result costs context. (The agent <em>can</em> read the code if it needs to, but doesn't have to.)</div>
+</div></div>
+
+<h2>Skills vs MCP, rules files and fine-tuning</h2>
+<p>Skills are often confused with their neighbours on the map from <a href="ag-1.html">AG.1</a>. The quick version: skills are <strong>know-how</strong>, MCP is <strong>connections</strong>, rules files are <strong>always-on conventions</strong>, fine-tuning is <strong>built-in habits</strong>.</p>
+<table class="kit-table">
+  <thead><tr><th>Building block</th><th>Adds</th><th>Loaded</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td>Agent Skill</td><td data-l="Adds">Procedures, expertise, scripts, templates</td><td data-l="Loaded">Description always; the rest when a task matches</td><td data-l="Example">“Make a slide deck in our brand style”</td></tr>
+    <tr><td>MCP server</td><td data-l="Adds">Live access to an outside system (read and act)</td><td data-l="Loaded">Tool definitions while connected (or found on demand)</td><td data-l="Example">Create a Jira ticket; query the sales database</td></tr>
+    <tr><td>Rules file</td><td data-l="Adds">Conventions for every task in a project</td><td data-l="Loaded">Always, every session</td><td data-l="Example">“Use pnpm; never edit <code>generated/</code>”</td></tr>
+    <tr><td>Fine-tuning</td><td data-l="Adds">Changed default behaviour, style or cost</td><td data-l="Loaded">Baked into the weights</td><td data-l="Example">A small model that always answers in your house tone</td></tr>
+  </tbody>
+</table>
+<p><strong>They combine well.</strong> A <em>release-notes</em> skill can say: “use the GitHub MCP server's <code>list_pull_requests</code> tool for merged PRs since the last tag, group them into Features, Fixes and Breaking changes, and fill in <code>assets/template.md</code>.” MCP gives the agent hands; the skill tells it what to do with them. (An MCP working group has been exploring ways to deliver skills through MCP servers too.) A simple test: if a new teammate would need an <em>account</em> to do it, think MCP; if they would need a <em>how-to document</em>, think skill; if they would need it on <em>every</em> task, think rules file.</p>
+<p><strong>Write the description so it triggers.</strong> The description carries the whole burden of activation: if it doesn't say when the skill applies, the agent won't reach for it. The standard's guidance:</p>
+<ul>
+  <li>Say <strong>what</strong> it does and <strong>when</strong> to use it, in the user's words: “Use when the user asks to review, check or mark up a contract…”.</li>
+  <li>List the situations it covers, including ones where the user doesn't name the topic (“even if they don't mention the checklist”). A little pushy is fine.</li>
+  <li>Keep it to a few sentences, since every installed skill's description sits in every context.</li>
+  <li>Test it with about 20 realistic requests: some that should trigger it and some near-misses that shouldn't (“update the formulas in my budget spreadsheet” for a CSV-analysis skill).</li>
+</ul>
+<p>“Helps with contracts” will fire too rarely and too randomly. Note too that agents tend to consult skills only for tasks they can't easily do alone; a one-step request may not trigger a skill even when the description matches.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Your agent must create invoices in your accounting system, following the finance team's naming and approval rules. What fits best?</p>
+  <ol class="q-src">
+    <li>An MCP server for the accounting system, plus a skill describing the finance team's rules</li>
+    <li>A rules file only</li>
+    <li>Fine-tuning only</li>
+    <li>A skill only; skills can reach any system by themselves</li>
+  </ol>
+  <div class="q-explain">Creating invoices needs a connection to a live system (MCP or another tool). The team's procedure is know-how needed only for this kind of task, so it belongs in a skill. The two work together.</div>
+</div></div>
+
+<h2>A skill can run code: use it safely</h2>
+<p>A skill is more than text. Its instructions steer what the agent does, and its <code>scripts/</code> folder can run on your machine with the agent's permissions. So treat installing a skill like installing software:</p>
+<ul>
+  <li><strong>Install only from trusted sources</strong>: your own team, or publishers you would trust with a program.</li>
+  <li><strong>Review before you use</strong> anything less trusted: read <code>SKILL.md</code> and every bundled file, check the scripts and what they depend on, and look for instructions that send data to unfamiliar web addresses.</li>
+  <li><strong>Watch for hidden instructions.</strong> A malicious skill could tell the agent to leak data or weaken security, the same prompt-injection risk as with MCP tool descriptions (<a href="ag-3.html">AG.3</a>).</li>
+  <li><strong>Keep the agent's own guardrails on</strong>: sandboxing and permission prompts still apply when a skill runs a command. Pre-approving tools in <code>allowed-tools</code> is convenient, so do it only for skills you have reviewed.</li>
+</ul>
+<p>Skills also need the ordinary care of any shared code: put them in version control, give them an owner (the <code>metadata</code> field helps), and update them when the process changes, or the agent will faithfully follow last year's rules.</p>
+
+<div class="why"><strong>In real practice:</strong> teams start with the procedures people already explain over and over: “how we write release notes”, “how to make a deck in our template”, “how to run and read the load test”. A first skill is usually one <code>SKILL.md</code> of 50 to 150 lines. Scripts and reference files come later, when the agent keeps getting a deterministic step slightly wrong (move that step into a script) or the instructions grow too long (split details into <code>references/</code>). Anthropic's own public examples include skills for Word, PowerPoint, Excel and PDF files.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">A colleague shares a popular skill from an unknown website. What should you do before installing it?</p>
+  <ol class="q-src">
+    <li>Nothing; skills are plain text and can't do harm</li>
+    <li>Rename the folder so the agent can't find it</li>
+    <li>Turn off all permission prompts so it runs smoothly</li>
+    <li>Read SKILL.md and every bundled file, check the scripts and any web addresses they contact, and install only if you trust it</li>
+  </ol>
+  <div class="q-explain">Skills can run scripts and steer the agent, so an untrusted skill is like untrusted software. Review it, and keep the agent's permission checks on.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain progressive disclosure for skills, and why it lets an agent have dozens of skills installed without filling its context window.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Skills load in three levels: only each skill's name and description (about 100 tokens) are always in context; the full <code>SKILL.md</code> loads when a task matches the description; extra files are read and scripts run only when the instructions call for them. So dozens of skills cost a few thousand tokens of descriptions, and only the one skill in use costs more.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which description is most likely to make a CSV-analysis skill trigger at the right times?</p>
+    <ol class="q-src">
+      <li>“Helps with data.”</li>
+      <li>“Analyzes CSV and spreadsheet exports: summary statistics, charts, outliers. Use when the user wants to explore, chart or summarize tabular data, even if they don't say ‘CSV’.”</li>
+      <li>“The best skill. Always use this skill.”</li>
+      <li>A 3-page description listing every function in the scripts</li>
+    </ol>
+    <div class="q-explain">Good descriptions state what the skill does and when to use it, in the user's terms, and cover indirect requests. Vague ones misfire; “always use” over-triggers; very long ones waste context in every session.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Connect to AG.2: which context-engineering technique are skills a direct application of?</p>
+    <ol class="q-src">
+      <li>Prompt caching</li>
+      <li>Compaction</li>
+      <li>Progressive disclosure: show a short summary first, load details only on demand</li>
+      <li>Subagents</li>
+    </ol>
+    <div class="q-explain">Skills are progressive disclosure in a folder: descriptions always, instructions when relevant, resources when needed. They keep the context lean while making a lot of know-how available.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">“Every task in this repo must use the project's logging helper instead of print().” Where does this belong?</p>
+    <ol class="q-src">
+      <li>An Agent Skill</li>
+      <li>An MCP server</li>
+      <li>Fine-tuning</li>
+      <li>The project's rules file (AGENTS.md, CLAUDE.md…)</li>
+    </ol>
+    <div class="q-explain">It applies to <em>every</em> task, so it belongs in the always-loaded rules file. Skills are for things needed only sometimes.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What does the open standard require at minimum for a skill?</p>
+    <ol class="q-src">
+      <li>A folder with a SKILL.md whose frontmatter has a name and a description</li>
+      <li>A Python script and a JSON manifest</li>
+      <li>An MCP server</li>
+      <li>A signed certificate from the publisher</li>
+    </ol>
+    <div class="q-explain">Everything else (scripts, references, assets, license, compatibility, metadata) is optional. That simplicity is a big part of why the format spread.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A <strong>skill</strong> is a folder with a <code>SKILL.md</code> (YAML <code>name</code> and <code>description</code>, then instructions) plus optional <code>scripts/</code>, <code>references/</code> and <code>assets/</code>. Introduced by Anthropic in October 2025; an open standard (agentskills.io) since December 2025.</li>
+    <li><strong>Progressive disclosure:</strong> descriptions always (~100 tokens each), <code>SKILL.md</code> when a task matches, extra files and script output only as needed.</li>
+    <li>Skills are <strong>know-how</strong>; MCP is <strong>connections</strong>; rules files are <strong>always-on conventions</strong>; fine-tuning is <strong>built-in habits</strong>. Skills and MCP combine well.</li>
+    <li>The <strong>description</strong> decides when a skill triggers: say what and when, in the user's words, and test it.</li>
+    <li>Skills can run code: install from <strong>trusted sources</strong> and review them first.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ag-4-a","front":"What is an Agent Skill, physically?","back":"A folder containing a SKILL.md (YAML frontmatter with name and description, then Markdown instructions), plus optional scripts/, references/ and assets/."},
+  {"id":"ag-4-b","front":"Describe the three levels of progressive disclosure for skills.","back":"Level 1: name + description of every skill, always loaded (~100 tokens each). Level 2: the full SKILL.md when a task matches. Level 3: reference files read and scripts run only as needed (script code needn't enter the context)."},
+  {"id":"ag-4-c","front":"40 skills, ~100 tokens of metadata and a 2,000-token SKILL.md each: cost with progressive disclosure vs everything up front, for one task?","back":"Progressive: 40 × 100 + 2,000 = 6,000 tokens. Up front: 40 × 2,000 = 80,000 tokens (before any reference files)."},
+  {"id":"ag-4-d","front":"Skill vs MCP server vs rules file: one line each.","back":"Skill: know-how needed sometimes, loaded on demand. MCP server: a connection to a live outside system. Rules file: conventions needed on every task, always loaded."},
+  {"id":"ag-4-e","front":"What makes a good skill description?","back":"It says what the skill does and when to use it, in the user's words, covers indirect requests, stays a few sentences (max 1,024 characters), and is tested on should-trigger and near-miss requests."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ag-4-levels.js"></script>
+</body>
+</html>

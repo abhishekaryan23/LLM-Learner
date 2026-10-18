@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="v1-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vision Transformers: images as patches · LLMs, Animated</title>
+<meta name="description" content="How a Vision Transformer turns an image into a sentence of patch tokens: 16×16 patches, a linear patch embedding, [CLS] and position embeddings, a standard Transformer encoder, and why it needs so much data.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Vision Transformers: images as patches</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Vision</span></div>
+<p class="lede">For a decade, computer vision meant convolutional networks. In 2020 a Google team showed that you can cut an image into squares, treat each square like a word, and hand the result to an almost unmodified Transformer. That idea, the <strong>Vision Transformer (ViT)</strong>, is now inside image search, multimodal LLMs and video generators.</p>
+
+<div class="cover"><img src="../assets/img/cover-v1.webp" alt="Illustration: a friendly eye-shaped lens above a landscape photo that is being sliced into a grid of square tiles; the tiles lift off and line up in a row like a train." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Turn an image into ViT tokens step by step, and count them for any resolution and patch size.</li>
+    <li>Explain what the patch embedding, the [CLS] token and the position embeddings each do.</li>
+    <li>Explain why ViTs need more data than CNNs, and how DeiT and Swin responded.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> the encoder here is the Transformer block you assembled in <a href="m1-4.html">The decoder-only transformer (M1.4)</a>, minus the causal mask. The comparison with convolutions uses filters, weight sharing and receptive fields from <a href="p6-1.html">CNNs: filters, pooling &amp; receptive fields (P6.1)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A 224 × 224 image is cut into non-overlapping 16 × 16-pixel squares. How many squares is that?</p>
+    <ol class="q-src">
+      <li>14</li>
+      <li>196</li>
+      <li>256</li>
+      <li>50,176</li>
+    </ol>
+    <div class="q-explain">224 / 16 = 14 squares per side, and 14 × 14 = 196. (256 is what you get with 14 × 14-pixel squares; 50,176 is the number of pixels.)</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A Transformer and a CNN of similar size are both trained from scratch on ImageNet's 1.3 million labelled images, with no special tricks. What usually happens?</p>
+    <ol class="q-src">
+      <li>The Transformer wins easily, because attention is more powerful</li>
+      <li>They tie, because size is all that matters</li>
+      <li>The CNN wins, because its built-in assumptions about images make up for limited data</li>
+      <li>The Transformer can't be trained on images at all</li>
+    </ol>
+    <div class="q-explain">This is the original ViT paper's finding. A CNN "knows" that nearby pixels belong together; a ViT has to learn that from data. With hundreds of millions of images the ViT catches up and passes the CNN.</div>
+  </div>
+</section>
+
+<h2>Why CNNs ruled vision, and what ViT changed</h2>
+<p>In 2012, <strong>AlexNet</strong> (Krizhevsky, Sutskever &amp; Hinton) won the ImageNet challenge with a top-5 error of about 15%, against about 26% for the runner-up. Every winner after it was a convolutional network: VGG, GoogLeNet, then <strong>ResNet</strong> (He et al., 2015), whose residual connections made networks with 100+ layers trainable.</p>
+<p>CNNs won because they bake in two facts about images, which you met in <a href="p6-1.html">P6.1</a>:</p>
+<ul>
+  <li><strong>Locality:</strong> a filter only looks at a small neighbourhood, say 3 × 3 pixels. Nearby pixels matter most.</li>
+  <li><strong>Weight sharing:</strong> the same filter slides over the whole image, so a cat's ear is detected the same way anywhere (<em>translation equivariance</em>).</li>
+</ul>
+<p>These built-in assumptions are called <strong>inductive biases</strong>. They save data, but they also limit what a layer can see: an early layer cannot relate a pixel in the top-left corner to one in the bottom-right. Only after many layers does the receptive field cover the whole image.</p>
+<p>Meanwhile, in language, Transformers (Vaswani et al., 2017) were replacing everything. Researchers tried bolting attention onto CNNs, but attention over every <em>pixel</em> is hopeless: a 224 × 224 image has 50,176 pixels, so about 2.5 billion pixel pairs per attention layer.</p>
+<p>Dosovitskiy et al. (2020), in a paper titled <em>An Image is Worth 16x16 Words</em>, made the radical simple move: cut the image into <strong>16 × 16-pixel patches</strong>, treat each patch as a token, and feed the sequence to a <strong>standard Transformer encoder</strong> with almost no image-specific machinery. That model is the <strong>Vision Transformer (ViT)</strong>.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Which property does a ViT layer have that an early CNN layer does not?</p>
+  <ol class="q-src">
+    <li>Any patch can directly use information from any other patch, however far apart</li>
+    <li>The same weights are applied at every position in the image</li>
+    <li>It works on raw pixels instead of learned features</li>
+  </ol>
+  <div class="q-explain">Self-attention connects every token to every other token in one layer, so the "receptive field" is the whole image from layer 1. Weight sharing across positions is true of both (ViT applies the same patch embedding and the same blocks to every token).</div>
+</div></div>
+
+<h2>From pixels to tokens</h2>
+<p>A ViT needs a sequence of vectors, just like a language model. Here's how an image becomes one. Step through it:</p>
+
+<figure class="anim wide" data-anim="v1-1-patches"></figure>
+
+<p>In symbols, with patches $x_p^1, \dots, x_p^N$, each flattened to a row of $P^2 C$ numbers:</p>
+$$z_0 = \big[\,x_{\text{cls}};\; x_p^1 E;\; \dots;\; x_p^N E\,\big] + E_{\text{pos}}$$
+<p class="math-note">$P$ is the patch side (16) and $C$ the number of colour channels (3). $E$ is a learned $P^2C \times D$ matrix shared by all patches, and $D$ is the model width (768 for ViT-Base). $x_{\text{cls}}$ is a learned $D$-dimensional vector, and $E_{\text{pos}}$ is a learned $(N{+}1) \times D$ table with one row per position. The square brackets stack the rows into an $(N{+}1) \times D$ matrix $z_0$, the input to layer 1.</p>
+<ul>
+  <li><strong>Patch embedding.</strong> Multiplying every flattened patch by the same $E$ is exactly a convolution with a 16 × 16 kernel and stride 16, which is how most code implements it.</li>
+  <li><strong>[CLS] token.</strong> Borrowed from BERT: a learned token with no image content. Through attention it gathers a summary of all patches, and its final vector feeds the classifier.</li>
+  <li><strong>Position embeddings.</strong> Attention ignores order (<a href="m1-3.html">M1.3</a>), so without them the ViT would see a bag of shuffled patches. ViT simply learns one vector per position; the paper found that fancier 2-D schemes helped very little.</li>
+</ul>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-v1-1.webp" alt="A child cuts a photo of a cat into square jigsaw pieces and lays them out in a single row, each piece marked with a coloured dot so the order is remembered." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Take a photo of a cat and cut it into <strong>square jigsaw pieces</strong>. Lay them out in one long row, like words in a sentence.</p>
+      <p>Before you mix them up, put a <strong>coloured dot</strong> on each piece so you remember where it came from. Those dots are the position embeddings.</p>
+      <p>Now a reader who is very good at sentences can "read" the row and say: <em>that's a cat!</em> Where it breaks: the real model doesn't see the pieces as pictures; each piece becomes a list of numbers, and it learns what the dots mean during training.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example: ViT-B/16 at 224 × 224</h3>
+<ol class="steps">
+  <li><strong>Patches:</strong> $224/16 = 14$ per side, so $N = 14 \times 14 = 196$.</li>
+  <li><strong>Values per patch:</strong> $16 \times 16 \times 3 = 768$.</li>
+  <li><strong>Sequence length:</strong> $196 + 1 = 197$ tokens, including [CLS].</li>
+  <li><strong>Patch-embedding parameters:</strong> $E$ is $768 \times 768$, plus 768 biases $= 590{,}592$. The position table adds $197 \times 768 = 151{,}296$. Both are tiny next to ViT-B's roughly 86M parameters.</li>
+</ol>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">You remove the position embeddings from a trained ViT and shuffle the input patches. What happens to the [CLS] output?</p>
+  <ol class="q-src">
+    <li>It becomes random noise</li>
+    <li>It changes a lot, because attention depends on the order of tokens</li>
+    <li>Nothing: without position embeddings, the encoder treats the patches as an unordered set</li>
+  </ol>
+  <div class="q-explain">Self-attention and the per-token MLP are permutation-equivariant, so shuffling the patch tokens only shuffles their outputs, and [CLS], which attends to all of them, gets exactly the same result. Position embeddings are the only source of "where".</div>
+</div></div>
+
+<h2>A plain Transformer encoder, and its appetite for data</h2>
+<p>After the embedding, a ViT is the encoder you already know from <a href="m1-4.html">M1.4</a>: pre-norm LayerNorm, multi-head self-attention, a GELU MLP, residual adds. The one change is that there is <strong>no causal mask</strong>. A decoder LLM must not peek at future words, but an image has no "future": every patch may attend to every patch.</p>
+<p>The paper's three sizes set names still used today:</p>
+<ul>
+  <li><strong>ViT-Base:</strong> 12 layers, $D = 768$, 12 heads, about 86M parameters.</li>
+  <li><strong>ViT-Large:</strong> 24 layers, $D = 1024$, 16 heads, about 307M.</li>
+  <li><strong>ViT-Huge:</strong> 32 layers, $D = 1280$, 16 heads, about 632M.</li>
+</ul>
+<p>The suffix is the patch size: ViT-L/14 uses 14 × 14 patches, so a 224-pixel image gives $16 \times 16 = 256$ patches.</p>
+<p><strong>The catch: data.</strong> Trained on ImageNet-1k alone (1.3M images), ViTs did <em>worse</em> than ResNets of similar size. They only pulled ahead when pretrained on much larger datasets: ImageNet-21k (14M images) or Google's internal <strong>JFT-300M</strong> (about 300M images). After JFT pretraining, ViT-H/14 reached 88.55% top-1 accuracy on ImageNet, matching or beating the best CNNs while using less pretraining compute. The lesson: weaker inductive bias means the model must learn locality from examples, and at scale, learning it beats hard-coding it.</p>
+<p><strong>DeiT</strong> (Touvron et al., 2021) showed the data problem could also be engineered around. Using ImageNet-1k only, with heavy augmentation (RandAugment, Mixup, CutMix), strong regularization and a <strong>distillation token</strong> that learns from a CNN teacher, DeiT-B reached 81.8% top-1, trained on a single 8-GPU machine in under three days. Today the main answer is <strong>self-supervised pretraining</strong> on unlabelled images, which is the subject of <a href="v1-3.html">V1.3</a>.</p>
+<p>What do ViTs learn? The original paper found that some heads attend locally even in the lowest layers (rediscovering CNN-like behaviour), while others attend across the whole image from the start. The learned position embeddings even arrange themselves into a 2-D grid: patches in the same row or column get similar vectors.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why did the original ViT need JFT-300M pretraining to beat ResNets?</p>
+  <ol class="q-src">
+    <li>Transformers can't be trained with fewer than 100 million images</li>
+    <li>With less built-in knowledge about images (locality, translation), it must learn those regularities from many more examples</li>
+    <li>JFT images are higher resolution than ImageNet images</li>
+  </ol>
+  <div class="q-explain">The CNN's inductive biases act like free training data. The ViT has to learn them, which takes more data; DeiT showed that strong augmentation and distillation can partly substitute for it.</div>
+</div></div>
+
+<h2>More pixels, many more pairs</h2>
+<p>Keep the patch size fixed and the number of tokens grows with the image's <em>area</em>. Attention compares every token with every token, so its cost grows with the <em>square</em> of the token count (<a href="m1-1.html">M1.1</a>). Resolution gets expensive fast.</p>
+
+<h3>Worked example: 224 vs 448 pixels, 16-pixel patches</h3>
+<ol class="steps">
+  <li><strong>224 × 224:</strong> $14 \times 14 = 196$ patches, 197 tokens, $197^2 = 38{,}809$ attention scores per head per layer.</li>
+  <li><strong>448 × 448:</strong> $28 \times 28 = 784$ patches, 785 tokens, $785^2 = 616{,}225$ scores.</li>
+  <li><strong>Ratio:</strong> twice the side means $4\times$ the tokens and about $616{,}225 / 38{,}809 \approx 15.9\times$ the attention work. The MLPs, which run once per token, cost $4\times$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A ViT with 16-pixel patches is fine-tuned at 384 × 384, a common choice.</p>
+  <ol class="steps">
+    <li>Patches per side: <span class="blank" data-answer="24" data-tol="0.001" data-hint="384 / 16."></span></li>
+    <li>Number of patch tokens (no [CLS]): <span class="blank" data-answer="576" data-tol="0.001" data-hint="24 × 24."></span></li>
+    <li>Attention pairs relative to 224 × 224, ignoring [CLS] ($576^2 / 196^2$): <span class="blank" data-answer="8.64" data-tol="0.05" data-hint="576 / 196 ≈ 2.94; square it."></span> ×</li>
+  </ol>
+</section>
+
+<p>Two practical consequences:</p>
+<ul>
+  <li><strong>Changing resolution.</strong> Models are usually pretrained at low resolution and fine-tuned at higher. The position table was learned for a 14 × 14 grid, so it is <strong>interpolated in 2-D</strong> to the new grid (say 24 × 24). This is one of the few image-specific tricks in ViT.</li>
+  <li><strong>Hierarchical designs.</strong> <strong>Swin Transformer</strong> (Liu et al., 2021) uses small 4 × 4 patches but only attends inside local windows of 7 × 7 patches, <em>shifting</em> the windows in alternate layers so information crosses window borders. It merges neighbouring patches between stages, giving CNN-like feature maps at several scales, and its cost grows <strong>linearly</strong> with image area. That made it a strong backbone for detection and segmentation (<a href="v1-4.html">V1.4</a>).</li>
+</ul>
+<p>The competition pushed CNNs too: <strong>ConvNeXt</strong> (Liu et al., 2022) modernized a ResNet with Transformer-era design choices and matched Swin. As of 2026, plain ViTs dominate large pretrained vision encoders, while CNNs and hybrids remain common where latency on small devices matters.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> when you send an image to a multimodal LLM, a ViT encoder (usually a CLIP- or SigLIP-style one, <a href="v1-2.html">V1.2</a>) turns it into patch vectors that are projected into the LLM's token space (<a href="mm-1.html">MM.1</a>). Each patch then costs context like a word does, which is why image-heavy prompts are slow and why many systems tile, resize or merge patches to control the token count. The same "patchify" idea extends to video as space-time patches (<a href="vd-1.html">VD.1</a>) and to diffusion transformers (<a href="g1-6.html">G1.6</a>).</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">You switch from 16-pixel to 8-pixel patches at the same 224 × 224 resolution. Roughly how does the attention cost change?</p>
+  <ol class="q-src">
+    <li>It halves</li>
+    <li>It grows 4×</li>
+    <li>It grows about 16×</li>
+  </ol>
+  <div class="q-explain">Halving the patch side gives 28 × 28 = 784 patches instead of 196, so 4× the tokens and about 16× the pairs. Smaller patches mean finer detail but quadratically more attention.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a friend how a ViT turns a photo into something a Transformer can read, and why it needs position embeddings.</p>
+  <div class="model-answer"><strong>Model answer:</strong> The photo is cut into fixed-size patches (16 × 16 pixels), each patch is flattened and multiplied by one shared learned matrix to get a vector, and a learned [CLS] token is put in front. Because attention treats its inputs as an unordered set, a learned position vector is added to each token so the model knows where each patch came from; then a standard Transformer encoder processes the sequence and the [CLS] output is classified.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In ViT-B/16, what exactly is the "linear patch embedding"?</p>
+    <ol class="q-src">
+      <li>A small CNN that runs on each patch</li>
+      <li>One learned 768 × $D$ matrix applied to every flattened 16·16·3 patch (equivalently, a stride-16 convolution)</li>
+      <li>A lookup table with one vector per possible patch</li>
+      <li>A fixed Fourier transform of each patch</li>
+    </ol>
+    <div class="q-explain">It is a single shared linear map. There is no lookup table: unlike words, patches are continuous, so there is no finite vocabulary to look up.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A decoder LLM's attention uses a causal mask (<a href="m1-4.html">M1.4</a>). Why doesn't a ViT classifier use one?</p>
+    <ol class="q-src">
+      <li>Images are too small to need it</li>
+      <li>The mask is only needed when there are more than 1,000 tokens</li>
+      <li>ViTs use convolutions instead of attention</li>
+      <li>It isn't predicting the next token: the whole image is given at once, so every patch may look at every other patch</li>
+    </ol>
+    <div class="q-explain">The causal mask exists so a model can't see the token it is about to predict. A classifier sees the whole input at once, so full bidirectional attention is allowed and useful.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A ViT pretrained at 224 × 224 is fine-tuned at 448 × 448 with the same patch size. What must change?</p>
+    <ol class="q-src">
+      <li>The position embeddings, interpolated from a 14 × 14 to a 28 × 28 grid; the other weights can be reused</li>
+      <li>The patch-embedding matrix, which must get bigger</li>
+      <li>Nothing at all, and the cost stays the same</li>
+      <li>The number of layers must double</li>
+    </ol>
+    <div class="q-explain">All Transformer weights work on any number of tokens, and $E$ still sees 16 × 16 × 3 patches. Only the position table is tied to the grid size. The cost, of course, goes up about 16× in attention.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What problem was Swin Transformer mainly designed to fix?</p>
+    <ol class="q-src">
+      <li>ViTs can't classify images</li>
+      <li>ViTs need labelled data</li>
+      <li>Global attention cost grows quadratically with image area, and a plain ViT gives only one scale of features</li>
+      <li>ViTs can't use position embeddings</li>
+    </ol>
+    <div class="q-explain">Swin's local, shifted windows make cost linear in area, and patch merging builds a multi-scale hierarchy that detection and segmentation heads expect.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A ViT cuts an image into <strong>patches</strong> (224 px with 16-px patches gives 196), embeds each with one shared linear map, adds a <strong>[CLS]</strong> token and learned <strong>position embeddings</strong>.</li>
+    <li>The rest is a standard <strong>Transformer encoder</strong> with no causal mask; the [CLS] output feeds a classifier.</li>
+    <li>Weaker <strong>inductive bias</strong> than CNNs means ViTs need lots of data (JFT-300M) or tricks (DeiT's augmentation and distillation).</li>
+    <li>Tokens grow with image area and attention with tokens squared: doubling resolution costs about <strong>16×</strong> in attention. Swin's windows make it linear.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in PyTorch</div>
+    <p>Patchify an image tensor, build the patch embedding with [CLS] and positions, check it equals a stride-16 convolution, and train a tiny ViT on a synthetic shapes dataset in under a minute on CPU. Free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="v1-1-vit-patches.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"v1-1-a","front":"How does a ViT turn a 224 × 224 image into tokens (ViT-B/16)?","back":"Cut it into 16 × 16 patches (14 × 14 = 196), flatten each (16·16·3 = 768 values), multiply by a shared learned matrix $E$, prepend a [CLS] token and add learned position embeddings: 197 tokens."},
+  {"id":"v1-1-b","front":"What is the [CLS] token in a ViT?","back":"A learned extra token with no image content. It attends to all patches, and its final vector is passed to the classification head."},
+  {"id":"v1-1-c","front":"Why does a ViT need position embeddings?","back":"Self-attention ignores order, so without them the patches would be an unordered bag. ViT learns one vector per grid position (interpolated in 2-D when the resolution changes)."},
+  {"id":"v1-1-d","front":"Why did the original ViT need huge pretraining data (JFT-300M)?","back":"It has weaker inductive biases than a CNN (no built-in locality or translation equivariance), so it must learn them from data. On ImageNet-1k alone it lost to ResNets; DeiT closed the gap with augmentation and distillation."},
+  {"id":"v1-1-e","front":"How does ViT attention cost change if you double the image side, same patch size?","back":"4× the tokens (area), so about 16× the attention pairs: 197² = 38,809 vs 785² = 616,225 at 224 vs 448 px."},
+  {"id":"v1-1-f","front":"What is Swin Transformer's key idea?","back":"Attention inside local windows that shift between layers, plus patch merging into a multi-scale hierarchy, so cost grows linearly with image area (Liu et al., 2021)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/v1-1-patches.js"></script>
+</body>
+</html>

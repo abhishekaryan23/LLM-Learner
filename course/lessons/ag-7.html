@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ag-7">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Subagents, multi-agent systems &amp; A2A · LLMs, Animated</title>
+<meta name="description" content="When one agent isn't enough: subagents with their own context windows, the orchestrator-worker pattern, when multi-agent helps or hurts, the Agent2Agent (A2A) protocol, and hooks, permissions and sandboxes for what must always happen.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<style>
+  .table-wrap { overflow-x: auto; margin: 16px 0 20px; }
+  .ag-table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  .ag-table th, .ag-table td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .ag-table th { font: 600 .8rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); }
+  .ag-table td:first-child { font-weight: 620; }
+  .file { margin: 16px 0 20px; }
+  .file figcaption { font: 600 .8rem/1.2 var(--font-mono); color: var(--ink-2); margin: 0 0 6px; }
+  .file pre { margin: 0; }
+</style>
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Subagents, multi-agent systems &amp; A2A</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 7 of The agent toolkit</span></div>
+<p class="lede">One agent with one context window can only hold so much. Splitting work across <strong>subagents</strong> keeps each window clean and lets parts run in parallel, at a price. This lesson covers when that pays off, how agents from different companies can talk (<strong>A2A</strong>), and the parts of an agent system that should never depend on the model's mood: <strong>hooks, permissions and sandboxes</strong>.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what a subagent is and the orchestrator–worker pattern, and decide when multi-agent helps or hurts.</li>
+    <li>Describe the Agent2Agent (A2A) protocol and how it differs from MCP.</li>
+    <li>Choose hooks, permissions or a sandbox for rules that must hold no matter what the model decides.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="sy-5.html">Agents: loops, memory &amp; planning</a> (SY.5), the single-agent loop this lesson scales up, and <a href="ag-3.html">MCP</a> (AG.3), which A2A is compared with. Helpful but optional: <a href="ag-2.html">Context engineering</a> (AG.2).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A lead agent hands a subtask to a subagent. What does the lead usually get back?</p>
+    <ol class="q-src">
+      <li>The subagent's whole context window, every search result included</li>
+      <li>A short summary of what the subagent found or did</li>
+      <li>Nothing; subagents only write files</li>
+      <li>A copy of the subagent's model weights</li>
+    </ol>
+    <div class="q-explain">That is the whole trick: the subagent does messy work in its own window and passes back only a compact result, so the lead's window stays clean.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">You want an agent to <em>always</em> run the code formatter after editing a file. The most reliable way is…</p>
+    <ol class="q-src">
+      <li>Write "ALWAYS FORMAT" in capitals in the system prompt</li>
+      <li>Ask it nicely at the start of every chat</li>
+      <li>Use a bigger model</li>
+      <li>A script that the agent software runs automatically after every edit</li>
+    </ol>
+    <div class="q-explain">Prompts are followed most of the time; code runs every time. That is what hooks are for, as you'll see in the last byte.</div>
+  </div>
+</section>
+
+<h2>One window is not enough: subagents</h2>
+<p>Recap from <a href="sy-5.html">SY.5</a>: an agent is a model in a loop. It thinks, calls a tool, reads the result, and repeats until the task is done. Every tool result lands in the <strong>same context window</strong>. On a long task, that window fills up with search results, file contents and dead ends. Past a point, the model attends less well to what matters (<a href="ag-2.html">AG.2</a>), and eventually the window simply overflows.</p>
+<p>People have tried teams of LLM agents since the early days. In 2023, research frameworks such as CAMEL (Li et al.), MetaGPT (Hong et al.) and AutoGen (Wu et al., Microsoft) had several LLM "agents" with different roles talk to each other. By 2025 the pattern that stuck in real products was simpler: <strong>subagents</strong>.</p>
+<p>A <strong>subagent</strong> is a fresh agent the main agent starts for one subtask. It gets:</p>
+<ul>
+  <li>its <strong>own, empty context window</strong> and a short <strong>brief</strong> (not the whole conversation);</li>
+  <li>optionally its <strong>own instructions, tools and model</strong> (for example, read-only tools and a cheaper, faster model);</li>
+  <li>one job: do the subtask, then return a <strong>short summary</strong>.</li>
+</ul>
+<p>That buys three things:</p>
+<ol class="steps">
+  <li><strong>Context isolation.</strong> The 50 web pages a subagent skimmed never enter the main window; only the two-paragraph summary does.</li>
+  <li><strong>Parallelism.</strong> Independent subtasks run at the same time, so the wall-clock time is closer to one subtask than to all of them.</li>
+  <li><strong>Specialization.</strong> A "code reviewer" subagent can have a focused prompt and only read access; a "test runner" can have only the tools it needs.</li>
+</ol>
+<p>Coding agents increasingly ship this built in. Claude Code, for example, lets you define subagents as Markdown files with a name, a description of when to use them, the tools they may use and the model to run; the main agent delegates to them and gets back only their summary. Other tools offer similar features under names like "background agents" or "tasks".</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ag-7.webp" alt="In a restaurant kitchen a head chef robot hands tickets to three helper robots (chopping, stirring soup, plating dessert) who bring finished plates back." width="1200" height="900" loading="lazy">
+    <div>
+      <p>In a busy restaurant kitchen, the <strong>head chef robot</strong> doesn't cook every dish alone. It hands a ticket to each helper: one chops vegetables, one stirs the soup, one plates the dessert.</p>
+      <p>Each helper works at its <strong>own station</strong>, with its own mess. When it's done, it brings back a <strong>finished plate</strong>, not the peelings and dirty pots. The head chef only sees neat plates, so its counter stays clear and it can put the whole meal together.</p>
+      <p>The head chef is the <strong>orchestrator</strong>, the helpers are <strong>subagents</strong>, the tickets are <strong>briefs</strong> and the plates are <strong>summaries</strong>.</p>
+      <p class="math-note">Where it breaks: kitchen helpers can glance at each other's stations and fix mismatches as they go. Subagents usually can't see each other at all, so if the soup and the dessert need to "match", someone has to say so in the tickets.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What is the main reason a subagent helps with a long research task?</p>
+  <ol class="q-src">
+    <li>Its messy intermediate work stays in its own window; only a short summary reaches the main agent</li>
+    <li>Subagents use a smarter model by definition</li>
+    <li>Subagents never make mistakes</li>
+    <li>It removes the need for tools</li>
+  </ol>
+  <div class="q-explain">Context isolation is the core benefit. Parallelism and specialization are bonuses; subagents can still be wrong, and they use tools just like any agent.</div>
+</div></div>
+
+<h2>Orchestrator and workers: when it helps, when it hurts</h2>
+<p>The common multi-agent shape is <strong>orchestrator–worker</strong>: a lead agent plans, hands out briefs, collects summaries and writes the result. Step through it:</p>
+
+<figure class="anim wide" data-anim="ag-7-orchestrator"></figure>
+
+<p>Anthropic described such a system for its Research feature in a <strong>June 2025</strong> engineering post. A lead agent (Claude Opus 4) directed subagents (Claude Sonnet 4) that searched in parallel. On their internal research evaluation it beat a single Claude Opus 4 agent by <strong>90.2%</strong>, and parallel subagents and tool calls cut research time by up to 90% on complex queries. The costs were just as clear: agents used about <strong>4×</strong> the tokens of a normal chat, and multi-agent systems about <strong>15×</strong>. On the BrowseComp benchmark, token usage alone explained about 80% of the variance in performance. Put simply, a big part of the gain is that the system <em>spends more tokens</em>, spread across many clean windows.</p>
+<p>The same post is frank about where it fits badly: tasks where agents must share a lot of context or depend on each other. It notes that <em>"most coding tasks involve fewer truly parallelizable tasks than research"</em>. The coding-agent company Cognition made the same point more bluntly in a June 2025 essay, "Don't Build Multi-Agents": subagents that see only a summary miss decisions made elsewhere, so their pieces don't fit together. In a 2026 follow-up it reportedly described a narrower pattern that does work: several agents may contribute ideas and checks, but <strong>the writing stays in one thread</strong>.</p>
+<div class="table-wrap"><table class="ag-table">
+  <thead><tr><th>Good fit for subagents</th><th>Poor fit</th></tr></thead>
+  <tbody>
+    <tr><td>Broad research with independent parts (three cities, ten competitors)</td><td>Tightly coupled work: most code edits, where every change depends on shared decisions</td></tr>
+    <tr><td>Read-only exploration: "find every place we call the payments API"</td><td>Several agents editing the same files at once</td></tr>
+    <tr><td>Independent checks: review, test, security scan, each returning findings</td><td>Small tasks: the coordination costs more than the work</td></tr>
+    <tr><td>The main window keeps overflowing with raw material</td><td>Tight budgets: expect several times the tokens</td></tr>
+  </tbody>
+</table></div>
+<p>A safe default: start with <strong>one agent</strong>. Add subagents for <strong>read-heavy, parallel, separable</strong> work that returns a summary. Keep <strong>writes in one place</strong>. Measure cost and quality on your own tasks (<a href="m4-7.html">M4.7</a>) before you scale it up.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Your team wants three agents to refactor three tightly linked modules at the same time. What is the main risk?</p>
+  <ol class="q-src">
+    <li>The context windows will be too small</li>
+    <li>It will be too cheap</li>
+    <li>Each agent sees only its brief, so they make conflicting decisions and the pieces don't fit</li>
+    <li>Subagents can't edit code</li>
+  </ol>
+  <div class="q-explain">Coupled work needs shared context. Splitting it hides decisions from the agents that depend on them. Keep coupled writes in one agent; use subagents for independent reads and checks.</div>
+</div></div>
+
+<h2>A2A: when agents from different teams must talk</h2>
+<p>Subagents live inside one app, built by one team. But what if <em>your</em> travel agent needs to book with an <em>airline's</em> agent, built by another company on another framework? Neither side wants to expose its internal tools, prompts or memory. They need a shared language for one agent to hand a job to another.</p>
+<p>That is the <strong>Agent2Agent (A2A) protocol</strong>. Google announced it in <strong>April 2025</strong> with more than 50 partner companies, and in <strong>June 2025</strong> handed it to the <strong>Linux Foundation</strong> as a vendor-neutral project, with AWS, Cisco, Google, Microsoft, Salesforce, SAP and ServiceNow among the founding members. Its main ideas:</p>
+<ul>
+  <li><strong>Agent Card:</strong> a small JSON "business card" each agent publishes at a well-known web address: its name, what it can do (its skills), where to reach it and how to authenticate. Other agents read it to discover what it offers.</li>
+  <li><strong>Task:</strong> a unit of work with an id that moves through states such as <em>working</em>, <em>input-required</em> (the remote agent has a question) and <em>completed</em> or <em>failed</em>. Tasks can take seconds or days.</li>
+  <li><strong>Messages and artifacts:</strong> the agents exchange messages while working; the outputs (a document, a booking, an image) come back as artifacts.</li>
+  <li><strong>Plumbing:</strong> JSON-RPC 2.0 over HTTPS, with streaming updates and push notifications for long jobs.</li>
+</ul>
+<p>Agents stay <strong>opaque</strong>: the airline's agent never shows its internal tools or reasoning, only its card, its progress and its results.</p>
+<div class="table-wrap"><table class="ag-table">
+  <thead><tr><th></th><th>MCP (AG.3)</th><th>A2A</th></tr></thead>
+  <tbody>
+    <tr><td>Connects</td><td>An agent to <strong>tools and data</strong></td><td>An agent to <strong>another agent</strong></td></tr>
+    <tr><td>The other side is</td><td>A function: does one thing, returns a result</td><td>A peer that thinks, may ask questions, may take hours</td></tr>
+    <tr><td>Discovery</td><td>The client asks a server for its tool list</td><td>Read the remote agent's Agent Card</td></tr>
+    <tr><td>Typical use</td><td>Read the calendar, query a database, open a ticket</td><td>Hand a whole job to a partner's or another team's agent</td></tr>
+  </tbody>
+</table></div>
+<p>The two fit together: your travel agent uses <strong>MCP</strong> to read your calendar and <strong>A2A</strong> to ask the airline's agent to book a seat. On the "where to use what" map (<a href="ag-1.html">AG.1</a>): a big task with separable parts, or a window that keeps overflowing → <strong>subagents</strong>; agents built by different teams or vendors that must cooperate → <strong>A2A</strong>. As of 2026, A2A shows up mostly in enterprise agent platforms; if all your agents live in one app, plain subagents are simpler.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Your agent needs to look up rows in your own Postgres database. Which protocol fits?</p>
+  <ol class="q-src">
+    <li>A2A, because the database is another agent</li>
+    <li>MCP (or plain function calling): the database is a tool, not a peer agent</li>
+    <li>Neither; agents can't use databases</li>
+    <li>Both, always</li>
+  </ol>
+  <div class="q-explain">A database answers queries; it doesn't plan or ask questions. That is a tool, so MCP (reusable) or function calling inside your app (SY.4). A2A is for handing work to another agent.</div>
+</div></div>
+
+<h2>Hooks, permissions and sandboxes</h2>
+<p>Everything so far is guided by prompts and rules files, and a model follows those <em>most</em> of the time. Some things must hold <strong>every</strong> time: code gets formatted, tests run before "done", nobody drops the production database. Those belong in <strong>deterministic code</strong>, not in a prompt.</p>
+<p><strong>Hooks</strong> are scripts the agent software runs automatically at fixed points in its loop: when a session starts, before a tool call, after a tool call, when the agent says it's finished. Claude Code's docs describe the point well: hooks give <em>"deterministic control: certain actions always happen rather than relying on the LLM to choose to run them."</em> Several other agents now offer similar hooks. Two typical examples, in Claude Code's format:</p>
+<figure class="file">
+  <figcaption>.claude/settings.json · format every file after an edit</figcaption>
+<pre><code>{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{
+        "type": "command",
+        "command": "jq -r '.tool_input.file_path' | xargs npx prettier --write"
+      }]
+    }]
+  }
+}</code></pre>
+</figure>
+<figure class="file">
+  <figcaption>block-drop.sh · a PreToolUse hook that blocks a command</figcaption>
+<pre><code>#!/bin/bash
+COMMAND=$(jq -r '.tool_input.command')
+if echo "$COMMAND" | grep -qi "drop table"; then
+  echo "Blocked: dropping tables is not allowed" >&amp;2
+  exit 2   # exit code 2 = block the action, tell the model why
+fi
+exit 0</code></pre>
+</figure>
+<p>Hooks are one of three layers of control that don't depend on the model's judgement:</p>
+<ol class="steps">
+  <li><strong>Permissions:</strong> which tools the agent may use without asking, which need your approval (anything that deletes, sends, pays or deploys), and which are denied outright. Start with the least it needs.</li>
+  <li><strong>Hooks:</strong> your own checks and automations at lifecycle events: format, lint, run tests, block risky commands, log every tool call.</li>
+  <li><strong>Sandboxes:</strong> run the agent in a container or VM with limited files and network access, so even a confused or tricked agent (for example by instructions hidden in a web page, <a href="sy-7.html">SY.7</a>) can't reach your secrets or production systems.</li>
+</ol>
+<p>One warning: hooks are scripts that run with <em>your</em> permissions. Review hooks that come with someone else's project or plugin before you enable them, exactly as you would review any script.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> the reliable agent setups in 2026 combine both halves. Prompts, rules files and skills steer the model towards good behaviour; permissions, hooks and sandboxes guarantee the few things that must never go wrong. The "where to use what" rule is short: if it must happen no matter what the model decides, write code, not a prompt.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Which requirement needs a hook (or permission rule) rather than a line in AGENTS.md?</p>
+  <ol class="q-src">
+    <li>"Prefer descriptive variable names"</li>
+    <li>"API handlers live in <code>src/api/</code>"</li>
+    <li>"We use pnpm, not npm"</li>
+    <li>"The agent must never run <code>git push --force</code> on main"</li>
+  </ol>
+  <div class="q-explain">The first three are guidance, and a slip is cheap. A forced push to main must never happen, so block it in code (a PreToolUse hook or a deny rule) instead of hoping the model remembers.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">A colleague says: "Multi-agent is always better, more agents means more brainpower." How do you answer?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Subagents help when a task splits into independent, read-heavy parts, because each gets a clean context window and they run in parallel; but they cost several times more tokens and see only their brief, so tightly coupled work like most coding goes better in one agent. Start with one agent, add subagents for separable research or checks, and keep the writing in one place.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In Anthropic's June 2025 report on its multi-agent research system, what explained most of the variance in performance on BrowseComp?</p>
+    <ol class="q-src">
+      <li>The number of subagents</li>
+      <li>The length of the system prompt</li>
+      <li>How many tokens were used</li>
+      <li>Which programming language the tools used</li>
+    </ol>
+    <div class="q-explain">Token usage alone explained about 80% of the variance. Multi-agent systems help largely by spending more tokens across parallel, clean windows, which is also why they cost more.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What is an A2A Agent Card?</p>
+    <ol class="q-src">
+      <li>A JSON description an agent publishes: its name, skills, endpoint and how to authenticate</li>
+      <li>A list of every tool and prompt inside the agent</li>
+      <li>A payment card agents use to buy compute</li>
+      <li>The agent's memory file</li>
+    </ol>
+    <div class="q-explain">The card is how other agents discover what an agent can do and how to reach it, without seeing its internals: A2A agents stay opaque.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">The single-agent loop from SY.5 is "think, call a tool, read the result, repeat". Which problem with that loop do subagents mainly address?</p>
+    <ol class="q-src">
+      <li>The model can't call tools</li>
+      <li>Every tool result piles into one context window until it is crowded or full</li>
+      <li>The loop can't stop</li>
+      <li>Tools always return errors</li>
+    </ol>
+    <div class="q-explain">Subagents move bulky intermediate results into separate windows and pass back summaries, so the main loop stays focused.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which pairing is right?</p>
+    <ol class="q-src">
+      <li>Format after every edit → a line in the system prompt</li>
+      <li>Your agent hands a booking job to a partner company's agent → MCP</li>
+      <li>Read your own calendar → A2A</li>
+      <li>Never let the agent touch production credentials → a sandbox plus permission rules</li>
+    </ol>
+    <div class="q-explain">Must-always rules need deterministic controls: a hook for formatting, a sandbox and permissions for credentials. Agent-to-agent hand-offs are A2A; tools and data are MCP.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A <strong>subagent</strong> gets a fresh context window and a brief, works (often in parallel) and returns a <strong>short summary</strong>: isolation, parallelism, specialization.</li>
+    <li><strong>Orchestrator–worker</strong> shines on broad, separable, read-heavy work; it costs several times the tokens and hurts on tightly coupled work such as most coding. Keep writes in one thread.</li>
+    <li><strong>A2A</strong> (Google, April 2025; Linux Foundation since June 2025) lets agents from different teams cooperate via Agent Cards and tasks. <strong>MCP = agent ↔ tool; A2A = agent ↔ agent.</strong></li>
+    <li>What must always happen goes in <strong>code</strong>: hooks, permissions and sandboxes, not prompts.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ag-7-a","front":"What is a subagent, and what three things does it buy you?","back":"A fresh agent started for one subtask, with its own context window and a brief, that returns a short summary. Benefits: context isolation, parallelism, specialization (own prompt, tools, model)."},
+  {"id":"ag-7-b","front":"When does multi-agent help, and when does it hurt?","back":"Helps: broad, parallel, read-heavy work with separable parts (research, independent checks). Hurts: tightly coupled work like most coding, small tasks, tight budgets; agents see only their brief and token use is several times higher."},
+  {"id":"ag-7-c","front":"What did Anthropic report about tokens in its June 2025 multi-agent research system?","back":"Agents used about 4× the tokens of a chat and multi-agent systems about 15×; token usage alone explained about 80% of performance variance on BrowseComp. The system beat a single agent by 90.2% on their internal research eval."},
+  {"id":"ag-7-d","front":"MCP vs A2A in one line each.","back":"MCP connects an agent to tools and data (agent ↔ tool). A2A connects an agent to another, opaque agent via Agent Cards and tasks (agent ↔ agent)."},
+  {"id":"ag-7-e","front":"What is a hook, and why use one instead of a prompt instruction?","back":"A script the agent software runs automatically at a lifecycle event (session start, before/after a tool call, on stop). It runs every time, deterministically; a prompt is only followed most of the time."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ag-7-orchestrator.js"></script>
+</body>
+</html>

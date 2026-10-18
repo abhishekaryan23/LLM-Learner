@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="a1-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Music &amp; sound generation · LLMs, Animated</title>
+<meta name="description" content="How models generate music and sound: Jukebox, MusicLM and MusicGen's codebook delay pattern, latent diffusion with AudioLDM and Stable Audio, Fréchet Audio Distance, and the copyright questions around training data.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Music &amp; sound generation</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Audio &amp; speech</span></div>
+<p class="lede">Music is the hardest audio to generate: wide bandwidth, many instruments at once, and structure that unfolds over minutes. Two families of models tackle it, the same two you met for images: language models over codec tokens, and diffusion over a compressed latent. This lesson covers both, how they're evaluated, and the open questions about the data they learned from.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how MusicGen's codebook delay pattern lets one Transformer predict several codebooks per step, and count its steps.</li>
+    <li>Describe latent diffusion for audio (AudioLDM, Stable Audio), including timing conditioning.</li>
+    <li>Explain what Fréchet Audio Distance measures and its limits, and summarize the data-provenance concerns.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> you'll need <a href="a1-3.html">Neural audio codecs &amp; audio tokens (A1.3)</a> for codebooks and RVQ, and <a href="g1-3.html">Diffusion from scratch (G1.3)</a> for the denoising idea. Helpful but optional: <a href="g1-4.html">Latent diffusion &amp; guidance (G1.4)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; it's fine to be wrong.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A codec gives 4 tokens per frame at 50 frames per second. If a Transformer predicts every token one at a time, how many steps for 30 seconds of music?</p>
+    <ol class="q-src">
+      <li>1,500</li>
+      <li>200</li>
+      <li>6,000</li>
+      <li>120</li>
+    </ol>
+    <div class="q-explain">$30 \times 50 = 1{,}500$ frames, times 4 tokens $= 6{,}000$ sequential steps. MusicGen's delay pattern brings that down to about 1,500.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Fréchet Audio Distance (FAD) compares…</p>
+    <ol class="q-src">
+      <li>each generated clip with its text prompt</li>
+      <li>the statistics of embeddings of many real clips and many generated clips</li>
+      <li>the waveforms of two clips, sample by sample</li>
+      <li>how long the model took to generate</li>
+    </ol>
+    <div class="q-explain">FAD embeds both sets with a pretrained audio classifier, fits a Gaussian to each, and measures the distance between them. It says nothing about any single clip or about prompt adherence.</div>
+  </div>
+</section>
+
+<h2>From notes to raw audio: Jukebox</h2>
+<p>Early music generation worked with <strong>symbols</strong>: MIDI notes, chords, durations. Symbolic models such as the Music Transformer (Huang et al., 2018) composed convincing piano pieces, but a score isn't a recording; it has no voice, no timbre, no production.</p>
+<p><strong>Jukebox</strong> (Dhariwal et al., 2020, OpenAI) went straight to raw audio at 44.1 kHz, including singing. It compressed audio with a VQ-VAE at three levels, downsampling 8×, 32× and 128×, with codebooks of 2,048 entries. Even the coarsest level is about $44{,}100 / 128 \approx 344$ tokens per second. A separate Transformer prior at each level generated tokens, top level first, conditioned on artist, genre and lyrics; trained on 1.2 million songs, it produced recognisable styles and sung words.</p>
+<p>The cost was extreme. OpenAI reported that rendering one minute of audio took about 9 hours. Three problems stood out and shaped everything since: <strong>too many tokens per second</strong>, <strong>slow sequential sampling</strong>, and <strong>training data scraped from commercial music</strong>.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why did Jukebox take hours to render a minute of music?</p>
+  <ol class="q-src">
+    <li>Even its coarsest VQ-VAE level had hundreds of tokens per second, all sampled one after another, and finer levels had more</li>
+    <li>It generated MIDI notes and needed a human to play them</li>
+    <li>It used diffusion with thousands of steps</li>
+    <li>It recorded real instruments for every song</li>
+  </ol>
+  <div class="q-explain">At 344 top-level tokens per second (and 4× and 16× more at the lower levels), a minute is tens of thousands to millions of sequential predictions. Lower frame rates and parallel codebooks fixed much of this.</div>
+</div></div>
+
+<h2>Token models: MusicLM and MusicGen's delay pattern</h2>
+<p><strong>MusicLM</strong> (Agostinelli et al., 2023, Google) brought AudioLM's hierarchy (A1.3) to text-to-music. A joint music–text embedding model, MuLan, supplies conditioning tokens; w2v-BERT semantic tokens plan the long-range structure; SoundStream acoustic tokens render 24 kHz audio. It was trained on about 280,000 hours of music, and the authors released <strong>MusicCaps</strong>, about 5,500 music clips with captions written by musicians, which became a standard evaluation set. The model itself was not released.</p>
+<p><strong>MusicGen</strong> (Copet et al., 2023, Meta) showed one Transformer is enough. It uses a 32 kHz EnCodec with <strong>4 codebooks at 50 frames per second</strong>, conditions on text through a T5 text encoder (and optionally on a melody's chromagram), was trained on about 20,000 hours of licensed music, and was released with open weights for non-commercial use. The key question it answered: with $K = 4$ tokens per frame, in what order should a single Transformer predict them?</p>
+<ul>
+  <li><strong>Flatten:</strong> predict all tokens one by one. Exact, but $4 \times$ the steps.</li>
+  <li><strong>Parallel:</strong> predict all 4 codebooks of a frame in one step (4 output heads). Fast, but the finer codebooks are guessed without knowing the coarser ones of the same frame, and quality drops.</li>
+  <li><strong>Delay:</strong> shift codebook $k$ right by $k - 1$ steps. At step $t$ the model predicts codebook 1 of frame $t$, codebook 2 of frame $t-1$, codebook 3 of frame $t-2$ and codebook 4 of frame $t-3$. Each finer token is predicted after the coarser tokens of its frame are already known, at nearly one step per frame.</li>
+</ul>
+
+<figure class="anim wide" data-anim="a1-5-delay"></figure>
+
+<h3>Worked example</h3>
+<p>30 seconds of music with MusicGen's codec (50 frames/s, 4 codebooks).</p>
+<ol class="steps">
+  <li>Frames: $30 \times 50 = 1{,}500$. Tokens: $1{,}500 \times 4 = 6{,}000$.</li>
+  <li>Flattened: 6,000 sequential steps.</li>
+  <li>Delay pattern: $1{,}500 + (4 - 1) = 1{,}503$ steps, almost 4× fewer, with each token still conditioned on the coarser codebooks of its own frame.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A 10-second jingle, same codec.</p>
+  <ol class="steps">
+    <li>Frames: <span class="blank" data-answer="500" data-tol="0.5" data-hint="10 s × 50 frames/s."></span></li>
+    <li>Steps if flattened: <span class="blank" data-answer="2000" data-tol="0.5" data-hint="500 frames × 4 codebooks."></span></li>
+    <li>Steps with the delay pattern: <span class="blank" data-answer="503" data-tol="0.5" data-hint="Frames + (codebooks − 1)."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">In the delay pattern, when the model predicts codebook 3 of frame 10, which tokens of frame 10 are already generated?</p>
+  <ol class="q-src">
+    <li>None of them</li>
+    <li>Only codebook 4</li>
+    <li>All four</li>
+    <li>Codebooks 1 and 2</li>
+  </ol>
+  <div class="q-explain">Codebook $k$ of frame $t$ is produced at step $t + k - 1$. So codebook 3 of frame 10 comes at step 12, after codebook 1 (step 10) and codebook 2 (step 11) of the same frame.</div>
+</div></div>
+
+<h2>Latent diffusion for audio: AudioLDM and Stable Audio</h2>
+<p>The other family borrows from image generation (G1.3, G1.4): run diffusion not on raw audio but in a <strong>compressed continuous latent</strong>, then decode.</p>
+<p><strong>AudioLDM</strong> (Liu et al., 2023) did this for sound effects, speech and music. A VAE compresses the <em>mel spectrogram</em> into a small latent "image"; a diffusion model learns to denoise those latents; a HiFi-GAN vocoder turns the decoded spectrogram back into a waveform. For conditioning it used <strong>CLAP</strong>, a contrastive model that maps audio and text into a shared embedding space (CLIP for sound). Because the spaces are shared, the diffusion model could be trained with <em>audio</em> embeddings and then driven by <em>text</em> embeddings at generation time.</p>
+<p><strong>Stable Audio</strong> (Evans et al., 2024, Stability AI) works on <strong>44.1 kHz stereo</strong> audio. A fully convolutional VAE compresses the waveform itself into a latent sequence, a U-Net diffusion model denoises it, and conditioning combines a text encoder with <strong>timing embeddings</strong>: the clip's start time within its source file and the file's total length. Training on chunks of longer files, the model learns where in a piece a chunk sits, so at generation time you can ask for a specific length and get music that starts and ends properly rather than stopping mid-phrase. The paper reports up to 95 seconds of stereo audio rendered in 8 seconds on one A100 GPU. It was trained on licensed stock music (the AudioSparx library). Later versions moved to diffusion-transformer backbones and longer outputs.</p>
+<p>The trade-off between the families mirrors images. Token models stream naturally and reuse LLM tooling but sample step by step; diffusion models generate a whole clip in parallel over a fixed number of denoising steps and handle long, high-fidelity stereo well, but streaming is awkward. As of 2026 both are in active use, and hybrids exist.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What problem does Stable Audio's timing conditioning solve?</p>
+  <ol class="q-src">
+    <li>It removes the need for a VAE</li>
+    <li>It lets you request a length, and the model knows where it is within a piece, so clips can begin and end naturally</li>
+    <li>It makes the audio mono</li>
+    <li>It replaces the text prompt</li>
+  </ol>
+  <div class="q-explain">Feeding the chunk's start time and the total duration tells the model whether it's at an intro, the middle or an ending. Without it, generated clips tend to start or stop mid-phrase.</div>
+</div></div>
+
+<h2>Judging generated audio, and whose music it learned from</h2>
+<p>How good is a generated clip? Listening tests are the gold standard but slow and costly, so papers report automatic metrics. The most common is <strong>Fréchet Audio Distance</strong> (Kilgour et al., 2019), the audio cousin of FID for images. Embed many real clips and many generated clips with a pretrained audio classifier (originally VGGish), fit a Gaussian to each set, and compute</p>
+$$\text{FAD} = \lVert \mu_r - \mu_g \rVert^2 + \operatorname{Tr}\!\left(\Sigma_r + \Sigma_g - 2\,(\Sigma_r \Sigma_g)^{1/2}\right)$$
+<p class="math-note">$\mu_r, \Sigma_r$ are the mean and covariance of the real-audio embeddings; $\mu_g, \Sigma_g$ of the generated ones; $\operatorname{Tr}$ is the trace (sum of the diagonal). Lower is better; 0 means the two embedding distributions match in mean and covariance.</p>
+<p>FAD has real limits:</p>
+<ul>
+  <li>It only sees what the <strong>embedding model</strong> sees. VGGish works on 16 kHz audio and was trained to classify sound events, so it is largely blind to high-frequency quality and to musical qualities like harmony or long-term structure. Different embedding models can rank systems differently.</li>
+  <li>It's a <strong>set-level</strong> score, biased by sample size, and says nothing about whether a clip follows its prompt. Papers add a text–audio similarity such as a CLAP score, plus human ratings.</li>
+  <li>A model can score well by matching the reference set's style while lacking musical interest; it can also be gamed by close copies of training data.</li>
+</ul>
+<p>That last point leads to <strong>data provenance</strong>. Music generators learn from recordings, and many were trained on music whose rights holders never agreed. In June 2024 the major record labels sued two commercial music generators, Suno and Udio, alleging training on copyrighted recordings without licences. In late 2025 Universal Music settled with Udio and Warner Music with Suno, each announcing licensing partnerships; other claims continued, and the underlying legal questions (is training "fair use"? who owns outputs?) remain unsettled in many countries. Research has also shown that generators can sometimes reproduce snippets of training data, which is why papers like MusicLM's included memorization checks. Some models were trained only on licensed or stock libraries (MusicGen's 20,000 hours, Stable Audio's AudioSparx data), and watermarking (A1.4) is increasingly applied to outputs.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>There are two ways a robot can make a song. One robot is like a kid <strong>stacking colored bricks</strong> left to right, each brick a tiny piece of sound, choosing the next brick from the ones before. The other starts with a <strong>fuzzy, noisy picture of the whole song</strong> and cleans it up a little at a time, everywhere at once, until it's sharp.</p>
+      <p>Both robots learned by listening to lots of songs. So we have to ask whose songs they heard, and whether those musicians said yes.</p>
+      <p>Where it breaks: the brick robot actually places several bricks per moment (one per codebook), and the "picture" robot cleans a compressed sketch, not the sound itself.</p>
+    </div>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters for LLM practice:</strong> music and sound generation reuse the two engines of modern generative AI. Token models are LLMs over a different vocabulary, with the same sampling knobs (M1.5) and the same tricks for several tokens per step that speech-to-speech models need (A1.6). Diffusion models share their machinery with image and video generation. And the evaluation and data questions here, metrics that miss what people care about and training data of uncertain provenance, are the same ones text LLMs face.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">A new music model gets a lower (better) FAD than a baseline. What can you conclude?</p>
+  <ol class="q-src">
+    <li>Each of its clips follows the text prompt better</li>
+    <li>Listeners will definitely prefer it</li>
+    <li>Its outputs' embedding statistics are closer to the reference set's, under that embedding model</li>
+    <li>It did not memorize any training data</li>
+  </ol>
+  <div class="q-explain">FAD measures distribution similarity in one embedding space. Prompt adherence, human preference and memorization each need their own checks.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Compare a token-based music model like MusicGen with a latent-diffusion model like Stable Audio, and say what FAD can and can't tell you about them.</p>
+  <div class="model-answer"><strong>Model answer:</strong> MusicGen is a single Transformer that predicts EnCodec tokens (4 codebooks at 50 Hz) step by step, using a delay pattern so each step predicts one token from every codebook, offset in time, which gives about one step per frame while keeping coarse-before-fine order. Stable Audio instead runs diffusion over a VAE's continuous latent of 44.1 kHz stereo audio, generating the whole clip in parallel over denoising steps, with text and timing embeddings to control content and length. FAD compares embedding statistics of many generated and real clips, so it tracks overall realism in that embedding space, but not prompt adherence, musical structure, human preference or memorization.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">MusicGen's "parallel" pattern is as fast as the delay pattern. Why is the delay pattern better?</p>
+    <ol class="q-src">
+      <li>In the delay pattern, each finer codebook token is predicted after the coarser tokens of its own frame are known</li>
+      <li>The delay pattern uses fewer codebooks</li>
+      <li>The parallel pattern can't use text conditioning</li>
+      <li>The delay pattern needs no codec</li>
+    </ol>
+    <div class="q-explain">RVQ codebooks depend on each other (A1.3): codebook 2 refines codebook 1's choice. Predicting them at the same time ignores that; offsetting them by one step each restores the order at almost no cost.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">How did AudioLDM manage text-to-audio generation with limited captioned audio?</p>
+    <ol class="q-src">
+      <li>It generated MIDI and rendered it</li>
+      <li>It used no conditioning at all</li>
+      <li>It conditioned on CLAP embeddings: trained with audio embeddings, then driven by text embeddings from the shared space</li>
+      <li>It transcribed every clip with Whisper first</li>
+    </ol>
+    <div class="q-explain">CLAP puts audio and text in one embedding space, so audio embeddings can stand in for captions during training.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">MusicGen samples codec tokens with a softmax over each codebook. Which knob from M1.5 makes its music more adventurous but riskier?</p>
+    <ol class="q-src">
+      <li>The KV cache size</li>
+      <li>The codec's sample rate</li>
+      <li>The number of layers</li>
+      <li>A higher sampling temperature (or larger top-k/top-p)</li>
+    </ol>
+    <div class="q-explain">Same as text: flatter distributions give more varied, surprising continuations and more chances to wander off. MusicGen's authors used top-k sampling.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which statement about training data for music models is accurate?</p>
+    <ol class="q-src">
+      <li>All music generators are trained only on public-domain recordings</li>
+      <li>Some were trained on licensed libraries; others faced lawsuits over unlicensed recordings, and the legal questions are not settled everywhere</li>
+      <li>Copyright doesn't apply to recordings used for training, by international treaty</li>
+      <li>FAD proves a model did not copy its training data</li>
+    </ol>
+    <div class="q-explain">MusicGen and Stable Audio used licensed data; Suno and Udio were sued by major labels in 2024, with some settlements announced in late 2025. Whether training is lawful is still being decided in courts and legislatures.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Jukebox</strong> (2020) generated raw 44.1 kHz music with a 3-level VQ-VAE and Transformer priors, but took hours per minute.</li>
+    <li><strong>MusicLM</strong> used semantic + acoustic token hierarchies; <strong>MusicGen</strong> uses one Transformer over 4 EnCodec codebooks with a <strong>delay pattern</strong>: $T + 3$ steps instead of $4T$.</li>
+    <li><strong>AudioLDM</strong> and <strong>Stable Audio</strong> run diffusion in a compressed latent; Stable Audio's timing embeddings control length and structure.</li>
+    <li><strong>FAD</strong> compares embedding statistics of real and generated sets; it misses prompt adherence, structure and memorization.</li>
+    <li>Training-data <strong>provenance</strong> is contested: licensed-data models exist, and lawsuits over unlicensed training continue.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"a1-5-a","front":"What was Jukebox, and why was it slow?","back":"OpenAI, 2020: raw 44.1 kHz music from a 3-level VQ-VAE (8×, 32×, 128× downsampling) with Transformer priors conditioned on artist, genre, lyrics. Hundreds of tokens per second sampled sequentially: about 9 hours per minute of audio."},
+  {"id":"a1-5-b","front":"Explain MusicGen's delay pattern.","back":"Codebook $k$ is shifted $k-1$ steps, so step $t$ predicts cb1 of frame $t$, cb2 of $t-1$, cb3 of $t-2$, cb4 of $t-3$. One step per frame (plus 3), and each finer token comes after the coarser tokens of its frame."},
+  {"id":"a1-5-c","front":"Step counts for 30 s with 4 codebooks at 50 Hz?","back":"1,500 frames, 6,000 tokens. Flattened: 6,000 steps. Delay pattern: 1,503 steps."},
+  {"id":"a1-5-d","front":"How do AudioLDM and Stable Audio generate audio?","back":"Latent diffusion. AudioLDM: VAE over mel spectrograms, CLAP conditioning, HiFi-GAN vocoder. Stable Audio: VAE over 44.1 kHz stereo waveforms, text + timing (start, total length) conditioning; up to 95 s in about 8 s on an A100."},
+  {"id":"a1-5-e","front":"What is Fréchet Audio Distance and what does it miss?","back":"Fréchet distance between Gaussians fit to embeddings (e.g. VGGish) of real vs generated sets: $\\lVert\\mu_r-\\mu_g\\rVert^2 + \\mathrm{Tr}(\\Sigma_r+\\Sigma_g-2(\\Sigma_r\\Sigma_g)^{1/2})$. Misses prompt adherence, musical structure, human preference, memorization; depends on the embedding model and sample size."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/a1-5-delay.js"></script>
+</body>
+</html>

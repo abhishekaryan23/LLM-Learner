@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="v1-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Detection &amp; segmentation (SAM) · LLMs, Animated</title>
+<meta name="description" content="Beyond one label per image: bounding boxes and IoU, two-stage and one-stage detectors, DETR's set prediction, Mask R-CNN, and Segment Anything's promptable masks.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Detection &amp; segmentation (SAM)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Vision</span></div>
+<p class="lede">"Is there a cat?" is the easy question. A self-driving car, a photo editor or a robot needs <em>where</em>, <em>how many</em> and <em>exactly which pixels</em>. This lesson walks from bounding boxes to Meta's <strong>Segment Anything</strong>, which outlines almost any object you click on.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Tell classification, detection, and semantic, instance and panoptic segmentation apart.</li>
+    <li>Compute IoU for two boxes and say how it decides whether a detection counts.</li>
+    <li>Explain how Faster R-CNN, YOLO, DETR and SAM differ in design.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> SAM's image encoder is a ViT pretrained as a masked autoencoder, from <a href="v1-3.html">Self-supervised vision (V1.3)</a>. Helpful but optional: convolutional feature maps from <a href="p6-1.html">P6.1</a>, and CLIP's text–image space from <a href="v1-2.html">V1.2</a> for the open-vocabulary detectors at the end.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; it primes you for the answer.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A predicted box and the true box each cover 100 pixels and overlap on 50 pixels. What is their "intersection over union"?</p>
+    <ol class="q-src">
+      <li>0.5</li>
+      <li>0.33</li>
+      <li>0.25</li>
+      <li>0.75</li>
+    </ol>
+    <div class="q-explain">Intersection = 50. Union = 100 + 100 − 50 = 150 (subtract the overlap so it isn't counted twice). 50 / 150 ≈ 0.33. Half-overlapping boxes score only a third.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which task gives each of two cats in a photo its own pixel mask, but labels the grass and sky as nothing?</p>
+    <ol class="q-src">
+      <li>Image classification</li>
+      <li>Semantic segmentation</li>
+      <li>Instance segmentation</li>
+      <li>Object detection</li>
+    </ol>
+    <div class="q-explain">Instance segmentation separates individual objects ("things") pixel by pixel. Semantic segmentation labels every pixel by class but merges the two cats; detection gives boxes, not masks.</div>
+  </div>
+</section>
+
+<h2>From one label to every pixel</h2>
+<p>Image classification (ImageNet-style) was the benchmark that drove a decade of vision research, from AlexNet to ViT. But a classifier outputs one label per image. Most applications need more structure, and over the years the field settled on a ladder of tasks:</p>
+
+<figure class="anim wide" data-anim="v1-4-tasks"></figure>
+
+<ul>
+  <li><strong>Object detection:</strong> for each object, a box (usually 4 numbers, such as $x_{\min}, y_{\min}, x_{\max}, y_{\max}$), a class and a confidence. The COCO benchmark (Lin et al., 2014) has 80 such object classes.</li>
+  <li><strong>Semantic segmentation:</strong> a class for every pixel. Good for road scenes and medical scans, where "how much road" or "which tissue" matters more than counting.</li>
+  <li><strong>Instance segmentation:</strong> a separate mask per object instance.</li>
+  <li><strong>Panoptic segmentation</strong> (Kirillov et al., 2019) unifies the last two. Countable <strong>things</strong> (cats, cars, people) get class + instance ID; amorphous <strong>stuff</strong> (sky, grass, road) gets a class only.</li>
+</ul>
+<p>All of these reuse a classification-style backbone (a CNN, ViT or Swin) to turn pixels into feature maps, and add a task-specific <strong>head</strong> on top. Denser outputs need features that keep spatial detail, one reason hierarchical backbones like Swin (<a href="v1-1.html">V1.1</a>) were popular here.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-v1-4.webp" alt="A child traces a coloured outline around each toy in a photo of a playroom and fills each outline with its own colour; a few toys get simple rectangle frames instead." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A child has a photo of a messy playroom. For a few toys, they just draw a <strong>rectangle frame</strong> around each one: quick, and you can count the toys. That's detection.</p>
+      <p>For the rest, they <strong>trace the exact outline</strong> of each toy and colour it in, every toy its own colour. That's instance segmentation: now you know exactly which bits of the photo belong to which toy.</p>
+      <p>Where it breaks: the model doesn't trace slowly around edges. It decides for every pixel at once which object it belongs to.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A city planner wants to know what fraction of an aerial photo is road, park or building, and doesn't care about individual buildings. Which task fits best?</p>
+  <ol class="q-src">
+    <li>Semantic segmentation</li>
+    <li>Instance segmentation</li>
+    <li>Image classification</li>
+  </ol>
+  <div class="q-explain">A class per pixel gives area fractions directly. Instance IDs would add work the planner doesn't need, and classification gives only one label for the whole photo.</div>
+</div></div>
+
+<h2>Boxes and IoU</h2>
+<p>How close is a predicted box to the true one? The standard measure is <strong>intersection over union (IoU)</strong>, also called the Jaccard index:</p>
+$$\mathrm{IoU}(A, B) = \frac{\lvert A \cap B \rvert}{\lvert A \cup B \rvert}$$
+$$\lvert A \cup B \rvert = \lvert A\rvert + \lvert B\rvert - \lvert A \cap B \rvert$$
+<p class="math-note">$\lvert A \cap B\rvert$ is the overlap area; $\lvert A\rvert$ and $\lvert B\rvert$ are the two boxes' areas. Subtracting the overlap avoids counting it twice. IoU is 1 for identical boxes and 0 for boxes that don't touch.</p>
+<p>For axis-aligned boxes the overlap is easy: its width is $\min(x_{\max}) - \max(x_{\min})$, its height likewise, and either one below zero means no overlap.</p>
+
+<h3>Worked example</h3>
+<p>Truth $A = (0, 0)$–$(4, 4)$; prediction $B = (2, 2)$–$(6, 6)$.</p>
+<ol class="steps">
+  <li><strong>Areas:</strong> $\lvert A\rvert = \lvert B\rvert = 4 \times 4 = 16$.</li>
+  <li><strong>Overlap:</strong> width $\min(4, 6) - \max(0, 2) = 2$, height also 2, so $\lvert A \cap B\rvert = 4$.</li>
+  <li><strong>Union:</strong> $16 + 16 - 4 = 28$.</li>
+  <li><strong>IoU</strong> $= 4/28 \approx 0.14$. Visually the boxes overlap "a quarter", yet IoU is low: it's a strict measure.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Truth $A = (0, 0)$–$(10, 10)$; prediction $B = (5, 0)$–$(15, 10)$, shifted right by half a box.</p>
+  <ol class="steps">
+    <li>Overlap area $\lvert A \cap B\rvert$: <span class="blank" data-answer="50" data-tol="0.001" data-hint="Width min(10, 15) − max(0, 5) = 5; height 10."></span></li>
+    <li>Union: <span class="blank" data-answer="150" data-tol="0.001" data-hint="100 + 100 − overlap."></span></li>
+    <li>IoU: <span class="blank" data-answer="0.333" data-tol="0.005" data-hint="Overlap / union."></span> (below 0.5, so a standard benchmark would count it as a miss)</li>
+  </ol>
+</section>
+
+<section class="playground" data-iou-playground aria-labelledby="pg">
+  <h3 id="pg">Try it: drag the prediction</h3>
+  <p class="math-note" style="margin:0">Move or resize the orange prediction (drag it, or use the sliders) and watch IoU against the blue ground truth.</p>
+</section>
+
+<p>IoU decides what counts as a hit. On PASCAL VOC a detection matches a true object if IoU ≥ 0.5; COCO's main score, <strong>AP</strong> (often called mAP), averages precision over ten thresholds from 0.50 to 0.95, rewarding tight boxes. IoU also drives <strong>non-maximum suppression (NMS)</strong>: detectors often fire several overlapping boxes on one object, so you keep the highest-scoring box and drop others of the same class that overlap it with IoU above a threshold (say 0.5).</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">A detector outputs three boxes on the same dog, with scores 0.95, 0.90 and 0.60, all overlapping each other with IoU around 0.8. What does NMS at threshold 0.5 keep?</p>
+  <ol class="q-src">
+    <li>All three</li>
+    <li>The 0.60 box only</li>
+    <li>Only the 0.95 box</li>
+  </ol>
+  <div class="q-explain">NMS keeps the top-scoring box and removes any box of the same class overlapping it with IoU above 0.5. Both others overlap it by about 0.8, so they go.</div>
+</div></div>
+
+<h2>Detectors: two-stage, one-stage, and DETR</h2>
+<p><strong>Two-stage detectors</strong> first propose regions, then classify them. R-CNN (Girshick et al., 2014) ran a CNN on about 2,000 proposed crops per image, slowly. <strong>Faster R-CNN</strong> (Ren et al., 2015) made proposals part of the network: a <strong>region proposal network</strong> slides over the shared feature map and, at each position, scores 9 <strong>anchor</strong> boxes (3 sizes × 3 aspect ratios) and nudges their coordinates. The best few hundred proposals are pooled from the feature map and classified. <strong>Mask R-CNN</strong> (He et al., 2017) added a third small head that predicts a 28 × 28 binary mask inside each box, plus <strong>RoIAlign</strong>, which samples features without rounding errors so masks line up with pixels. It became the default for instance segmentation.</p>
+<p><strong>One-stage detectors</strong> predict boxes directly in a single pass. <strong>YOLO</strong> (Redmon et al., 2016, "You Only Look Once") divides the image into a 7 × 7 grid; each cell predicts 2 boxes with confidences plus class probabilities, at about 45 frames per second. Successors such as SSD, RetinaNet with its focal loss, and many later YOLO versions traded accuracy and speed; as of 2026, YOLO-family models are still a default for real-time detection on cameras and edge devices.</p>
+<p>Both families produce many overlapping candidates and need hand-tuned anchors and NMS. <strong>DETR</strong> (Carion et al., 2020, "End-to-End Object Detection with Transformers") removed both:</p>
+<ul>
+  <li>A CNN backbone and a Transformer <strong>encoder</strong> process the image features.</li>
+  <li>A Transformer <strong>decoder</strong> takes 100 learned <strong>object queries</strong>; each one cross-attends to the image and outputs one box plus a class, or "no object".</li>
+  <li>Training treats detection as <strong>set prediction</strong>: the <strong>Hungarian algorithm</strong> finds the one-to-one matching between the 100 predictions and the true objects with the lowest total cost (class + box error), and only matched pairs are pulled toward their targets. Each object gets exactly one prediction, so duplicates are punished and NMS is unnecessary.</li>
+</ul>
+<p>DETR was elegant but slow to train (500 epochs on COCO) and weak on small objects. Deformable DETR (Zhu et al., 2020) fixed much of that by attending to a few sampled points, and later DETR variants, including real-time ones, became competitive with YOLO-style models.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why doesn't DETR need non-maximum suppression?</p>
+  <ol class="q-src">
+    <li>It only ever predicts one box per image</li>
+    <li>Hungarian matching assigns each true object to exactly one query during training, so the model learns not to output duplicates</li>
+    <li>Its anchors never overlap</li>
+  </ol>
+  <div class="q-explain">With one-to-one matching, a second query predicting the same object is matched to "no object" and penalised. DETR has no anchors at all; it can output up to 100 objects.</div>
+</div></div>
+
+<h2>Segment Anything: promptable masks</h2>
+<p>Every model above knows a fixed list of classes from its training set. <strong>SAM</strong> (Kirillov et al., 2023, Meta, "Segment Anything") changed the question to: <em>given a prompt, what's the mask?</em> A prompt can be one or more clicked points (foreground or background), a box, or a rough mask. The model returns the matching mask for nearly any object, with no class names involved.</p>
+<p>The architecture is split so that interaction is fast:</p>
+<ul>
+  <li><strong>Image encoder:</strong> a large ViT (ViT-H in the main model) pretrained as an MAE (<a href="v1-3.html">V1.3</a>). It runs <strong>once per image</strong> at 1024 × 1024 and produces a 64 × 64 grid of embeddings. This is the heavy part.</li>
+  <li><strong>Prompt encoder:</strong> turns points and boxes into small embeddings (positional encodings plus learned type vectors).</li>
+  <li><strong>Mask decoder:</strong> a light two-layer Transformer that mixes prompt and image embeddings and outputs masks in about 50 ms, fast enough to run in a web browser for each click.</li>
+</ul>
+<p>A single click is <strong>ambiguous</strong>: a point on a shirt could mean the shirt or the whole person. So SAM outputs <strong>three masks</strong> (roughly part, object and whole) plus a predicted IoU score for each, and you pick one.</p>
+<p>The data was as important as the model. Meta's "data engine" moved from human annotators using SAM as a helper, to semi-automatic, to fully automatic labelling, producing <strong>SA-1B</strong>: about <strong>1.1 billion masks on 11 million images</strong>, 99.1% of them generated automatically. <strong>SAM 2</strong> (Ravi et al., 2024) extended this to video: a memory of earlier frames lets one click track an object's mask through a clip. <strong>SAM 3</strong> (Meta, 2025) added short text prompts such as "yellow school bus", returning masks for every matching instance.</p>
+<p>Language-driven detection grew in parallel. Open-vocabulary detectors such as OWL-ViT (Minderer et al., 2022) and Grounding DINO (Liu et al., 2023) use CLIP-style text embeddings (<a href="v1-2.html">V1.2</a>) as their class list, so you can type the name of the object you want.</p>
+
+<div class="why"><strong>Why this matters for LLM practice:</strong> multimodal LLMs increasingly answer with <em>where</em>, not just <em>what</em>: many can output box coordinates or points as text, a skill called <strong>grounding</strong> (<a href="mm-3.html">MM.3</a> covers documents and screens, where it is essential). Agent pipelines often pair an LLM with a specialist: the LLM decides what to find, and a detector or SAM produces precise boxes and masks. IoU is how all of these are scored, including grounding benchmarks for multimodal models.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why does SAM output three masks for a single click?</p>
+  <ol class="q-src">
+    <li>A point is ambiguous (part, object or larger whole), so SAM proposes several plausible masks and scores each</li>
+    <li>To average them into one final mask</li>
+    <li>One mask per colour channel</li>
+  </ol>
+  <div class="q-explain">A click on a wheel could mean the wheel or the whole car. Returning several masks, each with a predicted IoU, lets the user or a program choose.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain what IoU measures and how DETR's training differs from a detector that uses anchors and NMS.</p>
+  <div class="model-answer"><strong>Model answer:</strong> IoU is the overlap area of two regions divided by the area they cover together: 1 for a perfect match, 0 for no overlap, and benchmarks usually count a detection as correct at IoU ≥ 0.5. Anchor-based detectors score many preset boxes and then delete duplicates with non-maximum suppression; DETR outputs a fixed set of predictions from learned object queries and uses Hungarian matching during training so each real object is matched to exactly one prediction, removing the need for anchors and NMS.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In panoptic segmentation, how are "stuff" regions such as sky and road treated?</p>
+    <ol class="q-src">
+      <li>They are ignored</li>
+      <li>Each connected patch of sky gets its own instance ID</li>
+      <li>They get bounding boxes</li>
+      <li>They get a class label but no instance ID</li>
+    </ol>
+    <div class="q-explain">Panoptic segmentation labels every pixel. Countable things get class + instance; amorphous stuff gets a class only.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A prediction fully contains the true box, and its area is twice the true box's area. What is the IoU?</p>
+    <ol class="q-src">
+      <li>1.0</li>
+      <li>0.5</li>
+      <li>0.33</li>
+      <li>2.0</li>
+    </ol>
+    <div class="q-explain">The intersection is the whole true box (area $a$); the union is the prediction (area $2a$). IoU $= a/2a = 0.5$. Oversized boxes are penalised, which is why "just draw a huge box" doesn't work.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">DETR's decoder lets 100 object queries attend to image features. Which idea from earlier lessons is this cross-attention closest to?</p>
+    <ol class="q-src">
+      <li>The causal mask of a decoder LLM (<a href="m1-4.html">M1.4</a>)</li>
+      <li>The position embeddings of a ViT (<a href="v1-1.html">V1.1</a>)</li>
+      <li>Attention with queries from one set (the object queries) and keys and values from another (the image features)</li>
+      <li>CLIP's contrastive loss (<a href="v1-2.html">V1.2</a>)</li>
+    </ol>
+    <div class="q-explain">It's ordinary attention (<a href="m1-1.html">M1.1</a>), just with queries and keys/values coming from different sequences. Each query learns to "look for" one object.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why is SAM's design split into a heavy image encoder and a light mask decoder?</p>
+    <ol class="q-src">
+      <li>The image is encoded once; every new click only reruns the fast decoder, so interaction feels instant</li>
+      <li>The decoder is trained on text, the encoder on images</li>
+      <li>The encoder only works on video</li>
+      <li>So that it can avoid using a ViT</li>
+    </ol>
+    <div class="q-explain">The expensive ViT-H runs once per image; prompts are cheap to encode and the decoder takes tens of milliseconds, so users can click repeatedly.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Tasks form a ladder: <strong>classification</strong> → <strong>detection</strong> (boxes) → <strong>semantic</strong> (class per pixel) / <strong>instance</strong> (mask per object) → <strong>panoptic</strong> (both).</li>
+    <li><strong>IoU</strong> = overlap / union; detections usually count at IoU ≥ 0.5, COCO AP averages 0.50–0.95, and NMS uses IoU to remove duplicates.</li>
+    <li>Two-stage (<strong>Faster R-CNN</strong>, <strong>Mask R-CNN</strong>) propose then classify; one-stage (<strong>YOLO</strong>) predict in one pass; <strong>DETR</strong> uses object queries and Hungarian matching, with no anchors or NMS.</li>
+    <li><strong>SAM</strong> segments whatever you prompt: a heavy MAE-pretrained ViT encoder runs once, a light decoder answers each click, trained on SA-1B's 1.1B masks.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"v1-4-a","front":"Semantic vs instance vs panoptic segmentation?","back":"Semantic: a class for every pixel (objects of one class merge). Instance: a separate mask per object (things only). Panoptic: every pixel gets a class, and things also get an instance ID (Kirillov et al., 2019)."},
+  {"id":"v1-4-b","front":"Define IoU and compute it for A = (0,0)–(4,4), B = (2,2)–(6,6).","back":"IoU = overlap / union = $|A\\cap B| / (|A| + |B| - |A\\cap B|)$. Here overlap 4, union 16 + 16 − 4 = 28, IoU ≈ 0.14."},
+  {"id":"v1-4-c","front":"What is non-maximum suppression (NMS)?","back":"Keep the highest-scoring box, drop other boxes of the same class that overlap it with IoU above a threshold (e.g. 0.5), and repeat. It removes duplicate detections."},
+  {"id":"v1-4-d","front":"Two-stage vs one-stage detectors: name one of each and the difference.","back":"Two-stage (Faster R-CNN, 2015): a region proposal network with anchors proposes boxes, then a second stage classifies and refines them. One-stage (YOLO, 2016): predicts boxes and classes in a single pass over a grid; faster."},
+  {"id":"v1-4-e","front":"How does DETR avoid anchors and NMS?","back":"A Transformer decoder with 100 learned object queries outputs a set of boxes; Hungarian matching pairs each true object with exactly one prediction during training, so duplicates are penalised (Carion et al., 2020)."},
+  {"id":"v1-4-f","front":"What are SAM's three parts and its training data?","back":"A heavy MAE-pretrained ViT image encoder (once per image), a prompt encoder (points, boxes, masks) and a light mask decoder (~50 ms per prompt, 3 masks + IoU scores). Trained on SA-1B: ~1.1B masks on ~11M images (Kirillov et al., 2023)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/v1-4-tasks.js"></script>
+<script src="../assets/js/anims/v1-4-iou-playground.js"></script>
+</body>
+</html>

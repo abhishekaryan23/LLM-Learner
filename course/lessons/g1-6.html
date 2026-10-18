@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="g1-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Diffusion transformers &amp; autoregressive images · LLMs, Animated</title>
+<meta name="description" content="How transformers took over image generation: DiT's patchify and adaLN conditioning, MMDiT's joint text–image attention, and autoregressive image generators from DALL·E to MaskGIT, VAR and natively multimodal LLMs.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Diffusion transformers &amp; autoregressive images</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of Image generation</span></div>
+<p class="lede">The transformer won language, then vision. Image generation followed two ways: replace the diffusion U-Net with a transformer over latent patches, or skip diffusion and generate image tokens the way an LLM generates words. As of 2026, frontier systems use one, the other, or both.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how DiT patchifies a latent, conditions with adaLN, and why it scales with compute.</li>
+    <li>Describe MMDiT's joint text–image attention and count tokens and attention cost for a given resolution.</li>
+    <li>Compare raster autoregression, MaskGIT and VAR, and describe the trend toward LLMs that generate images.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> this lesson builds on <a href="g1-4.html">G1.4 Latent diffusion &amp; guidance</a> (VAE latents, conditioning) and <a href="v1-1.html">V1.1 Vision Transformers: images as patches</a> (patch embedding, transformer blocks on images). Helpful but optional: <a href="g1-1.html">G1.1 Variational autoencoders</a> (VQ-VAE tokens) and <a href="m1-4.html">M1.4 The decoder-only transformer</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; it primes the lesson.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A diffusion transformer cuts a 32×32 latent into 2×2 patches. How many tokens does the transformer see?</p>
+    <ol class="q-src">
+      <li>32</li>
+      <li>64</li>
+      <li>1,024</li>
+      <li>256</li>
+    </ol>
+    <div class="q-explain">$(32/2)^2 = 16 \times 16 = 256$ patch tokens, exactly like a ViT's patch embedding.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">DALL·E (2021) generated each 256×256 image as a sequence of discrete tokens, one at a time. Roughly how many image tokens?</p>
+    <ol class="q-src">
+      <li>16</li>
+      <li>1,024</li>
+      <li>65,536</li>
+      <li>196,608</li>
+    </ol>
+    <div class="q-explain">Its discrete VAE compressed the image to a 32×32 grid of tokens, 1,024 sequential prediction steps per image. Speeding that up motivated MaskGIT and VAR.</div>
+  </div>
+</section>
+
+<h2>From U-Nets to transformers: DiT</h2>
+<p>By 2022 transformers dominated language and, with the Vision Transformer (V1.1), image recognition, and they scaled predictably with compute. Diffusion models still used convolutional U-Nets. Peebles &amp; Xie (2022, "Scalable Diffusion Models with Transformers") asked whether the U-Net's inductive biases were needed. Their <strong>DiT</strong> replaced it with a plain transformer working on the latent of Stable Diffusion's VAE:</p>
+<ol class="steps">
+  <li><strong>Patchify:</strong> cut the $I \times I \times C$ latent into $p \times p$ patches and linearly embed each as one token, plus positional embeddings. That gives $(I/p)^2$ tokens.</li>
+  <li><strong>Transformer blocks:</strong> standard self-attention and MLP blocks over all patch tokens.</li>
+  <li><strong>Conditioning with adaLN:</strong> the time step $t$ and the class label are embedded and passed through an MLP that outputs, for every block, the <em>scale</em> $\gamma$ and <em>shift</em> $\beta$ of its layer norms. The best variant, <strong>adaLN-Zero</strong>, also outputs a gate $\alpha$ on each residual branch, initialised to zero, so every block starts as the identity function and training is stable.</li>
+  <li><strong>Unpatchify:</strong> a final linear layer turns each token back into a $p \times p \times C$ patch of predicted noise (and variance).</li>
+</ol>
+
+<figure class="anim wide" data-anim="g1-6-dit"></figure>
+
+<p>The key finding was <strong>scaling</strong>. Sample quality improved steadily with the compute per forward pass (measured in GFLOPs), whether that came from a bigger model or from smaller patches (more tokens). The largest model, DiT-XL/2, reached an FID of 2.27 on class-conditional ImageNet 256×256 with guidance, beating the previous U-Net diffusion models. That predictability, the same property that made LLMs bankable, is why DiT-style backbones took over large image and video generators.</p>
+
+<h3>Worked example</h3>
+<p>A 256×256 image through an $f = 8$, 4-channel VAE, with patch size $p = 2$:</p>
+<ol class="steps">
+  <li>Latent: $256/8 = 32$, so $32 \times 32 \times 4$.</li>
+  <li>Tokens: $(32/2)^2 = 16^2 = 256$.</li>
+  <li>Each token flattens a $2 \times 2 \times 4$ patch: 16 numbers, then a linear layer maps it to the model width.</li>
+</ol>
+
+<section class="card" aria-labelledby="fd1">
+  <div class="card-label" id="fd1">Your turn · faded example</div>
+  <p>Now a 512×512 image, same VAE and $p = 2$. Self-attention compares every pair of tokens (M1.1).</p>
+  <ol class="steps">
+    <li>Latent side length: <span class="blank" data-answer="64" data-tol="0.5" data-hint="512 / 8."></span></li>
+    <li>Number of tokens: <span class="blank" data-answer="1024" data-tol="0.5" data-hint="(64 / 2)²."></span></li>
+    <li>Attention pairs grow by what factor versus the 256-token case? <span class="blank" data-answer="16" data-tol="0.5" data-hint="Tokens grow 4×, and attention cost grows with the square."></span></li>
+  </ol>
+</section>
+
+<h3>MMDiT: text and image in one attention</h3>
+<p>DiT conditioned on a class label. For text-to-image you need the prompt. U-Nets read it through cross-attention (G1.4), where image features query the text but the text never updates. Stable Diffusion 3 (Esser et al., 2024) introduced the <strong>MMDiT</strong> (multimodal DiT) block:</p>
+<ul>
+  <li>Two token streams: <strong>text tokens</strong> from the text encoders (CLIP and T5) and <strong>image patch tokens</strong> from the latent.</li>
+  <li>Each stream has <strong>its own weights</strong> (its own QKV projections, MLPs and norms), because the two modalities are so different.</li>
+  <li>For attention, the two sequences are <strong>concatenated</strong>, so every image token attends to every text token <em>and vice versa</em>: joint attention, updating both streams in every block.</li>
+  <li>The time step and a pooled text embedding still come in through adaLN.</li>
+</ul>
+<p>SD3's paper scaled this up to 8 billion parameters and reported that quality kept improving with model size. FLUX.1 (Black Forest Labs, 2024) uses a related design, mixing joint-attention blocks with single-stream blocks, per its developers. The same transformer-over-patches idea extends to video by cutting <em>space-time</em> patches; OpenAI described Sora (2024) as a diffusion transformer of this kind (VD2).</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What is the main difference between MMDiT's joint attention and the cross-attention in Stable Diffusion 1.x?</p>
+  <ol class="q-src">
+    <li>In joint attention, text and image tokens attend to each other in both directions, and both streams are updated in every block</li>
+    <li>Joint attention uses no text encoder</li>
+    <li>Cross-attention is bidirectional, joint attention is not</li>
+    <li>Joint attention runs only once, at the start</li>
+  </ol>
+  <div class="q-explain">In cross-attention the image queries the text, but text features stay fixed. MMDiT concatenates both sequences, so text representations also adapt to the image as it forms.</div>
+</div></div>
+
+<h2>Images as tokens, and LLMs that draw</h2>
+<p>The other route skips diffusion. Turn an image into a sequence of <strong>discrete tokens</strong> with a VQ-style tokenizer (G1.1), then train a transformer to predict them one at a time, exactly like next-token prediction in an LLM (M2.2).</p>
+<ul>
+  <li><strong>DALL·E</strong> (Ramesh et al., 2021): a discrete VAE turns a 256×256 image into a 32×32 grid of tokens from a vocabulary of 8,192. A 12-billion-parameter transformer reads up to 256 text tokens, then generates the 1,024 image tokens in raster order. Candidates were re-ranked with CLIP.</li>
+  <li><strong>Parti</strong> (Yu et al., 2022): a 20-billion-parameter encoder–decoder transformer over ViT-VQGAN tokens, showing autoregressive models also improve with scale.</li>
+</ul>
+<p>The drawback is speed: one forward pass per token, and raster order is an odd way to paint. Two ideas changed the order:</p>
+<ul>
+  <li><strong>MaskGIT</strong> (Chang et al., 2022): a <em>bidirectional</em> transformer trained to fill in masked tokens. At generation, start with every token masked, predict all of them at once, keep the most confident, re-mask the rest and repeat. Their 256×256 images (16×16 = 256 tokens) needed about 8 rounds instead of 256 steps. Muse (Chang et al., 2023) used this for text-to-image.</li>
+  <li><strong>VAR</strong> (Tian et al., 2024, "Visual Autoregressive Modeling"): autoregress over <strong>scales</strong> instead of positions. Predict a 1×1 token map, then 2×2, then 4×4 and so on, each whole map in one step, conditioned on all coarser ones. The authors reported better quality than DiT models of similar size on ImageNet 256×256, with faster sampling; the paper won a NeurIPS 2024 best paper award.</li>
+</ul>
+
+<h3>LLMs that draw</h3>
+<p>If images are tokens, an LLM can generate them too. Several 2024–26 systems are trained on interleaved text and image tokens so one model reads and writes both:</p>
+<ul>
+  <li><strong>Chameleon</strong> (Meta, 2024): "early fusion", with text and VQ image tokens in one vocabulary and one next-token objective.</li>
+  <li><strong>Transfusion</strong> (Zhou et al., 2024): one transformer trained with next-token loss on text and a <em>diffusion</em> loss on continuous image patches.</li>
+  <li><strong>Janus</strong> and Janus-Pro (DeepSeek, 2024–25): separate visual encoders for understanding and for generation inside one autoregressive model.</li>
+  <li><strong>Closed models:</strong> in March 2025 OpenAI launched image generation built into GPT-4o and described it as autoregressive and native to the model, and Google added native image output to Gemini models during 2025. These labs published little about architecture; some systems appear to pair an autoregressive backbone with a diffusion-style decoder, so treat specific claims cautiously.</li>
+</ul>
+<p>Why bother, when diffusion works so well? A model that shares weights with an LLM brings its world knowledge and instruction following to images. That shows up as better rendering of text inside images, following long and specific prompts, and <strong>multi-turn editing in conversation</strong> ("now make the cat wear a hat"). MM2 covers these natively multimodal models in depth.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>Think of a picture cut into a <strong>jigsaw</strong> of little square pieces.</p>
+      <p>A <strong>diffusion transformer</strong> gets all the pieces covered in smudges and cleans every piece a little at a time, while each piece "talks" to all the others about what the whole picture should be.</p>
+      <p>An <strong>autoregressive</strong> model fills the jigsaw from an empty board: one piece at a time, top-left to bottom-right (DALL·E), or a few sure pieces at a time anywhere on the board (MaskGIT), or first a blurry tiny version, then a sharper one, then a sharper one (VAR).</p>
+      <p>Where it breaks: the real pieces aren't little pictures; they're codes or number patches that only the model's decoder knows how to turn back into pixels.</p>
+    </div>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the line between "LLM" and "image generator" is blurring. The same transformer blocks, scaling laws and serving tricks (KV caching for autoregressive image tokens, M1.5) now apply to pictures, and the multimodal assistants you use may produce images with the same model that writes their replies.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What does Transfusion combine in one transformer?</p>
+  <ol class="q-src">
+    <li>A GAN generator and discriminator</li>
+    <li>A next-token loss on text and a diffusion loss on continuous image patches</li>
+    <li>Two separate diffusion models</li>
+    <li>A U-Net and a VQ codebook</li>
+  </ol>
+  <div class="q-explain">It shows that one model can be autoregressive for text and diffusion-based for images at the same time, one of several recipes for natively multimodal generation.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Contrast how a diffusion transformer and an autoregressive image model produce an image from a prompt.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A diffusion transformer patchifies a noisy latent into tokens, runs transformer blocks conditioned on the time step and text (via adaLN and joint attention), and predicts the noise for all patches at once, repeating over many denoising steps before a VAE decodes the result. An autoregressive model represents the image as discrete tokens and predicts them sequentially after the text, one at a time (DALL·E), in confident parallel batches (MaskGIT) or scale by scale (VAR), then a tokenizer decoder turns the tokens into pixels.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What did Peebles &amp; Xie find about scaling DiT?</p>
+    <ol class="q-src">
+      <li>Quality stopped improving beyond small models</li>
+      <li>Quality improved steadily with compute per forward pass (GFLOPs), from bigger models or smaller patches</li>
+      <li>Larger patches always gave better images</li>
+      <li>U-Nets scaled better than transformers</li>
+    </ol>
+    <div class="q-explain">FID fell as GFLOPs rose, across model sizes and patch sizes, and DiT-XL/2 reached 2.27 on ImageNet 256×256.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">From M1.1 and V1.1: you halve a DiT's patch size from 4 to 2 at fixed resolution. What happens to the self-attention cost per layer?</p>
+    <ol class="q-src">
+      <li>It halves</li>
+      <li>It stays the same</li>
+      <li>It doubles</li>
+      <li>About 16× more, because there are 4× as many tokens and attention compares every pair</li>
+    </ol>
+    <div class="q-explain">Halving $p$ doubles the tokens per side, so 4× tokens and $4^2 = 16×$ token pairs. That's why smaller patches give better but much costlier models.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">VAR's "next-scale prediction" means…</p>
+    <ol class="q-src">
+      <li>Generating whole token maps from coarse (1×1) to fine, each conditioned on the coarser ones</li>
+      <li>Predicting the next pixel in raster order</li>
+      <li>Upscaling a finished image with a separate model</li>
+      <li>Predicting the noise scale at each diffusion step</li>
+    </ol>
+    <div class="q-explain">Each autoregressive step outputs an entire, larger token map, so a full image takes only as many steps as there are scales.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In the time step's journey into a DiT block, what does adaLN produce?</p>
+    <ol class="q-src">
+      <li>Extra tokens appended to the sequence</li>
+      <li>A new attention mask</li>
+      <li>Per-block scale and shift for the layer norms (and, in adaLN-Zero, a residual gate)</li>
+      <li>The patch size</li>
+    </ol>
+    <div class="q-explain">An MLP maps the time and condition embeddings to $\gamma$, $\beta$ (and $\alpha$), which modulate every block's normalized activations.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>DiT</strong>: patchify the latent ($(I/p)^2$ tokens), transformer blocks with <strong>adaLN-Zero</strong> conditioning, unpatchify to predicted noise; quality scales with GFLOPs.</li>
+    <li><strong>MMDiT</strong> (SD3): separate text and image weights, one joint attention over both.</li>
+    <li>Autoregressive image models predict discrete tokens: raster (DALL·E, Parti), parallel unmasking (MaskGIT), or coarse-to-fine scales (VAR).</li>
+    <li>Natively multimodal LLMs now generate images too; closed labs disclose little, and hybrids with diffusion decoders are common.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"g1-6-a","front":"How does DiT turn a latent into tokens?","back":"Patchify: cut the $I\\times I\\times C$ latent into $p\\times p$ patches, linearly embed each → $(I/p)^2$ tokens (e.g. 32×32 latent, p = 2 → 256)."},
+  {"id":"g1-6-b","front":"What is adaLN-Zero?","back":"Time and condition embeddings → MLP → per-block LayerNorm scale and shift plus a residual gate initialised to zero, so each block starts as the identity (Peebles & Xie, 2022)."},
+  {"id":"g1-6-c","front":"What is MMDiT's joint attention?","back":"Text and image tokens keep separate weights but are concatenated for attention, so each attends to the other in both directions (SD3, Esser et al., 2024)."},
+  {"id":"g1-6-d","front":"How did DALL·E (2021) generate images?","back":"A discrete VAE turns 256×256 images into 32×32 = 1,024 tokens (vocab 8,192); a 12B transformer predicts them one by one after the text tokens."},
+  {"id":"g1-6-e","front":"MaskGIT vs VAR?","back":"MaskGIT: predict all masked tokens in parallel, keep the confident ones, ~8 rounds. VAR: next-scale prediction, whole token maps from 1×1 up to full size."},
+  {"id":"g1-6-f","front":"Why build LLMs that generate images natively?","back":"Shared weights bring world knowledge, instruction following, in-image text rendering and multi-turn editing; examples include Chameleon, Transfusion, Janus, and GPT-4o / Gemini image output (few details disclosed)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/g1-toy.js"></script>
+<script src="../assets/js/anims/g1-6-dit.js"></script>
+</body>
+</html>

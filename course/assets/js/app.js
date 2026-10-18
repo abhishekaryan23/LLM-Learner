@@ -219,7 +219,25 @@
     }
   }
 
+  /* Lessons link forward to lessons that may not be written yet. Instead of a 404,
+     show those links as plain text marked "coming soon". */
+  function markUnwrittenLinks() {
+    var ready = {};
+    LC.allLessons().forEach(function (l) { ready[l.id] = !!l.ready; });
+    document.querySelectorAll("main a[href]").forEach(function (a) {
+      var m = a.getAttribute("href").match(/(?:^|\/)([a-z0-9]+-\d+)\.html(?:#.*)?$/);
+      if (!m || !(m[1] in ready) || ready[m[1]]) return;
+      var s = document.createElement("span");
+      s.className = "soon-link";
+      s.title = "Coming soon";
+      s.innerHTML = a.innerHTML;
+      s.appendChild(el('<span class="soon-mark"> (coming soon)</span>'));
+      a.replaceWith(s);
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
+    markUnwrittenLinks();
     buildTopbar();
     buildSidebar();
     buildLessonNav();

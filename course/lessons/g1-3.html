@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="g1-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Diffusion from scratch · LLMs, Animated</title>
+<meta name="description" content="DDPM step by step: the forward noising process, training a network to predict the noise, the sampling loop, the score-based view and DDIM, animated on a 2-D toy.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Diffusion from scratch</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Image generation</span></div>
+<p class="lede">Almost every image generator you have used since 2022 rests on one strange idea: <strong>learn to make pictures by learning to remove noise</strong>. Ruin the data a little at a time, train a network to undo one small step, then run it backwards from pure static.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write the forward process $q(x_t \mid x_0)$ and compute a noised value with $\bar\alpha_t$.</li>
+    <li>Explain the DDPM training objective (predict the noise) and the sampling loop.</li>
+    <li>Connect the noise prediction to the score and Langevin dynamics, and say what DDIM changes.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> this lesson builds on <a href="p5-1.html">P5.1 Gaussians &amp; noise</a> (adding independent Gaussian noise; variances add), <a href="p5-3.html">P5.3 Markov chains &amp; sampling</a> (chains of small random steps and Langevin dynamics) and <a href="p6-1.html">P6.1 CNNs</a> (the convolutions inside the U-Net). Helpful but optional: <a href="g1-1.html">G1.1 Variational autoencoders</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A diffusion model is trained on photos. During training, what is the network actually asked to output?</p>
+    <ol class="q-src">
+      <li>A whole new photo, from nothing</li>
+      <li>A yes/no verdict on whether a photo is real</li>
+      <li>The noise that was mixed into a noisy version of a training photo</li>
+      <li>A short text caption of the photo</li>
+    </ol>
+    <div class="q-explain">The standard DDPM network gets a noisy image plus the noise level and predicts the noise. Generating a whole image only happens at sampling time, by calling that network many times.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">The original 2020 recipe generates one image in how many network calls?</p>
+    <ol class="q-src">
+      <li>1</li>
+      <li>About 1,000</li>
+      <li>One per pixel</li>
+      <li>One per training image</li>
+    </ol>
+    <div class="q-explain">DDPM uses $T = 1000$ noise levels and walks back through all of them. Faster samplers (DDIM, later in this lesson) and distillation (G1.5) cut that to tens or even a handful.</div>
+  </div>
+</section>
+
+<h2>Why diffusion: build by destroying</h2>
+<p>By 2019, image generation had two main families, and each had a weakness. <strong>VAEs</strong> (Kingma &amp; Welling, 2013; lesson G1.1) train stably but give blurry samples. <strong>GANs</strong> (Goodfellow et al., 2014; G1.2) give sharp samples but are notoriously unstable to train and prone to <em>mode collapse</em>, covering only part of the data.</p>
+<p>A third idea had been sitting quietly since 2015. Sohl-Dickstein et al., borrowing from non-equilibrium physics, proposed: destroy the structure in data <strong>slowly</strong>, by adding a little noise many times, then learn to <strong>reverse</strong> each small step. Each reverse step is a small, nearly Gaussian correction, which a neural network can learn with an ordinary regression loss. No adversary, no balancing act.</p>
+<p>It took five years to make it work well. <strong>DDPM</strong> (Ho, Jain &amp; Abbeel, 2020, "Denoising Diffusion Probabilistic Models") simplified the training into "predict the noise" and reached an FID of 3.17 on CIFAR-10, competitive with the best GANs. A year later, Dhariwal &amp; Nichol (2021) published "Diffusion Models Beat GANs on Image Synthesis". Stable Diffusion, DALL·E 2 and Imagen followed in 2022, and as of 2026 nearly all leading image and video generators are diffusion models or their close cousin, flow matching (G1.5).</p>
+<p>The trade-off: generating is <strong>slow</strong>. Instead of one network call (a GAN), you make many, one per denoising step. Much of the research since 2020 has been about cutting that number.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-g1-3.webp" alt="On a beach, wind blows a sandcastle into a flat pile in stages; beside it a child sculptor works backward, shaping a flat pile into a sandcastle." width="1200" height="900" loading="lazy">
+    <div>
+      <p>The wind blows on a sandcastle. Bit by bit the towers slump, until there is just a <strong>flat pile of sand</strong>. Blowing it flat is easy: the wind needs no skill at all.</p>
+      <p>Next to it, a little sculptor practises the <strong>opposite</strong>. She looks at a slightly blown castle and learns how to put back the bit the wind took. After watching thousands of castles blow away, she can start from a flat pile and pat, pat, pat, <strong>one small fix at a time</strong>, until a castle stands there.</p>
+      <p>Where the story breaks: she doesn't rebuild the <em>same</em> castle. Starting from a different pile gives a brand-new castle, which is exactly what we want from a generator.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What made diffusion attractive compared with GANs?</p>
+  <ol class="q-src">
+    <li>It generates an image in a single network call</li>
+    <li>Training is a stable regression problem (predict the noise), with no adversary to balance</li>
+    <li>It needs no training data</li>
+    <li>It produces blurrier but faster samples</li>
+  </ol>
+  <div class="q-explain">Diffusion swaps the GAN's two-player game for a plain squared-error loss, which trains reliably. The price is many network calls at sampling time.</div>
+</div></div>
+
+<h2>The forward process, in one jump</h2>
+<p>Pick a data point $x_0$ (an image, flattened into a long vector). The forward process adds a little Gaussian noise at each of $T = 1000$ steps:</p>
+$$q(x_t \mid x_{t-1}) = \mathcal{N}\!\left(\sqrt{1-\beta_t}\,x_{t-1},\; \beta_t I\right)$$
+<p>$\beta_t$ is the <strong>noise schedule</strong>: how much fresh noise step $t$ adds. DDPM uses a linear schedule from $\beta_1 = 10^{-4}$ to $\beta_{1000} = 0.02$. The $\sqrt{1-\beta_t}$ shrinks the old value slightly, so the total variance stays about 1 instead of growing.</p>
+<p>Because a sum of independent Gaussians is Gaussian (P5.1), all those small steps collapse into <strong>one jump</strong>. Define $\alpha_t = 1 - \beta_t$ and the running product $\bar\alpha_t = \alpha_1 \alpha_2 \cdots \alpha_t$. Then</p>
+$$q(x_t \mid x_0) = \mathcal{N}\!\left(\sqrt{\bar\alpha_t}\,x_0,\; (1-\bar\alpha_t) I\right) \quad\Longleftrightarrow\quad x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon,\;\; \varepsilon \sim \mathcal{N}(0, I)$$
+<p>$\bar\alpha_t$ is the share of the original signal's variance still left at step $t$; $1-\bar\alpha_t$ is the share that is now noise. With the linear schedule, $\bar\alpha_{100} \approx 0.897$, $\bar\alpha_{250} \approx 0.524$, $\bar\alpha_{500} \approx 0.079$ and $\bar\alpha_{1000} \approx 0.00004$: by the end essentially nothing of $x_0$ survives, and $x_T$ is plain $\mathcal{N}(0, I)$ noise.</p>
+
+<figure class="anim wide" data-anim="g1-3-diffusion"></figure>
+
+<h3>Worked example</h3>
+<p>One pixel with value $x_0 = 1.0$ (images are scaled to $[-1, 1]$), at $t = 250$, with noise draw $\varepsilon = -0.5$. We know $\bar\alpha_{250} \approx 0.524$.</p>
+<ol class="steps">
+  <li>Signal weight: $\sqrt{0.524} \approx 0.724$</li>
+  <li>Noise weight: $\sqrt{1 - 0.524} = \sqrt{0.476} \approx 0.690$</li>
+  <li>$x_{250} = 0.724 \times 1.0 + 0.690 \times (-0.5) = 0.724 - 0.345 = 0.379$</li>
+</ol>
+
+<section class="card" aria-labelledby="fd1">
+  <div class="card-label" id="fd1">Your turn · faded example</div>
+  <p>Pixel $x_0 = 0.8$, step $t = 500$ where $\bar\alpha_{500} \approx 0.0786$, noise draw $\varepsilon = 1.0$.</p>
+  <ol class="steps">
+    <li>Signal weight $\sqrt{\bar\alpha_{500}} \approx$ <span class="blank" data-answer="0.28" data-tol="0.01" data-hint="The square root of 0.0786."></span></li>
+    <li>Noise weight $\sqrt{1-\bar\alpha_{500}} \approx$ <span class="blank" data-answer="0.96" data-tol="0.01" data-hint="The square root of 1 − 0.0786 = 0.9214."></span></li>
+    <li>$x_{500} \approx$ <span class="blank" data-answer="1.18" data-tol="0.02" data-hint="0.28 × 0.8 + 0.96 × 1.0."></span> (the noise now dominates)</li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why can training jump straight from $x_0$ to any $x_t$ without simulating the steps in between?</p>
+  <ol class="q-src">
+    <li>Because $\beta_t$ is the same at every step</li>
+    <li>Because the network learns the shortcut</li>
+    <li>Because $x_T$ is always exactly zero</li>
+    <li>Because chained Gaussian noise steps add up to one Gaussian, $\mathcal{N}(\sqrt{\bar\alpha_t}\,x_0, (1-\bar\alpha_t)I)$</li>
+  </ol>
+  <div class="q-explain">Independent Gaussian noise composes into a single Gaussian, so $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$ in one line. The schedule is not constant; it rises from $10^{-4}$ to $0.02$.</div>
+</div></div>
+
+<h2>Training and sampling</h2>
+<p>To run the process backwards we need, at every step, a good guess of <em>which noise was mixed in</em>. So we train a network $\varepsilon_\theta(x_t, t)$ to predict it. Ho et al. derived the objective from a variational bound (the same ELBO idea as a VAE, with a fixed, non-learned encoder) and found that a simple unweighted version works best:</p>
+$$\mathcal{L}_{\text{simple}} = \mathbb{E}_{x_0,\,t,\,\varepsilon}\Big[\big\|\,\varepsilon - \varepsilon_\theta\big(\sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon,\; t\big)\big\|^2\Big]$$
+<p>In words: the squared error between the true noise $\varepsilon$ and the network's guess, averaged over training images $x_0$, random steps $t$ and random noise draws $\varepsilon$. One training step is:</p>
+<ol class="steps">
+  <li>Take a batch of training images $x_0$.</li>
+  <li>For each, draw a step $t$ uniformly from $1 \dots 1000$ and noise $\varepsilon \sim \mathcal{N}(0, I)$.</li>
+  <li>Make $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$ in one jump.</li>
+  <li>Predict $\hat\varepsilon = \varepsilon_\theta(x_t, t)$ and compute $\|\varepsilon - \hat\varepsilon\|^2$.</li>
+  <li>Backpropagate and take an optimizer step (Adam in the original paper).</li>
+</ol>
+<p>The step $t$ is fed in through a <strong>time embedding</strong>: the same sinusoidal encoding transformers use for positions (M1.3), passed through a small MLP and added inside every block. One network thus learns to denoise at <em>every</em> noise level, from "barely touched" to "pure static".</p>
+<p>Predicting $\varepsilon$ is one of several equivalent choices. Knowing $\hat\varepsilon$ gives you a guess of the clean image, $\hat x_0 = (x_t - \sqrt{1-\bar\alpha_t}\,\hat\varepsilon)/\sqrt{\bar\alpha_t}$, so some models predict $x_0$ directly, and many recent ones predict a mix called the <strong>velocity</strong> $v$ (Salimans &amp; Ho, 2022). The choice changes how errors are weighted across noise levels, not what is learned.</p>
+
+<h3>Sampling, and the score view</h3>
+<p>To generate, start from pure noise $x_T \sim \mathcal{N}(0, I)$ and step down from $t = 1000$ to $t = 1$:</p>
+$$x_{t-1} = \frac{1}{\sqrt{\alpha_t}}\left(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\varepsilon_\theta(x_t, t)\right) + \sigma_t\, z, \qquad z \sim \mathcal{N}(0, I)$$
+<p>The bracket removes the small slice of predicted noise that belongs to this step, and $1/\sqrt{\alpha_t}$ undoes the forward shrink. Then $\sigma_t z$ adds back a little <em>fresh</em> noise (DDPM uses $\sigma_t^2 = \beta_t$, and $z = 0$ on the last step). That's 1,000 network calls per image, which is why the original DDPM was slow.</p>
+<p><strong>The score view.</strong> At about the same time, Song &amp; Ermon (2019) attacked generation from another angle. They trained a network to estimate the <strong>score</strong> $\nabla_x \log p_t(x)$, the direction in which the noisy data density rises fastest, at many noise levels. Then they sampled with <strong>Langevin dynamics</strong> (P5.3), whose basic step is</p>
+$$x \leftarrow x + \tfrac{\eta}{2}\,\nabla_x \log p(x) + \sqrt{\eta}\,z$$
+<p>which climbs the density while jiggling with noise, annealing from large noise to small. The two views turn out to be one: for Gaussian noising, the score is the predicted noise rescaled,</p>
+$$\nabla_x \log p_t(x_t) \approx -\frac{\varepsilon_\theta(x_t, t)}{\sqrt{1-\bar\alpha_t}}$$
+<p>"Remove the predicted noise" and "step uphill on the density" are the same move. Song et al. (2021) unified both as stochastic differential equations: noising is an SDE, sampling solves its time-reversed SDE, and there is also a deterministic <strong>probability-flow ODE</strong> with the same marginals. That ODE view sets up DDIM below and flow matching in G1.5.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">How is the network's noise prediction related to the score $\nabla_x \log p_t(x_t)$?</p>
+  <ol class="q-src">
+    <li>They are unrelated; scores need a separate network</li>
+    <li>The score equals $+\varepsilon_\theta$ exactly, with no scaling</li>
+    <li>The score is about $-\varepsilon_\theta / \sqrt{1-\bar\alpha_t}$: the predicted noise points <em>away</em> from the data</li>
+    <li>The score is the clean image $x_0$</li>
+  </ol>
+  <div class="q-explain">Noise pushed $x_t$ away from the data, so minus the noise (rescaled by the noise level) points back toward higher density. That is the score that Langevin dynamics climbs.</div>
+</div></div>
+
+<h2>Fewer steps, and the network inside</h2>
+<p><strong>DDIM</strong> (Song, Meng &amp; Ermon, 2020, "Denoising Diffusion Implicit Models") keeps the trained network and changes only the sampler. At each step it forms the clean-image guess $\hat x_0$ and jumps straight to an earlier step $t'$, re-using the predicted noise instead of drawing fresh noise:</p>
+$$x_{t'} = \sqrt{\bar\alpha_{t'}}\;\hat x_0 + \sqrt{1-\bar\alpha_{t'}}\;\hat\varepsilon, \qquad \hat x_0 = \frac{x_t - \sqrt{1-\bar\alpha_t}\,\hat\varepsilon}{\sqrt{\bar\alpha_t}}$$
+<p>Because nothing random is added, the same starting noise always gives the same image, and the steps can be large: the paper reports samples of similar quality 10 to 50 times faster in wall-clock time. Later ODE solvers such as DPM-Solver (Lu et al., 2022) brought typical counts to roughly 10–30 steps, and distillation (G1.5) goes down to 1–4.</p>
+<p><strong>The network inside</strong> was, for years, a <strong>U-Net</strong> (Ronneberger et al., 2015, originally for medical image segmentation). Its encoder half shrinks the image through convolution blocks (P6.1) into coarse, wide feature maps; its decoder half grows them back to full size, with <strong>skip connections</strong> carrying fine detail across. The output has exactly the input's shape, which is what a noise predictor needs. DDPM's U-Net added residual blocks, group normalization, self-attention at the 16×16 resolution, and the time embedding inside every block.</p>
+<p>Two problems remained. Running a U-Net on every pixel of a 512×512 image, dozens of times, is expensive; G1.4 moves diffusion into a compressed <strong>latent space</strong>. And U-Nets scale less predictably than transformers; G1.6 swaps them for <strong>diffusion transformers</strong>.</p>
+
+<div class="why"><strong>Why this matters beyond images:</strong> the same recipe (corrupt, then learn to undo the corruption step by step) now drives video, audio and music generators (A1.5), and is being tried on text: <em>masked diffusion language models</em> corrupt tokens by masking them and learn to unmask in parallel. As of 2026 these are an active research direction alongside, not a replacement for, autoregressive LLMs.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What does DDIM change compared with DDPM?</p>
+  <ol class="q-src">
+    <li>It trains a new network with a different loss</li>
+    <li>Only the sampler: it reuses the same trained network but takes deterministic, larger jumps</li>
+    <li>It replaces the U-Net with a transformer</li>
+    <li>It adds more noise per step so the image forms faster</li>
+  </ol>
+  <div class="q-explain">DDIM is a drop-in sampler for an ordinary DDPM-trained model. Deterministic, larger jumps mean far fewer network calls.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a friend how a diffusion model is trained and how it then makes a brand-new image.</p>
+  <div class="model-answer"><strong>Model answer:</strong> In training, we take a real image, mix in a random amount of Gaussian noise in one jump ($x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$), and teach a network to predict that noise with a squared-error loss. To generate, we start from pure noise and repeatedly subtract a bit of the predicted noise (adding a little fresh noise in DDPM, none in DDIM) until a clean image remains.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">With the linear schedule ($10^{-4}$ to $0.02$, $T = 1000$), roughly how much of the signal's variance is left at the final step, $\bar\alpha_{1000}$?</p>
+    <ol class="q-src">
+      <li>About 0.5</li>
+      <li>About 0.00004: essentially none</li>
+      <li>About 0.02</li>
+      <li>Exactly 1</li>
+    </ol>
+    <div class="q-explain">Multiplying 1,000 factors $(1-\beta_t)$ gives $\bar\alpha_{1000} \approx 4 \times 10^{-5}$, so $x_T$ is indistinguishable from $\mathcal{N}(0, I)$. That's why sampling can start from pure noise. (0.02 is the last $\beta$, not $\bar\alpha$.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In the DDPM sampling update, what is the role of the term $\sigma_t z$?</p>
+    <ol class="q-src">
+      <li>It removes the predicted noise</li>
+      <li>It encodes the time step</li>
+      <li>It undoes the forward shrinking by $\sqrt{\alpha_t}$</li>
+      <li>It injects a little fresh noise, making each step stochastic like a Langevin step</li>
+    </ol>
+    <div class="q-explain">The bracket removes predicted noise and $1/\sqrt{\alpha_t}$ undoes the shrink; $\sigma_t z$ adds fresh randomness. DDIM sets it to zero, which makes sampling deterministic.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">From P5.3: Langevin dynamics samples from $p(x)$ by repeating $x \leftarrow x + \tfrac{\eta}{2}\nabla_x \log p(x) + \sqrt{\eta}\,z$. What does a diffusion model supply to make this work on images?</p>
+    <ol class="q-src">
+      <li>An estimate of the score $\nabla_x \log p_t(x)$ at every noise level, from the noise predictor</li>
+      <li>The exact density $p(x)$ of natural images</li>
+      <li>A discriminator that scores realism</li>
+      <li>A codebook of image tokens</li>
+    </ol>
+    <div class="q-explain">Langevin only needs the score. The trained noise predictor gives it, rescaled: $\nabla \log p_t \approx -\varepsilon_\theta/\sqrt{1-\bar\alpha_t}$, at each noise level along the way.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why is the U-Net a natural fit for a noise predictor?</p>
+    <ol class="q-src">
+      <li>It outputs a single number per image</li>
+      <li>It has no convolutions, so it is cheap</li>
+      <li>Its output has the same shape as its input, and skip connections keep fine detail while the bottleneck sees the big picture</li>
+      <li>It is the only architecture that accepts a time step</li>
+    </ol>
+    <div class="q-explain">The noise has the same shape as the image, so the network must map image-shaped input to image-shaped output. Transformers can do it too (G1.6), with the time step fed in by adaptive normalization.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Forward process: $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$, with $\bar\alpha_t$ falling from 1 to about $4\times10^{-5}$ over 1,000 steps.</li>
+    <li>Training is regression: predict the added noise, loss $\|\varepsilon - \varepsilon_\theta(x_t, t)\|^2$, at random $t$.</li>
+    <li>Sampling starts from pure noise and removes predicted noise step by step; DDPM adds fresh noise each step, DDIM doesn't and needs far fewer steps.</li>
+    <li>The noise predictor is a rescaled <strong>score</strong>, so diffusion sampling is a cousin of Langevin dynamics.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Build a DDPM on the two-moons toy in PyTorch: the schedule, one-jump noising, a small MLP noise predictor with a time embedding, training, and the 1,000-step sampling loop. Trains in well under a minute on a CPU.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="g1-3-diffusion-2d.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"g1-3-a","front":"Write the one-jump forward process of DDPM.","back":"$x_t = \\sqrt{\\bar\\alpha_t}\\,x_0 + \\sqrt{1-\\bar\\alpha_t}\\,\\varepsilon$, $\\varepsilon \\sim \\mathcal{N}(0,I)$, with $\\bar\\alpha_t = \\prod_{s \\le t}(1-\\beta_s)$."},
+  {"id":"g1-3-b","front":"What is the DDPM training loss?","back":"$\\|\\varepsilon - \\varepsilon_\\theta(x_t, t)\\|^2$: predict the noise that was mixed into $x_t$, at a random step $t$."},
+  {"id":"g1-3-c","front":"DDPM's noise schedule and the resulting $\\bar\\alpha_T$?","back":"Linear $\\beta$ from $10^{-4}$ to $0.02$ over $T = 1000$ steps; $\\bar\\alpha_{1000} \\approx 4\\times10^{-5}$, so $x_T$ is essentially pure noise."},
+  {"id":"g1-3-d","front":"How does the noise prediction relate to the score?","back":"$\\nabla_x \\log p_t(x_t) \\approx -\\varepsilon_\\theta(x_t,t)/\\sqrt{1-\\bar\\alpha_t}$. Denoising = stepping uphill on the noisy data density, as in Langevin dynamics."},
+  {"id":"g1-3-e","front":"What does DDIM change, and why does it help?","back":"Only the sampler: it predicts $\\hat x_0$ and jumps deterministically to an earlier step, reusing the predicted noise. Same network, 10–50× fewer steps."},
+  {"id":"g1-3-f","front":"Why a U-Net as the classic denoiser backbone?","back":"Image-shaped in, image-shaped out; the encoder–decoder sees global context while skip connections keep fine detail; the time embedding is added in every block."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/g1-toy.js"></script>
+<script src="../assets/js/anims/g1-3-diffusion.js"></script>
+</body>
+</html>

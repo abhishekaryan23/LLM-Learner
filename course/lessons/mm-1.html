@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="mm-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Connecting vision to LLMs · LLMs, Animated</title>
+<meta name="description" content="How a text-only LLM learns to see: a vision encoder, a small projector and visual tokens. Flamingo, BLIP-2 and LLaVA, the two-stage training recipe, and what high-resolution images cost in tokens.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Connecting vision to LLMs</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Multimodal models</span></div>
+<p class="lede">Most of the AI models that “look at” your photo, screenshot or PDF are, at heart, a text LLM with a pair of eyes bolted on. The bolt is surprisingly small: a projector that turns image patches into <strong>visual tokens</strong> the LLM reads like words. This lesson builds that recipe piece by piece and counts what an image costs.</p>
+
+<div class="cover"><img src="../assets/img/cover-mm.webp" alt="Illustration: a robot at a round table, with streams from a photograph, a sound wave, a film strip and a blank page braiding into one glowing ribbon." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Trace an image through vision encoder → projector → LLM, and compute how many visual tokens it becomes.</li>
+    <li>Compare three ways to connect vision to a language model: Flamingo's cross-attention, BLIP-2's Q-Former and LLaVA's projector.</li>
+    <li>Explain the two training stages (align, then instruction-tune) and how tiling or dynamic resolution handle large images.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="v1-2.html">V1.2 Contrastive learning &amp; CLIP</a> (the vision encoder we plug in) and <a href="m1-4.html">M1.4 The decoder-only transformer</a> (the LLM it plugs into). Helpful but optional: <a href="v1-1.html">V1.1 Vision Transformers</a>, for how an image becomes a grid of patches.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A vision transformer cuts a 336×336-pixel image into 14×14-pixel patches. How many patches is that?</p>
+    <ol class="q-src">
+      <li>24</li>
+      <li>336</li>
+      <li>576</li>
+      <li>112,896</li>
+    </ol>
+    <div class="q-explain">$336 / 14 = 24$ patches per side, so $24 \times 24 = 576$. In a LLaVA-style model each patch becomes one token in the LLM's input, so this one small image costs 576 tokens.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In 2023 a simple recipe made many open models able to chat about images. What did it add to an existing text LLM?</p>
+    <ol class="q-src">
+      <li>Nothing: it retrained the whole LLM from scratch on images</li>
+      <li>A small learned layer that maps image-patch features into the LLM's word-embedding space</li>
+      <li>A captioning model whose text description is pasted into the prompt</li>
+      <li>New image words added to the tokenizer's vocabulary</li>
+    </ol>
+    <div class="q-explain">That is LLaVA's projector. Pasting a caption (option 3) was an earlier trick and works, but the caption throws away most of what's in the picture.</div>
+  </div>
+</section>
+
+<h2>From captions to visual tokens</h2>
+<p>By 2021 there were strong text LLMs (GPT-3) and strong image encoders (CLIP, <a href="v1-2.html">V1.2</a>), but they lived apart. Vision-language systems were mostly task-specific: one model for captions, another for visual question answering. The quickest bridge was text itself: <strong>caption the image, then paste the caption into the prompt</strong>. PICa (Yang et al., 2022) answered questions about images this way with GPT-3. It works, but a caption is a bottleneck. Ask about the colour of the third car or a number on a sign, and if the captioner didn't mention it, the LLM can't know.</p>
+<p>The better idea is to skip the words and feed the LLM the image's <em>features</em> directly. Frozen (Tsimpoukelli et al., 2021) showed that a vision encoder trained to output a few “prefix” embeddings could steer a frozen language model. Since 2023 the standard recipe has three parts:</p>
+<ol class="steps">
+  <li><strong>Vision encoder:</strong> a pretrained image model, usually a CLIP-style ViT (CLIP itself or, in many open models since 2024, SigLIP; Zhai et al., 2023), that turns each image patch into a feature vector.</li>
+  <li><strong>Connector</strong> (often a <strong>projector</strong>): a small network that maps those features into the LLM's embedding space.</li>
+  <li><strong>LLM:</strong> a pretrained decoder that reads the resulting <strong>visual tokens</strong> alongside ordinary text tokens and writes the answer.</li>
+</ol>
+<p>Why does this work at all? An LLM's input is just a sequence of vectors (<a href="m1-4.html">M1.4</a>). It never sees token IDs past the embedding lookup. Hand it vectors that live in the same space and carry useful information, and attention will use them like any other context.</p>
+
+<figure class="anim wide" data-anim="mm-1-pipeline"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-mm-1.webp" alt="An interpreter parrot sits between a camera-headed robot holding photos and an owl who only reads, turning each photo into a row of coloured beads." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A robot with a camera for a head is great at looking at photos, but it can't talk. A wise owl knows lots of things, but it can only read.</p>
+      <p>So a <strong>parrot interpreter</strong> sits between them. For every photo the robot holds up, the parrot strings a <strong>row of coloured beads</strong> in the owl's own bead language. The owl reads the beads like a sentence and answers your question.</p>
+      <p>The robot is the vision encoder, the parrot is the projector, the beads are visual tokens and the owl is the LLM. The parrot is the only one who has to learn something new.</p>
+      <p class="math-note">Where it breaks: the owl doesn't just read the beads passively. During instruction tuning the owl itself also learns to use them better.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why can an LLM accept visual tokens at all, even though it was trained on text?</p>
+  <ol class="q-src">
+    <li>Its layers only ever see vectors; any vector in the embedding space can sit in the sequence and be attended to</li>
+    <li>The image is first converted to words by the vision encoder</li>
+    <li>Its tokenizer already contains one token per pixel colour</li>
+  </ol>
+  <div class="q-explain">After the embedding lookup, a transformer works on vectors only. The projector's job is to produce vectors in that same space, so the LLM can attend to them like text.</div>
+</div></div>
+
+<h2>Counting visual tokens</h2>
+<p>A ViT cuts an $H \times W$ image into square patches of side $p$ pixels (<a href="v1-1.html">V1.1</a>). In the LLaVA recipe each patch becomes one visual token, so</p>
+$$N_{\text{visual}} = \frac{H}{p} \times \frac{W}{p}$$
+<p>where $H$ and $W$ are the image height and width in pixels after resizing, $p$ is the patch side, and $N_{\text{visual}}$ is the number of tokens the LLM must read. Tokens grow with the <em>square</em> of the side: double the resolution, four times the tokens. And because attention compares every token with every other, the cost of the attention scores grows with the square of the sequence length.</p>
+
+<h3>Worked example</h3>
+<p>LLaVA-1.5 uses CLIP ViT-L/14 at 336×336 pixels.</p>
+<ol class="steps">
+  <li>Patches per side: $336 / 14 = 24$.</li>
+  <li>Visual tokens: $24 \times 24 = 576$.</li>
+  <li>Its LLM has a 4,096-token context, so one image uses $576 / 4096 \approx 14\%$ of it, before you type a word.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>A model reads 448×448 images with 14-pixel patches.</p>
+  <ol class="steps">
+    <li>Patches per side: <span class="blank" data-answer="32" data-tol="0.001" data-hint="448 ÷ 14"></span></li>
+    <li>Visual tokens, one per patch: <span class="blank" data-answer="1024" data-tol="0.5" data-hint="Square the patches per side."></span></li>
+    <li>Now merge each 2×2 block of neighbouring patches into one token (as Qwen2-VL does). Tokens: <span class="blank" data-answer="256" data-tol="0.5" data-hint="Merging 4 patches into 1 divides the count by 4."></span></li>
+    <li>Share of an 8,192-token context, in %: <span class="blank" data-answer="3.125" data-tol="0.01" data-hint="256 ÷ 8192 × 100"></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="mm1-tokens">
+  <h3>Playground: what does an image cost?</h3>
+  <p class="math-note" style="margin:0">Drag the image size, pick a patch size and whether 2×2 patches are merged into one token, then see the token count and its share of the context window. The square is drawn to scale.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Image side = <output>336</output> px</span>
+      <input type="range" min="224" max="1344" step="112" value="336">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Patch size" style="margin-top:10px">
+    <button type="button" class="chip" data-patch="14" aria-pressed="true">14 px patches</button>
+    <button type="button" class="chip" data-patch="16" aria-pressed="false">16 px patches</button>
+  </div>
+  <div class="chips" role="group" aria-label="Tokens per patch" style="margin-top:8px">
+    <button type="button" class="chip" data-merge="1" aria-pressed="true">1 patch = 1 token</button>
+    <button type="button" class="chip" data-merge="4" aria-pressed="false">2×2 patches = 1 token</button>
+  </div>
+  <div class="chips" role="group" aria-label="Context window" style="margin-top:8px">
+    <button type="button" class="chip" data-ctx="4096" aria-pressed="false">4K context</button>
+    <button type="button" class="chip" data-ctx="32768" aria-pressed="true">32K context</button>
+    <button type="button" class="chip" data-ctx="131072" aria-pressed="false">128K context</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">You double an image's side from 336 to 672 pixels, keeping 14-pixel patches and one token per patch. The visual-token count…</p>
+  <ol class="q-src">
+    <li>stays at 576</li>
+    <li>doubles to 1,152</li>
+    <li>quadruples to 2,304</li>
+    <li>grows eightfold</li>
+  </ol>
+  <div class="q-explain">Tokens scale with the area: $(672/14)^2 = 48^2 = 2304 = 4 \times 576$.</div>
+</div></div>
+
+<h2>Three ways to connect: cross-attention, Q-Former, projector</h2>
+<p>The connector is where designs differ most. Three landmark models span the options.</p>
+<p><strong>Flamingo</strong> (Alayrac et al., 2022, DeepMind) kept a 70B Chinchilla language model completely frozen. A <strong>Perceiver resampler</strong> squeezed each image's features into a fixed 64 vectors, and new <strong>gated cross-attention</strong> layers, inserted between the frozen LM layers, let text attend to them:</p>
+$$y \leftarrow y + \tanh(\alpha)\cdot \mathrm{XAttn}(y,\ v)$$
+<p>Here $y$ is the text stream at that layer, $v$ the resampled visual vectors, $\mathrm{XAttn}$ cross-attention (queries from text, keys and values from the image), and $\alpha$ a learned gate that starts at 0. At initialisation $\tanh(0) = 0$, so the model behaves exactly like the original LM and learns to let vision in gradually. Trained on web pages with interleaved images and text, Flamingo could learn new visual tasks from a few examples in the prompt.</p>
+<p><strong>BLIP-2</strong> (Li et al., 2023, Salesforce) froze both the image encoder and the LLM and trained a small bridge in between, the <strong>Q-Former</strong>. It has 32 learned query vectors that cross-attend to the image features and come out as 32 “soft prompt” vectors for the LLM. Every image costs the same 32 tokens, and only about 188M parameters are trained.</p>
+<p><strong>LLaVA</strong> (Liu et al., 2023, “Visual Instruction Tuning”) went the other way: no resampling at all. A single <strong>linear layer</strong> maps each CLIP patch feature $z_i$ into the LLM's embedding space, $h_i = W z_i$. In LLaVA-1.5 (Liu et al., 2023) this became a two-layer MLP, the encoder moved to 336 pixels, and the whole model trained in about a day on one 8-GPU node. Every patch survives as its own token, so nothing is thrown away before the LLM sees it, at the price of many more tokens.</p>
+<ul>
+  <li><strong>Fixed small budget</strong> (Flamingo's 64, BLIP-2's 32): cheap, but fine detail such as small text can be squeezed out.</li>
+  <li><strong>One token per patch</strong> (LLaVA): simple and detail-preserving, but token-hungry.</li>
+</ul>
+<p>As of 2026, most open vision-language models follow the LLaVA pattern (encoder, MLP projector, LLM), often with some token merging. Cross-attention never disappeared: Meta's Llama 3.2 Vision models (2024) add cross-attention adapter layers to a Llama 3.1 text model. For closed frontier models, labs mostly don't publish their connectors.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why does Flamingo's gate $\tanh(\alpha)$ start with $\alpha = 0$?</p>
+  <ol class="q-src">
+    <li>To make the visual signal as strong as possible from the first step</li>
+    <li>So that at the start the frozen LM behaves exactly as before, and vision is blended in gradually during training</li>
+    <li>Because tanh can't be computed for other values</li>
+  </ol>
+  <div class="q-explain">$\tanh(0) = 0$ switches the new cross-attention off at first, so training starts from the intact language model instead of disrupting it with random visual noise.</div>
+</div></div>
+
+<h2>Training: align first, then instruction-tune</h2>
+<p>A freshly initialised projector outputs vectors the LLM has never seen: noise, as far as the LLM is concerned. LLaVA fixes this in two stages.</p>
+<ol class="steps">
+  <li><strong>Stage 1, feature alignment.</strong> Freeze the vision encoder and the LLM; train only the projector on image–caption pairs (about 595K pairs filtered from CC3M in LLaVA, 558K captioned images in LLaVA-1.5). The task: given the visual tokens, predict the caption. The projector learns to put each image “where its words are” in embedding space.</li>
+  <li><strong>Stage 2, visual instruction tuning.</strong> Keep the encoder frozen, train the projector <em>and</em> the LLM on image-grounded conversations. LLaVA's 158K examples were written by a text-only GPT-4 that was given each image's captions and object boxes; LLaVA-1.5 mixed in academic VQA data for about 665K examples.</li>
+</ol>
+<p>Both stages use the ordinary next-token loss (<a href="m2-2.html">M2.2</a>), counted only on the tokens the model should produce:</p>
+$$\mathcal{L} = -\sum_{t \in \text{answer}} \log p_\theta\big(x_t \mid x_{&lt;t},\ \text{image}\big)$$
+<p>$x_t$ is the $t$-th answer token, $x_{&lt;t}$ everything before it (visual tokens, question, earlier answer tokens), and $\theta$ the parameters being trained in that stage. Visual and question tokens are inputs only; they're masked out of the loss, just as the prompt is in supervised fine-tuning (<a href="m3-1.html">M3.1</a>).</p>
+<p>Why two stages? Alignment is cheap and needs only captions, while conversation skills need curated data and touch the LLM itself. Training both from the start would let a random projector push noisy gradients into the LLM. Recipes published since 2024 typically add stages (unfreezing the vision encoder, large interleaved and OCR data, then preference tuning), but the align-then-tune skeleton is the same.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In LLaVA's stage 1, which parts are trained?</p>
+  <ol class="q-src">
+    <li>Only the projector; the vision encoder and LLM are frozen</li>
+    <li>Only the LLM; the projector is fixed at random values</li>
+    <li>Everything, end to end, on instruction data</li>
+  </ol>
+  <div class="q-explain">Stage 1 is alignment: with both big models frozen, only the projector learns to map image features to where the matching caption words live.</div>
+</div></div>
+
+<h2>High resolution: tiles and dynamic resolution</h2>
+<p>A 336-pixel encoder is fine for “is there a dog?” and hopeless for a receipt or a slide full of small text: shrink a full page to 336×336 and each line of text is a few pixels tall. But CLIP-style encoders were trained at one fixed size. Two families of fixes emerged.</p>
+<p><strong>Tiling.</strong> LLaVA-NeXT (LLaVA-1.6, Liu et al., 2024) keeps the 336-pixel encoder and cuts a larger image into a grid of 336×336 <strong>tiles</strong>, plus one downscaled <strong>overview</strong> of the whole image for global context, choosing the grid to fit the aspect ratio (up to 672×672, 336×1344 or 1344×336). A 672×672 image is 2×2 tiles plus the overview: $5 \times 576 = 2{,}880$ visual tokens. Detail is back; the bill is five times higher.</p>
+<p><strong>Dynamic (native) resolution.</strong> Qwen2-VL (Wang et al., 2024) instead lets its ViT read images at roughly their own size and shape, with 2-D rotary position embeddings so the encoder knows where each patch sits, then merges each 2×2 block of 14-pixel patches into one token. One token then covers 28×28 pixels: a 224×224 image becomes $8 \times 8 = 64$ tokens (66 with the start and end markers), and a 1344×1344 image becomes $48 \times 48 = 2{,}304$. Users set minimum and maximum pixel budgets to trade detail for cost.</p>
+<p>Both approaches share the same economics: <strong>detail costs tokens</strong>. Tokens cost memory (each one sits in the KV cache, <a href="m1-5.html">M1.5</a>), latency and money. Much current work is about spending them wisely: merging or pruning redundant tokens (a blue sky does not need 200 of them) and choosing resolution per image.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> hosted multimodal APIs generally bill an image as input tokens, and the count grows with resolution, so a phone photo can quietly cost more than a page of text. Resizing or cropping to what the question needs is often the cheapest optimisation you have. For documents and screenshots, though, too little resolution makes small text unreadable (<a href="mm-3.html">MM.3</a>), so test accuracy before you downscale.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What is the extra “overview” image for in LLaVA-NeXT's tiling?</p>
+  <ol class="q-src">
+    <li>It replaces the tiles when the image is small</li>
+    <li>It is used only for training, never at inference</li>
+    <li>Tiles each see only a piece; the downscaled overview gives the model the global layout of the whole image</li>
+  </ol>
+  <div class="q-explain">Each tile is encoded on its own, so no single tile sees the whole picture. The low-resolution overview restores global context for 576 extra tokens.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">A friend asks how a chatbot that was trained on text can answer questions about a photo. Explain the pipeline and what had to be trained.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A pretrained vision encoder (usually a CLIP-style ViT) turns the image's patches into feature vectors, and a small projector maps each one into the LLM's embedding space, producing visual tokens that sit in the sequence next to the text tokens. The LLM attends over all of them and writes the answer. Training first aligns the projector on image–caption pairs with everything else frozen, then instruction-tunes the projector and LLM on image-grounded conversations.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which description matches LLaVA's connector?</p>
+    <ol class="q-src">
+      <li>32 learned queries cross-attend to the image and become 32 soft-prompt tokens</li>
+      <li>Gated cross-attention layers inserted between frozen LM layers</li>
+      <li>The image is captioned and the caption is added to the prompt</li>
+      <li>A linear layer (an MLP in LLaVA-1.5) maps each patch feature to one token in the LLM's embedding space</li>
+    </ol>
+    <div class="q-explain">Option 1 is BLIP-2's Q-Former, option 2 is Flamingo, option 3 is the older caption pipeline. LLaVA keeps one token per patch and just projects it.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Recall the causal mask in a decoder-only LLM (M1.4). Why do most VLM prompts put the image <em>before</em> the question?</p>
+    <ol class="q-src">
+      <li>Visual tokens must be first or the projector fails</li>
+      <li>Each token can only attend to earlier tokens, so the question and the answer can attend to the image only if it comes first</li>
+      <li>It reduces the number of visual tokens</li>
+      <li>The order makes no difference in a transformer</li>
+    </ol>
+    <div class="q-explain">With causal masking, information flows only forward. Image first means every question and answer token can look back at all the visual tokens.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A tiling model uses 336-pixel tiles (576 tokens each) plus one overview. How many visual tokens does a 1008×672 image cost?</p>
+    <ol class="q-src">
+      <li>576</li>
+      <li>3,456</li>
+      <li>4,032</li>
+      <li>6,048</li>
+    </ol>
+    <div class="q-explain">$1008/336 = 3$ by $672/336 = 2$ gives 6 tiles, plus 1 overview: $7 \times 576 = 4{,}032$. 3,456 forgets the overview.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why not train the projector and the LLM together from the very first step?</p>
+    <ol class="q-src">
+      <li>A random projector feeds the LLM noise, and its gradients can damage the LLM before the projector has learned anything useful</li>
+      <li>The LLM has no gradients</li>
+      <li>Image–caption pairs can't be used with a next-token loss</li>
+      <li>It is impossible to unfreeze an LLM after pretraining</li>
+    </ol>
+    <div class="q-explain">Aligning the projector first (stage 1) gives the LLM sensible inputs before its own weights start to move in stage 2.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Most vision-language models are <strong>vision encoder → connector → LLM</strong>; the LLM reads <strong>visual tokens</strong> like words.</li>
+    <li>One token per patch: $N = (H/p)(W/p)$. A 336×336 image with 14-pixel patches is <strong>576</strong> tokens; doubling the side quadruples it.</li>
+    <li>Connectors range from Flamingo's gated cross-attention and BLIP-2's 32-query Q-Former to LLaVA's simple linear/MLP projector.</li>
+    <li>Train in two stages: <strong>align</strong> the projector with everything else frozen, then <strong>instruction-tune</strong> projector and LLM.</li>
+    <li>High resolution comes from <strong>tiles</strong> (LLaVA-NeXT) or <strong>dynamic resolution</strong> with token merging (Qwen2-VL); either way, detail costs tokens.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Do stage 1 yourself in about 15 minutes: train a linear projector so frozen toy “image features” land next to the embeddings of their caption words, then compute visual-token counts for real resolutions and patch sizes. NumPy only, runs in seconds.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="mm-1-projector.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"mm-1-a","front":"What are the three parts of the standard vision-language model recipe?","back":"A pretrained vision encoder (usually a CLIP-style ViT) → a connector/projector that maps patch features into the LLM's embedding space → a pretrained LLM that reads the resulting visual tokens alongside text tokens."},
+  {"id":"mm-1-b","front":"How many visual tokens does a 336×336 image cost with 14-pixel patches and one token per patch?","back":"$(336/14)^2 = 24^2 = 576$. In general $N = (H/p)(W/p)$, so doubling the side quadruples the tokens."},
+  {"id":"mm-1-c","front":"Flamingo vs BLIP-2 vs LLaVA: how does each connect vision to the LM?","back":"Flamingo (2022): Perceiver resampler (64 vectors) + gated cross-attention layers in a frozen LM. BLIP-2 (2023): Q-Former with 32 learned queries → 32 soft-prompt tokens, encoder and LLM frozen. LLaVA (2023): a linear (later MLP) projector, one token per patch."},
+  {"id":"mm-1-d","front":"What are LLaVA's two training stages?","back":"1) Feature alignment: train only the projector on image–caption pairs, encoder and LLM frozen. 2) Visual instruction tuning: train projector + LLM on image-grounded conversations (loss on answer tokens only)."},
+  {"id":"mm-1-e","front":"Two ways to handle high-resolution images, with a token example for each.","back":"Tiling (LLaVA-NeXT): 336-px tiles + a downscaled overview; 672×672 → 5 × 576 = 2,880 tokens. Dynamic resolution (Qwen2-VL): ViT at native size, 2×2 patch merge so one token covers 28×28 px; 224×224 → 64 tokens (+2 markers)."},
+  {"id":"mm-1-f","front":"Why does Flamingo gate its new cross-attention with $\\tanh(\\alpha)$, $\\alpha$ initialised to 0?","back":"At the start $\\tanh(0)=0$, so the frozen LM behaves exactly as before; the visual signal is blended in gradually as $\\alpha$ is learned."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/mm-1-pipeline.js"></script>
+<script src="../assets/js/anims/mm-1-tokens-playground.js"></script>
+</body>
+</html>

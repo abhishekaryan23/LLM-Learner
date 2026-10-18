@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="rs-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Chain of thought · LLMs, Animated</title>
+<meta name="description" content="Why asking a language model to write out its reasoning step by step makes it better at multi-step problems, when it doesn't help, and why the written reasoning may not be what really drives the answer.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Chain of thought</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Reasoning &amp; test-time compute</span></div>
+<p class="lede">Ask a language model a three-step word problem and it may blurt out a wrong number. Ask it to <strong>write its working first</strong> and the same model, with the same weights, often gets it right. That trick, chain of thought, is where every modern "reasoning model" starts.</p>
+
+<div class="cover"><img src="../assets/img/cover-rs.webp" alt="Illustration: a robot at a desk with a long scroll of step boxes joined by arrows, while branching stepping-stone paths fan out toward a glowing lighthouse, some of them fading out." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain chain-of-thought prompting, few-shot and zero-shot ("Let's think step by step").</li>
+    <li>Give three reasons writing steps helps, including the <strong>extra serial computation</strong> each token buys.</li>
+    <li>Say when chain of thought doesn't help, and why the written reasoning may not be <strong>faithful</strong> to what drives the answer.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="m3-1.html">SFT &amp; instruction tuning</a> (how a base model becomes an assistant that follows prompts). Helpful but optional: <a href="m1-5.html">KV cache &amp; sampling</a> for how generation runs one token at a time.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A large model keeps getting a four-step arithmetic word problem wrong. Which change to the prompt is most likely to help?</p>
+    <ol class="q-src">
+      <li>"Answer with a single number only."</li>
+      <li>"You are an expert mathematician. Be confident."</li>
+      <li>Adding "Let's think step by step." before the answer</li>
+      <li>Repeating the question twice</li>
+    </ol>
+    <div class="q-explain">Kojima et al. (2022) found that this one phrase sharply raised accuracy on arithmetic word problems, because the model then writes out intermediate steps before answering. Forcing a single number does the opposite: it removes the room to work.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model writes a tidy step-by-step explanation and reaches the right answer. Does the explanation show how it actually got there?</p>
+    <ol class="q-src">
+      <li>Yes, always: the answer is generated after the explanation, so it must follow from it</li>
+      <li>Not necessarily: studies find that explanations can leave out what really drove the answer</li>
+      <li>No, the explanation is random text</li>
+      <li>Only if the temperature is 0</li>
+    </ol>
+    <div class="q-explain">This is the <strong>faithfulness</strong> problem. Written reasoning often helps, but experiments show it can omit, or even rationalise, the real cause of an answer. You'll see the evidence at the end of the lesson.</div>
+  </div>
+</section>
+
+<h2>Thinking out loud: where chain of thought came from</h2>
+<p>By 2021, scaling up language models had improved almost everything, except problems that need several steps in a row. Multi-step arithmetic and word problems improved far more slowly with model size than reading comprehension or trivia. The model was being asked to produce the answer as its <strong>very next token</strong>, with no room to work anything out.</p>
+<p>Three papers changed that within a year:</p>
+<ul>
+  <li><strong>Scratchpads</strong> (Nye et al., 2021, "Show Your Work"): fine-tune a model to write intermediate results, such as the digits and carries of a long addition or the state of a program line by line, before the final output. It made long addition and program execution far more reliable.</li>
+  <li><strong>Chain-of-thought prompting</strong> (Wei et al., 2022): no fine-tuning at all. Put a few worked examples in the prompt that show the reasoning before each answer (for a question about tennis balls: "Roger started with 5 balls. 2 cans of 3 tennis balls each is 6 tennis balls. 5 + 6 = 11. The answer is 11."), and the model imitates the format on new questions. With PaLM 540B and just eight such examples, it reached the state of the art on the GSM8K maths benchmark. The gains appeared mainly in the largest models; models below roughly 100B parameters often wrote fluent but illogical chains.</li>
+  <li><strong>Zero-shot chain of thought</strong> (Kojima et al., 2022, "Large Language Models are Zero-Shot Reasoners"): skip the examples and add one sentence, <em>"Let's think step by step."</em> With InstructGPT (text-davinci-002), accuracy on the MultiArith word problems rose from 17.7% to 78.7%, and on GSM8K from 10.4% to 40.7%.</li>
+</ul>
+<p>Here is the difference on a small problem:</p>
+
+<figure class="anim wide" data-anim="rs-1-cot"></figure>
+
+<p>Today you rarely need the magic phrase. Assistants are fine-tuned (<a href="m3-1.html">M3.1</a>) on answers that show their working, and <strong>reasoning models</strong> (RS.3) are trained to write long chains by themselves, often hidden from the user. The mechanism underneath is the same one this lesson is about.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What did Kojima et al. (2022) add to get chain-of-thought behaviour <em>without</em> any worked examples?</p>
+  <ol class="q-src">
+    <li>The sentence "Let's think step by step." before the answer</li>
+    <li>Eight hand-written worked examples in the prompt</li>
+    <li>Fine-tuning on scratchpad traces</li>
+    <li>A lower sampling temperature</li>
+  </ol>
+  <div class="q-explain">That's <strong>zero-shot</strong> chain of thought. Worked examples in the prompt are Wei et al.'s few-shot version, and fine-tuning on intermediate steps is Nye et al.'s scratchpad.</div>
+</div></div>
+
+<h2>Why writing the steps helps</h2>
+<p>Nothing about the model changes when it "thinks step by step". What changes is <em>how much computation it does</em>, and <em>in what order</em>. Three effects work together.</p>
+<ol class="steps">
+  <li><strong>More serial computation.</strong> A transformer with $L$ layers applies exactly $L$ layers to produce each token. If the answer must be the next token, all the work has to fit in that one pass. Each written token is a whole extra pass whose result is fed back in as input. A chain of $n$ tokens before the answer lets information flow through about $n \times L$ layers <em>one after another</em>. Theory backs this up: with enough intermediate tokens, transformers can solve problems that provably need more sequential steps than a single pass allows (Feng et al., 2023; Merrill &amp; Sabharwal, 2024).</li>
+  <li><strong>Decomposition.</strong> "36 − 15" is a pattern the model has seen countless times. "3 packs of 12, give away 15, split 3 ways" in one jump is not. Writing steps turns one rare, hard prediction into several common, easy ones.</li>
+  <li><strong>Working memory.</strong> Through attention, every new token can read every earlier one. The written 36 stays in the context (and in the KV cache, <a href="m1-5.html">M1.5</a>), so the next step can use it instead of recomputing it inside the network.</li>
+</ol>
+
+<h3>Worked example</h3>
+<p>A model with $L = 32$ layers answers the pencil problem.</p>
+<ol class="steps">
+  <li><strong>Direct:</strong> the answer token is produced by one pass: $32$ layers in sequence.</li>
+  <li><strong>Chain of thought:</strong> it writes about $20$ tokens of working, then the answer: $20 + 1 = 21$ passes.</li>
+  <li><strong>Serial depth:</strong> $21 \times 32 = 672$ layer applications can now sit one after another, 21 times as many as before.</li>
+  <li><strong>Cost:</strong> you also generate (and pay for) 21 output tokens instead of 1.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A model with $L = 40$ layers writes $50$ tokens of reasoning before a one-token answer.</p>
+  <ol class="steps">
+    <li>Forward passes needed, including the answer token: <span class="blank" data-answer="51" data-tol="0.01" data-hint="50 reasoning tokens plus 1 answer token."></span></li>
+    <li>Layer applications that can sit in sequence: <span class="blank" data-answer="2040" data-tol="0.5" data-hint="Passes × layers: 51 × 40."></span></li>
+    <li>How many times more output tokens than answering directly with one token? <span class="blank" data-answer="51" data-tol="0.01" data-hint="51 tokens instead of 1."></span></li>
+  </ol>
+</section>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-rs-1.webp" alt="Two children trying to reach a cookie jar on a high shelf: one leaps and falls short, the other climbs small steps one at a time and reaches it." width="1200" height="900" loading="lazy">
+    <div>
+      <p>The cookie jar is on a <strong>high shelf</strong>. One child tries to reach it in <strong>one giant leap</strong>, and falls short. The other child climbs <strong>small steps, one at a time</strong>, and each step is easy. At the top, the jar is right there.</p>
+      <p>Answering straight away is the giant leap. Writing the steps is the staircase: every step is small, and you stand on the last one to reach the next.</p>
+      <p class="math-note">Where it breaks: the steps the model writes are words, not a real staircase. It can write a step that looks fine but is wrong, or reach the jar for reasons that have nothing to do with the steps it wrote (see the next section).</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why does a chain of 20 tokens give the model more room to compute than a direct answer?</p>
+  <ol class="q-src">
+    <li>Each written token makes the model's weights larger</li>
+    <li>The prompt is processed again with a higher temperature</li>
+    <li>Each token is a full extra pass through all layers, and its result is fed back as input to the next</li>
+    <li>It doesn't; the answer is computed before the chain is written</li>
+  </ol>
+  <div class="q-explain">The weights never change at inference time. What grows is the number of passes chained one after another, roughly tokens × layers, and the written results act as working memory for later steps.</div>
+</div></div>
+
+<h2>When it doesn't help, and whether it tells the truth</h2>
+<p><strong>It helps mainly where there is something to compute.</strong> Sprague et al. (2024, "To CoT or not to CoT?") combined results from over 100 papers with their own tests on 20 datasets and 14 models. Chain of thought gave large gains on maths and logic, and much smaller ones elsewhere. On the MMLU knowledge benchmark, answering directly was almost as accurate, except on questions involving equations. A lookup such as "What is the capital of Australia?" gains nothing from steps; you only pay for the extra tokens.</p>
+<p><strong>It can even hurt.</strong> Liu et al. (2024, "Mind Your Step (by Step)") found tasks where chain of thought reduced accuracy, notably ones where deliberating in words also makes <em>humans</em> worse, such as learning a hidden pattern from examples. Long chains also give errors more places to creep in, and later steps trust earlier mistakes.</p>
+<p><strong>The written reasoning may not be what drives the answer.</strong> A chain of thought is <em>faithful</em> if it reflects the actual cause of the model's answer. Several experiments show that often it doesn't:</p>
+<ul>
+  <li><strong>Turpin et al. (2023)</strong> biased the prompt, for example by reordering the multiple-choice options in the few-shot examples so the correct answer was always "(A)". The models then leaned toward "(A)" on new questions, yet their explanations never mentioned the pattern; they built plausible arguments for the biased answer instead. On 13 BIG-Bench Hard tasks, accuracy dropped by as much as 36%.</li>
+  <li><strong>Lanham et al. (2023)</strong> edited the chains: cut them short, inserted mistakes, paraphrased them. How much the final answer depended on the chain varied a lot by task, and on most tasks the larger, more capable models relied on their written reasoning <em>less</em>.</li>
+  <li><strong>Chen et al. (2025)</strong> repeated the idea with trained reasoning models: slip a hint into the prompt, check whether the model uses it, then check whether the chain admits it. When the models used a hint, their reasoning mentioned it only a minority of the time (on average about 25% for Claude 3.7 Sonnet and 39% for DeepSeek-R1).</li>
+</ul>
+<p>So treat a chain of thought as useful <em>computation</em> that often, but not always, also works as an <em>explanation</em>.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> as of 2026, most frontier models can reason before answering, either always or on request. Prompting a reasoning model with "think step by step" is usually redundant, but asking for working still helps many smaller, non-reasoning models on maths and logic. Reasoning tokens cost money and latency, so turn them off for lookups and simple formatting. And because the chain is the most readable view we have into a model's process, researchers from several labs argue for monitoring it for signs of misbehaviour while keeping in mind that it can be incomplete (Korbak et al., 2025, "Chain of Thought Monitorability").</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Few-shot examples always have answer "(A)". The model picks (A) on a new question and explains it with a careful argument that never mentions the pattern. What does this show?</p>
+  <ol class="q-src">
+    <li>Chain of thought is useless and should never be used</li>
+    <li>The model has learned the correct answer is usually (A)</li>
+    <li>The temperature was set too high</li>
+    <li>The written reasoning can be plausible yet unfaithful: it hides what actually drove the answer</li>
+  </ol>
+  <div class="q-explain">This is Turpin et al.'s (2023) setup. The bias changed the answer, and the explanation rationalised it without mentioning the bias. Chain of thought still often helps accuracy; it just isn't a guaranteed window into the model.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does writing the steps make a model better at multi-step maths, and why shouldn't you fully trust the steps it writes?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Each written token is another full pass through the network whose result feeds the next one, so the model gets far more sequential computation, breaks the problem into easy familiar pieces, and can read its earlier results through attention. But the chain is generated text, not a log of the computation: experiments show the real cause of an answer (such as a bias or hint in the prompt) can be missing from the explanation.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">For which task would you expect chain of thought to help <em>least</em>?</p>
+    <ol class="q-src">
+      <li>A three-step unit-conversion word problem</li>
+      <li>"Which planet is closest to the Sun?"</li>
+      <li>Evaluating a short program line by line to predict its output</li>
+      <li>A logic puzzle about who sits next to whom</li>
+    </ol>
+    <div class="q-explain">A fact lookup has nothing to compute, so extra steps only add tokens. Sprague et al. (2024) found the gains concentrate on maths, logic and symbolic tasks like the other three.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Wei et al. (2022) found that few-shot chain-of-thought prompting…</p>
+    <ol class="q-src">
+      <li>Helped mostly the largest models; smaller ones often wrote fluent but illogical chains</li>
+      <li>Helped small models most, because they need more guidance</li>
+      <li>Required fine-tuning on thousands of rationales</li>
+      <li>Only worked with the phrase "Let's think step by step"</li>
+    </ol>
+    <div class="q-explain">The benefit emerged with scale (around 100B parameters in their experiments). No fine-tuning was needed, and the trigger phrase is Kojima et al.'s zero-shot variant.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">You fine-tune a small model on thousands of (question, worked solution, answer) examples, with the loss only on the response. In this course's terms, what are you doing?</p>
+    <ol class="q-src">
+      <li>RLHF with a reward model</li>
+      <li>Pretraining on more web text</li>
+      <li>Self-consistency voting</li>
+      <li>Supervised fine-tuning (M3.1) on rationales, so the model learns to write its working by default</li>
+    </ol>
+    <div class="q-explain">It's SFT with masked prompt tokens, exactly as in M3.1, applied to step-by-step solutions. Scratchpads (Nye et al., 2021) did this, and STaR (RS.3) builds on it by generating the rationales itself.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A 24-layer model answers directly, then with 9 tokens of working before a one-token answer. Roughly how many layer applications can sit in sequence in the second case?</p>
+    <ol class="q-src">
+      <li>24</li>
+      <li>33</li>
+      <li>240</li>
+      <li>216</li>
+    </ol>
+    <div class="q-explain">10 passes (9 + the answer) × 24 layers = 240, versus 24 for a direct answer. 216 forgets the answer token's own pass.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Chain of thought</strong>: let the model write intermediate steps before answering. Few-shot (Wei et al., 2022), zero-shot "Let's think step by step" (Kojima et al., 2022), or trained in (scratchpads, Nye et al., 2021).</li>
+    <li>It helps because each token adds a full pass of <strong>serial computation</strong>, the problem gets <strong>decomposed</strong> into easy steps, and written results act as <strong>working memory</strong>.</li>
+    <li>Gains concentrate on <strong>maths, logic and symbolic</strong> tasks; lookups gain nothing, and some tasks get worse.</li>
+    <li>The chain is not always <strong>faithful</strong>: what really drove the answer can be missing from it.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"rs-1-a","front":"What is chain-of-thought prompting?","back":"Getting the model to write intermediate reasoning steps before its final answer: with worked examples in the prompt (few-shot; Wei et al., 2022) or a trigger like \"Let's think step by step\" (zero-shot; Kojima et al., 2022)."},
+  {"id":"rs-1-b","front":"Name three reasons chain of thought helps on multi-step problems.","back":"1) More serial computation: each token is a full extra pass, about $n \\times L$ layers in sequence. 2) Decomposition into easy, familiar steps. 3) Working memory: later steps attend to earlier written results."},
+  {"id":"rs-1-c","front":"A 32-layer model writes 20 tokens of working, then a 1-token answer. How many layer applications can sit in sequence?","back":"$21 \\times 32 = 672$, versus 32 for a direct answer. It also generates 21 output tokens instead of 1."},
+  {"id":"rs-1-d","front":"Where does chain of thought help most, and where least?","back":"Most on maths, logic and symbolic tasks; little on knowledge lookups (Sprague et al., 2024). It can even hurt some tasks (Liu et al., 2024)."},
+  {"id":"rs-1-e","front":"What does it mean for a chain of thought to be unfaithful? Give one piece of evidence.","back":"The written reasoning doesn't reflect what actually caused the answer. Turpin et al. (2023): biasing few-shot answers toward \"(A)\" changed the models' answers, but their explanations never mentioned it."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/rs-1-cot.js"></script>
+</body>
+</html>

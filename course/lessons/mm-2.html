@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="mm-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Native multimodal &amp; any-to-any models · LLMs, Animated</title>
+<meta name="description" content="From bolting vision onto a text LLM to one model trained on text, image and audio tokens from the start: late vs early fusion, Chameleon's image tokens, Transfusion's two losses, speech in and out, and what any-to-any costs.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Native multimodal &amp; any-to-any models</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Multimodal models</span></div>
+<p class="lede">The models in MM.1 can look at a picture but can only answer in words, and they learned language long before they saw an image. The next step is a single model that is trained on text, images and sound <strong>from the start</strong>, and can also <em>produce</em> them. This lesson shows the two main ways to build one, and what it costs.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Distinguish late fusion (an adapter on a finished text LLM) from early fusion (one model trained on mixed tokens from the start).</li>
+    <li>Explain how discrete image tokens (Chameleon) and an in-model diffusion loss (Transfusion) let one transformer generate images, not just read them.</li>
+    <li>Weigh any-to-any trade-offs: token budgets, latency, and quality against specialist models.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="mm-1.html">MM.1 Connecting vision to LLMs</a> (the late-fusion recipe we start from) and <a href="a1-3.html">A1.3 Neural audio codecs &amp; audio tokens</a> (how sound becomes tokens). Helpful but optional: <a href="g1-6.html">G1.6 Diffusion transformers &amp; autoregressive images</a> and <a href="a1-6.html">A1.6 Real-time speech-to-speech models</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A LLaVA-style model (vision encoder → projector → text LLM) is asked to “draw a cat”. What can it output?</p>
+    <ol class="q-src">
+      <li>A picture of a cat, through its projector run in reverse</li>
+      <li>Only text, for example a description or SVG code, because its output layer scores text tokens only</li>
+      <li>Visual tokens that any screen can display</li>
+      <li>Nothing; it can't run without an image input</li>
+    </ol>
+    <div class="q-explain">Late-fusion models read images, but their output head only covers the text vocabulary. To <em>generate</em> images, a model needs image tokens in its output vocabulary or an image decoder of some kind.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">An image tokenizer turns a 512×512 image into 1,024 discrete codes. To generate one image token by token, an autoregressive model needs about…</p>
+    <ol class="q-src">
+      <li>1 forward pass</li>
+      <li>32 forward passes</li>
+      <li>1,024 forward passes, one per code</li>
+      <li>262,144 forward passes, one per pixel</li>
+    </ol>
+    <div class="q-explain">Like text, the codes come out one at a time, so one image costs about as many decoding steps as a 1,024-token answer. That's a big reason some unified models generate images with diffusion instead.</div>
+  </div>
+</section>
+
+<h2>Late fusion vs early fusion</h2>
+<p>The recipe in <a href="mm-1.html">MM.1</a> is <strong>late fusion</strong>: pretrain a text LLM and a vision encoder separately, then connect them. It is cheap and reuses the best text model you have, but it has three limits. Vision is <strong>input only</strong>; the model can't produce an image or a voice. Language was learned first and images were added later, from far less data. And for speech you need a <strong>pipeline</strong>: speech recognition, then the LLM, then text-to-speech, which adds delay and loses tone of voice.</p>
+<p><strong>Early fusion</strong> puts every modality into one token sequence <em>from the start of pretraining</em>, and lets the model write those tokens as well as read them. Two 2023–24 launches made “natively multimodal” the goal for frontier labs:</p>
+<ul>
+  <li><strong>Gemini 1.0</strong> (Gemini Team, Google, December 2023) was described as trained jointly on text, images, audio and video, accepting them interleaved, and its report says it can output images using discrete image tokens. The report gives few architectural details.</li>
+  <li><strong>GPT-4o</strong> (OpenAI, May 2024) was announced as “a single new model end-to-end across text, vision, and audio”. OpenAI's earlier Voice Mode chained three models, with average latencies of 2.8 s (GPT-3.5) and 5.4 s (GPT-4); GPT-4o was said to answer speech in as little as 232 ms, 320 ms on average. Its architecture has not been published.</li>
+</ul>
+<p>A warning about words: some papers call LLaVA-style models “early fusion” because visual tokens enter at the first layer, in contrast to Flamingo's cross-attention deep inside the network. Here we follow the Chameleon paper's usage: <strong>early fusion means one shared token space, trained together from the beginning</strong>. The animation covers the whole lesson; the next bytes take each part in turn.</p>
+
+<figure class="anim wide" data-anim="mm-2-fusion"></figure>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Which description fits “early fusion” as used in this lesson?</p>
+  <ol class="q-src">
+    <li>Text and image tokens share one sequence and one vocabulary, and a single model is trained on them from the start</li>
+    <li>A vision encoder is attached to a finished text LLM with a projector</li>
+    <li>Two separate models vote on the answer</li>
+  </ol>
+  <div class="q-explain">Option 2 is late fusion (MM.1). Early fusion trains one model on mixed-modality tokens from the beginning, so it can read and write every modality it was trained on.</div>
+</div></div>
+
+<h2>Images as tokens: Chameleon</h2>
+<p>The cleanest early-fusion design treats an image exactly like text. <strong>Chameleon</strong> (Chameleon Team, Meta, 2024) uses an image tokenizer, a vector-quantised autoencoder in the style of those in <a href="g1-6.html">G1.6</a>. It turns a 512×512 image into a 32×32 grid of <strong>codes</strong>: each 16×16-pixel region is replaced by the index of the nearest of 8,192 learned codebook vectors. Those 1,024 indices become ordinary token IDs in a shared vocabulary of 65,536 entries, next to the text tokens.</p>
+<p>From there it is “just” language modelling. One transformer (7B and 34B versions) is trained from scratch with the next-token loss on text-only data, image–text pairs and interleaved documents. Because image codes are in the output vocabulary, the same model can answer a question about a picture or write a picture in the middle of a story. The paper reports two practical lessons:</p>
+<ul>
+  <li><strong>Mixing modalities made training unstable</strong> at scale; the authors needed architectural changes such as normalising queries and keys inside attention to keep it from diverging.</li>
+  <li><strong>The tokenizer sets a ceiling.</strong> Discrete codes lose fine detail, and the authors note their tokenizer struggles to reconstruct images with a lot of text, which hurts OCR-heavy tasks.</li>
+</ul>
+
+<h3>Worked example: the token bill</h3>
+<p>An illustrated story with 4 images and 800 words, at about 1.3 text tokens per word:</p>
+<ol class="steps">
+  <li>Image tokens: $4 \times 1{,}024 = 4{,}096$.</li>
+  <li>Text tokens: $800 \times 1.3 = 1{,}040$.</li>
+  <li>Total: $5{,}136$, of which images are $4{,}096 / 5{,}136 \approx 80\%$.</li>
+  <li>Writing it means 4,096 sequential decoding steps for the pictures alone.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>A smaller model encodes each image as a 16×16 grid of codes and decodes 50 tokens per second.</p>
+  <ol class="steps">
+    <li>Tokens per image: <span class="blank" data-answer="256" data-tol="0.5" data-hint="16 × 16"></span></li>
+    <li>Ten images, in tokens: <span class="blank" data-answer="2560" data-tol="0.5" data-hint="10 × 256"></span></li>
+    <li>Their share of an 8,192-token context, in %: <span class="blank" data-answer="31.25" data-tol="0.05" data-hint="2560 ÷ 8192 × 100"></span></li>
+    <li>Seconds to generate one image: <span class="blank" data-answer="5.12" data-tol="0.01" data-hint="256 tokens ÷ 50 tokens per second"></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why can Chameleon generate images while LLaVA can't?</p>
+  <ol class="q-src">
+    <li>Chameleon has a bigger vision encoder</li>
+    <li>Chameleon uses cross-attention instead of a projector</li>
+    <li>Its output vocabulary includes the 8,192 image codes, so it can predict them like words and decode them back to pixels</li>
+  </ol>
+  <div class="q-explain">Generation needs image tokens on the output side. With codes in the vocabulary, “draw a cat” is next-token prediction followed by the tokenizer's decoder.</div>
+</div></div>
+
+<h2>Next-token prediction plus diffusion: Transfusion</h2>
+<p>Discrete codes have two costs: quantising throws away detail, and generating thousands of codes one by one is slow. Meanwhile, diffusion models (<a href="g1-3.html">G1.3</a>, <a href="g1-4.html">G1.4</a>) make the best images. <strong>Transfusion</strong> (Zhou et al., 2024, Meta) asks: why not train one transformer to do both?</p>
+<ul>
+  <li><strong>Text</strong> stays discrete and gets the usual next-token loss.</li>
+  <li><strong>Images</strong> are encoded by a VAE into continuous latent patches, as in latent diffusion. During training the patches are noised, and the same transformer predicts the noise: a diffusion loss.</li>
+</ul>
+$$\mathcal{L} = \mathcal{L}_{\text{LM}} + \lambda\,\mathcal{L}_{\text{diffusion}}$$
+<p>$\mathcal{L}_{\text{LM}}$ is cross-entropy on the text tokens, $\mathcal{L}_{\text{diffusion}}$ is the mean squared error between the true and predicted noise on the image patches, and $\lambda$ is a weight that balances the two. One set of weights, one forward pass per training sequence, two losses.</p>
+<p>The attention mask is mixed too. Across the sequence it is causal, as in any LLM (<a href="m1-4.html">M1.4</a>), but <strong>inside an image all patches see each other</strong>, because an image has no natural left-to-right order and diffusion denoises all patches together. At generation time the model writes text normally; when it emits a begin-image token it switches mode, starts from pure-noise patches and denoises them over a fixed number of steps, each a parallel pass over the whole image, then returns to text.</p>
+<p>The authors scaled the recipe to 7B parameters and 2T multimodal tokens and reported text and image generation on par with similar-scale language and diffusion models. In their comparisons it also scaled better than a Chameleon-style discrete-token baseline. Other teams explored neighbouring designs: Show-o (Xie et al., 2024) uses discrete diffusion for images; Janus (DeepSeek, 2024) uses separate visual encoders for understanding and for generation inside one model. As of 2026 there is no single winning recipe for unified understanding-and-generation models, and the leading closed models disclose little about theirs.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In Transfusion's attention mask, which pairs of positions can attend to each other?</p>
+  <ol class="q-src">
+    <li>Every position sees every other position, everywhere</li>
+    <li>Each position sees earlier positions, and patches of the same image also see each other in both directions</li>
+    <li>Text tokens can't see image patches at all</li>
+  </ol>
+  <div class="q-explain">The mask is causal overall, so text after an image can read it, but within an image attention is bidirectional, which suits denoising all patches together.</div>
+</div></div>
+
+<h2>Speech in, speech out, and the any-to-any bill</h2>
+<p>Sound fits the same mould. A <strong>neural audio codec</strong> (<a href="a1-3.html">A1.3</a>) turns a waveform into a few streams of discrete codes, and a decoder turns codes back into audio. Put those codes in the sequence and a model can listen and talk without a text detour, so tone, pauses and laughter can survive. Kyutai's <strong>Moshi</strong> (Défossez et al., 2024) is a well-documented example: its Mimi codec produces 12.5 frames per second with 8 codebooks, and the model listens and speaks at the same time (<a href="a1-6.html">A1.6</a>).</p>
+<p>The token bill is real. One minute of speech is $60 \times 12.5 \times 8 = 6{,}000$ codes if you flatten every codebook into the sequence, against roughly 200 text tokens for the same 150 spoken words. Moshi avoids flattening: a small “depth” transformer predicts the 8 codes of a frame, so the main model takes just one step per frame, 750 steps a minute. Any-to-any models trade along several axes:</p>
+<ul>
+  <li><strong>Token budget.</strong> Images and audio are token-hungry, so context length, KV cache memory and compute all grow (<a href="m1-5.html">M1.5</a>).</li>
+  <li><strong>Quality vs specialists.</strong> One network shares its capacity and training data across modalities. Dedicated image or speech models have often led on their single task, though the gap has been narrowing, and results vary by task.</li>
+  <li><strong>Training mix.</strong> The data balance between modalities matters, and modalities can interfere with each other during training; Chameleon's instability is one example.</li>
+  <li><strong>The payoff.</strong> One shared context: edit a picture by talking about it, read a chart and redraw it, answer in a voice that matches the question's tone.</li>
+</ul>
+<p>As of 2026, frontier assistants generally accept text, images and audio (often video too), and many also generate images and speech. How much of that runs inside one network and how much is routed to specialist models is usually not disclosed, so treat “natively multimodal” in a product announcement as a claim about training, not a full architecture description.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Imagine a writer who only knows words. To tell them about a photo, a <strong>helper whispers</strong> what's in it. The writer can answer, but can't draw anything back. That's late fusion.</p>
+    <p>Now imagine a kid who grew up with <strong>picture books, songs and stories all mixed together</strong>. When you ask something, they can answer with words, a drawing or a song, because for them it was always one language. That's early fusion.</p>
+    <p class="math-note">Where it breaks: the kid doesn't really draw “one crayon stroke at a time from left to right”, but a token model does build an image one code at a time, which is why it's slow.</p>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters in practice:</strong> pick the architecture for the job. If your product only needs to <em>understand</em> images (search, captioning, document Q&amp;A), a late-fusion model reuses a strong text LLM cheaply. For real-time voice, native speech-to-speech avoids the latency and lost tone of a three-model pipeline. For editing images in conversation, a unified model keeps the whole exchange in one context. And whichever you use, count the tokens: an image or a minute of audio can cost more than everything else in the prompt.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">One minute of speech with a codec at 12.5 frames per second and 8 codebooks, flattened into the sequence, is how many tokens?</p>
+  <ol class="q-src">
+    <li>6,000</li>
+    <li>750</li>
+    <li>100</li>
+  </ol>
+  <div class="q-explain">$60 \times 12.5 = 750$ frames, times 8 codebooks = 6,000 codes. 750 is the number of steps if a small depth model handles the 8 codes of each frame.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What does “natively multimodal” add over an MM.1-style model, and what are two ways to let one model generate images?</p>
+  <div class="model-answer"><strong>Model answer:</strong> A natively multimodal (early-fusion) model is trained on text, image and audio tokens in one sequence from the start, so it can produce those modalities as well as read them, instead of bolting an encoder onto a finished text LLM. One way to generate images is to make them discrete tokens in the shared vocabulary and predict them one by one (Chameleon); another is to keep images as continuous latent patches and train the same transformer with a diffusion loss on them alongside the next-token loss on text (Transfusion).</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which model is an example of early fusion with discrete image tokens?</p>
+    <ol class="q-src">
+      <li>LLaVA</li>
+      <li>BLIP-2</li>
+      <li>Flamingo</li>
+      <li>Chameleon</li>
+    </ol>
+    <div class="q-explain">LLaVA, BLIP-2 and Flamingo all connect a vision encoder to a separately pretrained language model (MM.1). Chameleon trains one model from scratch on a shared vocabulary of text and image codes.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Recall the KV cache (M1.5). Chameleon generates a 1,024-code image after a 50-token prompt. With a KV cache, roughly how many sequential forward steps does the image take?</p>
+    <ol class="q-src">
+      <li>1, because the cache stores the whole image</li>
+      <li>About 1,024, one per code; the cache only stops each step from recomputing the earlier tokens</li>
+      <li>About 1,074², because attention is quadratic</li>
+      <li>50, one per prompt token</li>
+    </ol>
+    <div class="q-explain">A KV cache makes each step cheap but doesn't remove the steps: autoregressive generation still emits one token per forward pass.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What does Transfusion's diffusion loss train the transformer to do on image positions?</p>
+    <ol class="q-src">
+      <li>Predict the noise that was added to continuous latent image patches</li>
+      <li>Predict the next image code from an 8,192-entry codebook</li>
+      <li>Classify the image into one of 1,000 classes</li>
+      <li>Reconstruct the text caption</li>
+    </ol>
+    <div class="q-explain">Image patches stay continuous (VAE latents). They're noised in training and the model learns to predict the noise, exactly the diffusion objective of G1.3, while text keeps its next-token loss.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A team builds a voice assistant as speech recognition → text LLM → text-to-speech. What do they lose compared with a native speech-to-speech model?</p>
+    <ol class="q-src">
+      <li>The ability to answer questions at all</li>
+      <li>Nothing; pipelines and native models behave identically</li>
+      <li>Latency from chaining three models, and paralinguistic information such as tone and emotion that the text step drops</li>
+      <li>The ability to use a large language model</li>
+    </ol>
+    <div class="q-explain">The text bottleneck discards how something was said, and each stage adds delay. OpenAI cited exactly this when it replaced its three-model Voice Mode with GPT-4o.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Late fusion</strong> adds vision to a finished text LLM (input only); <strong>early fusion</strong> trains one model on mixed-modality tokens from the start and can output them too.</li>
+    <li><strong>Chameleon</strong>: a 512×512 image → 1,024 discrete codes in a shared 65,536-token vocabulary; generation is next-token prediction, one code at a time.</li>
+    <li><strong>Transfusion</strong>: one transformer, next-token loss on text plus diffusion loss on continuous image patches, bidirectional attention inside each image.</li>
+    <li>Codec tokens bring <strong>speech in and out</strong> without a text detour, but audio and images are token-hungry.</li>
+    <li>Any-to-any trades token budget, training stability and per-task quality for one shared context. Frontier labs disclose little, so hedge architecture claims.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"mm-2-a","front":"Late fusion vs early fusion (as in the Chameleon paper)?","back":"Late fusion: pretrain a text LLM and a vision encoder separately, then connect them (MM.1); images are input only. Early fusion: all modalities as tokens in one sequence and vocabulary, one model trained on them from the start, so it can also generate them."},
+  {"id":"mm-2-b","front":"How does Chameleon (Meta, 2024) represent an image?","back":"A VQ image tokenizer turns 512×512 pixels into 32×32 = 1,024 discrete codes from an 8,192-entry codebook; the codes are token IDs in a shared 65,536-token vocabulary, generated one at a time like text."},
+  {"id":"mm-2-c","front":"What is Transfusion's training loss, and how is attention masked?","back":"$\\mathcal{L} = \\mathcal{L}_{LM} + \\lambda\\,\\mathcal{L}_{diffusion}$: next-token cross-entropy on text, noise-prediction MSE on continuous (VAE latent) image patches. Attention is causal across the sequence but bidirectional within each image."},
+  {"id":"mm-2-d","front":"Why are any-to-any models token-hungry? Give one image and one audio number.","back":"Chameleon: 1,024 tokens per 512×512 image. Audio codec at 12.5 frames/s × 8 codebooks: 6,000 codes per minute if flattened (750 steps with a depth transformer), vs ~200 text tokens for the same words."},
+  {"id":"mm-2-e","front":"What did OpenAI say GPT-4o changed for voice, and what is not known?","back":"One model trained end-to-end on text, vision and audio replaced a three-model pipeline (2.8–5.4 s average latency); audio replies in as little as 232 ms (320 ms average). The architecture has not been published."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/mm-2-fusion.js"></script>
+</body>
+</html>

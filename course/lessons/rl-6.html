@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="rl-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Self-play &amp; search: AlphaGo to MuZero · LLMs, Animated</title>
+<meta name="description" content="How RL mastered games: TD-Gammon's self-play, Monte Carlo tree search and the PUCT rule, AlphaGo, AlphaGo Zero, AlphaZero and MuZero, and what they mean for test-time search in LLMs.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Self-play &amp; search: AlphaGo to MuZero</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of Reinforcement learning</span></div>
+<p class="lede">In March 2016 a program beat one of the world's best Go players, years before many experts expected. It combined everything in this module: a policy network, a value network, reinforcement learning from self-play, and a tree search that thinks before it moves. Its successors dropped human data, then even the rules. The same "learn, then search at test time" idea is now reshaping LLM reasoning.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Walk through one MCTS simulation (select, expand, evaluate, back up) and apply the PUCT rule.</li>
+    <li>Explain what changed from AlphaGo to AlphaGo Zero, AlphaZero and MuZero.</li>
+    <li>Explain why self-play is a curriculum, and how search connects to test-time compute in LLMs.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="rl-3.html">Q-learning &amp; DQN</a> (RL.3): TD learning and value functions as neural networks; and <a href="rl-5.html">Actor-critic &amp; PPO</a> (RL.5): a policy and a value function trained together. Helpful but optional: the bandit and UCB idea from <a href="rl-1.html">RL.1</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">AlphaGo Zero learned Go with no human games at all. Who did it learn from?</p>
+    <ol class="q-src">
+      <li>A database of professional games, added later in training</li>
+      <li>The original AlphaGo, as a teacher</li>
+      <li>Itself: it played millions of games against its own latest version</li>
+      <li>Hand-written Go rules of thumb</li>
+    </ol>
+    <div class="q-explain"><strong>Self-play</strong>. Starting from random moves, it improved by playing itself, and the opponent got stronger exactly as fast as it did.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A strong Go program has a good neural network that suggests moves. Why would it still search (look ahead) before playing?</p>
+    <ol class="q-src">
+      <li>Looking ahead at likely continuations catches mistakes the network's instant guess would make</li>
+      <li>Search is only needed when the network is untrained</li>
+      <li>The rules of Go require it</li>
+      <li>To use up the time on the clock</li>
+    </ol>
+    <div class="q-explain">The network is a fast intuition; search is slow, careful checking. Together they beat either alone, and the search's improved choices can be used to train the network further.</div>
+  </div>
+</section>
+
+<h2>Games as a proving ground: TD-Gammon and self-play</h2>
+<p>Games have been RL's favourite testbed for a simple reason: the rules are a perfect simulator, the reward (win or lose) is unambiguous, and you can play millions of games for free. The catch is the reward is very <strong>delayed</strong>: one bit at the end of a hundred moves.</p>
+<p>Gerald Tesauro's <strong>TD-Gammon</strong> (IBM, 1992–95) showed what RL could do with that. A small neural network estimated the probability of winning from any backgammon position, a <em>value function</em>, and was trained with TD($\lambda$) (RL.3) on games it played <strong>against itself</strong>, starting from random weights. Later versions, which also searched a couple of moves ahead, played close to the level of the world's best humans, and its unconventional opening choices changed how experts played some positions.</p>
+<p>Self-play solves a problem that's easy to miss: <strong>who should the agent practise against?</strong> A fixed weak opponent is beaten quickly and then teaches nothing; a fixed strong one wins every game and gives no signal. Your own current self is always about the right strength. As you improve, so does your opponent, so self-play is an automatic <strong>curriculum</strong>. (It has failure modes too: a population of one can cycle between strategies or overfit to its own quirks, which is why later systems such as AlphaStar trained against a league of past versions.)</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why does self-play act as a curriculum?</p>
+  <ol class="q-src">
+    <li>The rules get harder as training goes on</li>
+    <li>The opponent is always the agent's current self, so the difficulty rises exactly as the agent improves</li>
+    <li>It replays human games in order of difficulty</li>
+    <li>It removes the need for rewards</li>
+  </ol>
+  <div class="q-explain">An opponent of matched strength gives informative wins and losses at every stage. That's the defining property of a good curriculum.</div>
+</div></div>
+
+<h2>Monte Carlo tree search</h2>
+<p>Classical chess engines search with minimax over a hand-tuned evaluation function. Go resisted this: about 250 legal moves per turn and no good hand-written way to evaluate a position. The breakthrough was <strong>Monte Carlo tree search</strong> (MCTS; named by Rémi Coulom in 2006, with the UCT algorithm of Kocsis &amp; Szepesvári the same year). Instead of evaluating positions with rules, it plays out random games and averages the results, and grows a search tree that concentrates on the moves that look best. MCTS lifted Go programs to strong amateur level.</p>
+<p>Each <strong>simulation</strong> has four phases:</p>
+<ol class="steps">
+  <li><strong>Select:</strong> from the root, walk down the tree, at each node picking the child that best balances "looks good so far" against "hasn't been tried much". It's the explore–exploit trade-off from the bandit in RL.1, applied at every node.</li>
+  <li><strong>Expand:</strong> when you reach a position not yet in the tree, add it.</li>
+  <li><strong>Evaluate:</strong> estimate how good it is (originally a random playout to the end; later a value network).</li>
+  <li><strong>Back up:</strong> pass that value up the path, updating each move's visit count $N$ and average value $Q$.</li>
+</ol>
+<p>AlphaGo and its successors select with the <strong>PUCT</strong> rule (a variant of Rosin's 2011 "predictor + UCB"). At each node, choose the move $a$ that maximizes</p>
+$$Q(s,a) + c\,P(s,a)\,\frac{\sqrt{\sum_b N(s,b)}}{1 + N(s,a)}$$
+<p>In words: the move's average value so far, plus an exploration bonus that is large when the policy network's <strong>prior</strong> $P(s,a)$ likes the move, grows slowly as the parent is visited more, and shrinks as this particular move gets visited. $c$ sets how much to explore. Early on, the prior steers the search; with many visits, the measured values take over.</p>
+
+<figure class="anim wide" data-anim="rl-6-mcts"></figure>
+
+<h3>Worked example</h3>
+<p>The animation's root has been visited 10 times ($\sum_b N = 10$, $\sqrt{10} = 3.162$), with $c = 1.5$. Move A has $P = 0.5$, $N = 6$, $Q = 0.55$.</p>
+<ol class="steps">
+  <li>Bonus: $U = 1.5 \times 0.5 \times 3.162 / (1 + 6) = 0.339$.</li>
+  <li>Score: $Q + U = 0.55 + 0.339 = 0.889$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>Same root ($c = 1.5$, $\sqrt{10} = 3.162$).</p>
+  <ol class="steps">
+    <li>Move B ($P = 0.3$, $N = 4$, $Q = 0.50$): bonus $U$ = <span class="blank" data-answer="0.285" data-tol="0.003" data-hint="1.5 × 0.3 × 3.162 / (1 + 4)."></span></li>
+    <li>B's score $Q + U$: <span class="blank" data-answer="0.785" data-tol="0.003" data-hint="0.50 + 0.285."></span></li>
+    <li>Move C ($P = 0.2$, never visited, so $N = 0$ and $Q = 0$): score <span class="blank" data-answer="0.949" data-tol="0.003" data-hint="0 + 1.5 × 0.2 × 3.162 / (1 + 0)."></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">C wins (0.949 beats A's 0.889 and B's 0.785) despite the lowest prior: an untried move's bonus is undivided. After one visit its bonus halves.</p>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">In PUCT, what happens to a move's exploration bonus as that move is visited more and more?</p>
+  <ol class="q-src">
+    <li>It grows, so popular moves stay popular</li>
+    <li>It stays fixed at $c \cdot P$</li>
+    <li>It becomes negative</li>
+    <li>It shrinks (the $1 + N(s,a)$ in the denominator), so the measured value $Q$ dominates</li>
+  </ol>
+  <div class="q-explain">The bonus says "this might be good, go check". Once a move has been checked many times, its average value speaks for itself.</div>
+</div></div>
+
+<h2>AlphaGo: networks plus search</h2>
+<p><strong>AlphaGo</strong> (Silver et al., 2016, <em>Mastering the game of Go with deep neural networks and tree search</em>) plugged deep networks into MCTS:</p>
+<ul>
+  <li>A <strong>policy network</strong> first trained by supervised learning to predict expert moves (about 30 million positions from online games; 57% accuracy), then improved by <strong>policy-gradient RL through self-play</strong>, REINFORCE-style (RL.4).</li>
+  <li>A <strong>value network</strong> trained to predict the winner from a position, on 30 million positions taken from separate self-play games.</li>
+  <li><strong>MCTS</strong> used the supervised policy network's output as priors, and evaluated leaves by mixing the value network with fast rollouts.</li>
+</ul>
+<p>It beat European champion Fan Hui 5–0 in October 2015, then <strong>Lee Sedol 4–1</strong> in Seoul in March 2016. Its move 37 in game 2, a shoulder hit that commentators first took for a mistake, became famous as a move a human professional would rarely play. Lee Sedol's own move 78 in game 4, which won him that game, is just as famous.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In AlphaGo, what did the policy network contribute to the tree search?</p>
+  <ol class="q-src">
+    <li>Prior probabilities that focus the search on promising moves</li>
+    <li>The final win/loss reward</li>
+    <li>The rules of Go</li>
+    <li>Random playouts</li>
+  </ol>
+  <div class="q-explain">The priors $P(s,a)$ in PUCT. With ~250 legal moves, the search can afford to look closely at only a few; the policy network says which.</div>
+</div></div>
+
+<h2>AlphaGo Zero and AlphaZero: learning from scratch</h2>
+<p><strong>AlphaGo Zero</strong> (Silver et al., 2017, <em>Mastering the game of Go without human knowledge</em>) removed the human data entirely, <strong>tabula rasa</strong>. One network with two heads outputs both a move distribution $\mathbf p$ and a value $v$; leaves are evaluated by $v$ alone, with no rollouts. Training is a loop:</p>
+<ol class="steps">
+  <li><strong>Self-play</strong> with MCTS (1,600 simulations per move). The search's visit counts give an improved move distribution $\boldsymbol\pi$, usually stronger than the raw network's $\mathbf p$.</li>
+  <li>When the game ends, record the winner $z = \pm 1$ for every position.</li>
+  <li>Train the network to match both: $\;\ell = (z - v)^2 - \boldsymbol\pi^\top \log \mathbf p + c\,\lVert\theta\rVert^2$.</li>
+</ol>
+<p>Search acts as a <strong>policy-improvement operator</strong>: the network imitates its own search, so the next search starts from better priors, and so on. After three days of self-play it beat the version that had beaten Lee Sedol by <strong>100 games to 0</strong>.</p>
+<p><strong>AlphaZero</strong> (Silver et al., preprint 2017; <em>Science</em> 2018) ran the same algorithm, unchanged apart from the game rules and inputs, on <strong>chess, shogi and Go</strong>, and beat the champion programs Stockfish (chess) and Elmo (shogi) as well as AlphaGo Zero.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-rl-6.webp" alt="A child plays a board game against their own reflection in a mirror, with a stack of earlier game boards piled up behind them." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine playing a board game against your <strong>reflection in a mirror</strong>. Your reflection is exactly as good as you are, every single day.</p>
+      <p>Before each move you <strong>think ahead</strong>: "if I go here, it might go there…". After every game, you add the board to your <strong>stack of old games</strong> and study it: which of your quick guesses did the careful thinking change, and who won?</p>
+      <p>Your quick guesses get better, so your thinking ahead gets better, so your games get better. And because the mirror improves with you, the games never get too easy.</p>
+      <p class="math-note">Where it breaks: a reflection copies you exactly. In self-play the two sides choose moves independently (and randomly enough to explore), so the games differ even though both players are "you".</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What target does AlphaGo Zero train its policy head toward?</p>
+  <ol class="q-src">
+    <li>Moves from professional games</li>
+    <li>The single move that was finally played, as a one-hot label</li>
+    <li>The distribution of MCTS visit counts at that position</li>
+    <li>A uniform distribution over legal moves</li>
+  </ol>
+  <div class="q-explain">The search's visit distribution $\boldsymbol\pi$ is a better policy than the raw network, so imitating it improves the network: search is the teacher.</div>
+</div></div>
+
+<h2>MuZero, and search in LLMs</h2>
+<p>AlphaZero still needs the rules: MCTS must simulate "what happens if I play here". <strong>MuZero</strong> (Schrittwieser et al., 2020, <em>Mastering Atari, Go, chess and shogi by planning with a learned model</em>) learns its own model instead. Three functions are trained together: a <strong>representation</strong> function that turns observations into a hidden state, a <strong>dynamics</strong> function that predicts the next hidden state and reward for an action, and a <strong>prediction</strong> function that outputs policy and value. MCTS then plans entirely inside this learned latent space. The model never has to reconstruct the screen or board; it only has to be useful for predicting rewards, values and policies. MuZero matched AlphaZero at Go, chess and shogi without being told the rules, and set a new state of the art on the 57-game Atari benchmark.</p>
+<p>The lineage, in one line each:</p>
+<ul>
+  <li><strong>TD-Gammon</strong> (1992–95): value network + self-play + TD.</li>
+  <li><strong>AlphaGo</strong> (2016): human-data policy + RL + value net + MCTS.</li>
+  <li><strong>AlphaGo Zero</strong> (2017): no human data; search teaches the network.</li>
+  <li><strong>AlphaZero</strong> (2017/2018): same algorithm, three games.</li>
+  <li><strong>MuZero</strong> (2020): learned model; no rules needed.</li>
+</ul>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the AlphaZero loop, <em>sample with extra thinking, keep what the evaluator likes, train the fast policy to imitate it</em>, is the pattern behind much of today's reasoning work. Spending more compute at answer time (best-of-$N$ sampling, majority voting, tree search over reasoning steps) is <strong>test-time search</strong> (<a href="rs-2.html">RS.2</a>), with a reward model or verifier as the value function (<a href="rs-4.html">RS.4</a>). Training a model on its own filtered or rewarded outputs (expert iteration, STaR, RL with verifiers) mirrors "the network imitates its search" (<a href="rs-3.html">RS.3</a>). One honest difference: language has no clean move set or perfect simulator, and DeepSeek reported that MCTS over tokens did not scale well for R1 (2025); as of 2026, most reasoning models rely on long sampled chains of thought trained with RL, using explicit tree search only in some systems.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What is the key thing MuZero learns that AlphaZero was given?</p>
+  <ol class="q-src">
+    <li>A value function</li>
+    <li>A model of the environment's dynamics (in a hidden space), so it can plan without the rules</li>
+    <li>A policy network</li>
+    <li>The PUCT exploration constant</li>
+  </ol>
+  <div class="q-explain">AlphaZero simulates moves with the real game rules. MuZero's dynamics network predicts the next hidden state and reward, and MCTS plans with that.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain how AlphaGo Zero improves itself without any human games.</p>
+  <div class="model-answer"><strong>Model answer:</strong> It plays games against itself, choosing each move with MCTS guided by its network's move priors and value estimates; the search's visit counts are a better policy than the network alone. After each game it trains the network to match those visit distributions and to predict the final winner. The improved network makes the next searches stronger, and since the opponent is itself, the difficulty keeps rising with its skill.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Put the four phases of one MCTS simulation in order.</p>
+    <ol class="q-src">
+      <li>Expand → select → back up → evaluate</li>
+      <li>Evaluate → select → expand → back up</li>
+      <li>Select → evaluate → back up → expand</li>
+      <li>Select → expand → evaluate → back up</li>
+    </ol>
+    <div class="q-explain">Walk down by PUCT, add the new node, estimate its value, and propagate that value back up the path.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Connect to RL.1: the PUCT exploration bonus plays the same role as which earlier idea?</p>
+    <ol class="q-src">
+      <li>Exploring under-tried arms in a bandit (as UCB does), applied at every node of the tree</li>
+      <li>The discount factor $\gamma$</li>
+      <li>The Markov property</li>
+      <li>Experience replay</li>
+    </ol>
+    <div class="q-explain">Each node is a little bandit: exploit high-$Q$ moves, but keep trying uncertain ones. PUCT adds the policy prior to UCB-style bonuses.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Connect to RL.5: AlphaGo Zero's network has a policy head and a value head. Which earlier architecture is that most like?</p>
+    <ol class="q-src">
+      <li>DQN: one Q-value per action</li>
+      <li>A Q-table</li>
+      <li>Actor-critic: a policy (actor) and a value function (critic) trained together</li>
+      <li>A reward model</li>
+    </ol>
+    <div class="q-explain">Same two outputs. The difference is the policy target: AlphaGo Zero imitates the search's visit counts rather than following a policy gradient.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which result belongs to AlphaGo Zero?</p>
+    <ol class="q-src">
+      <li>Beat Lee Sedol 4–1 in March 2016</li>
+      <li>Beat the version of AlphaGo that defeated Lee Sedol 100–0, with no human training data</li>
+      <li>Played 57 Atari games with a learned model</li>
+      <li>Learned backgammon in the early 1990s</li>
+    </ol>
+    <div class="q-explain">4–1 was AlphaGo (2016), Atari with a learned model was MuZero (2020), backgammon was TD-Gammon.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Self-play</strong> gives an opponent that improves with you: an automatic curriculum (TD-Gammon onward).</li>
+    <li><strong>MCTS</strong>: select (PUCT: $Q$ + prior-weighted bonus) → expand → evaluate → back up; play the most-visited move.</li>
+    <li><strong>AlphaGo</strong> (2016) = networks + MCTS, beat Lee Sedol 4–1. <strong>AlphaGo Zero</strong> (2017) learned tabula rasa: the network imitates its own search.</li>
+    <li><strong>AlphaZero</strong> generalized to chess and shogi; <strong>MuZero</strong> (2020) plans with a learned model, no rules required.</li>
+    <li>For LLMs: test-time search and "train on what the search/verifier found" echo this loop (RS.2–RS.4).</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"rl-6-a","front":"Name the four phases of an MCTS simulation.","back":"Select (walk down by PUCT/UCB), expand (add a new node), evaluate (value network or random playout), back up (update visit counts $N$ and mean values $Q$ along the path)."},
+  {"id":"rl-6-b","front":"Write the PUCT selection rule and explain it in words.","back":"$\\arg\\max_a\\; Q(s,a) + c\\,P(s,a)\\,\\sqrt{\\sum_b N(s,b)}/(1+N(s,a))$: average value so far plus an exploration bonus that favours moves the policy prior likes and that have few visits."},
+  {"id":"rl-6-c","front":"What did AlphaGo (2016) combine, and what was its landmark result?","back":"A policy network (supervised on expert games, then RL by self-play), a value network, and MCTS. It beat Lee Sedol 4–1 in March 2016 (Silver et al., 2016)."},
+  {"id":"rl-6-d","front":"How does AlphaGo Zero train without human data?","back":"Self-play with MCTS; train the network's policy head toward the search's visit distribution $\\pi$ and its value head toward the game outcome $z$: $(z-v)^2 - \\pi^\\top \\log p + c\\|\\theta\\|^2$. Search acts as policy improvement."},
+  {"id":"rl-6-e","front":"What does MuZero add over AlphaZero?","back":"A learned model: representation, dynamics (next hidden state + reward) and prediction (policy, value) functions, so MCTS plans in latent space without knowing the rules (Schrittwieser et al., 2020)."},
+  {"id":"rl-6-f","front":"Why is self-play a curriculum?","back":"The opponent is the agent's own current version, so it is always about the right difficulty and gets stronger exactly as the agent does."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/rl-6-mcts.js"></script>
+</body>
+</html>

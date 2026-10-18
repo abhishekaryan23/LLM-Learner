@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="g1-7">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Controlling &amp; editing images · LLMs, Animated</title>
+<meta name="description" content="Steering image generators beyond the prompt: ControlNet, IP-Adapter, DreamBooth, textual inversion and LoRA, inpainting, SDEdit, InstructPix2Pix, plus provenance with C2PA and invisible watermarks.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Controlling &amp; editing images</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 7 of Image generation</span></div>
+<p class="lede">A prompt is a blunt instrument. "A dancer, arms raised" won't give you <em>this</em> pose, <em>your</em> dog, or the same photo with one tree changed. This lesson covers the add-ons that made diffusion models controllable: extra conditions, personalization, editing, and the labels that say an image was generated.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how ControlNet and IP-Adapter add new conditions to a frozen model.</li>
+    <li>Compare textual inversion, DreamBooth and LoRA for personalization, and count LoRA's parameters.</li>
+    <li>Explain inpainting, SDEdit's strength knob and instruction editing, and what C2PA and invisible watermarks can and can't do.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> this lesson builds on <a href="g1-4.html">G1.4 Latent diffusion &amp; guidance</a> (latents, cross-attention, guidance) and <a href="m3-7.html">M3.7 LoRA &amp; QLoRA</a> (low-rank adapters on a frozen model). Helpful but optional: <a href="g1-3.html">G1.3 Diffusion from scratch</a> (the forward noising process).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; you'll see why below.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You want an existing text-to-image model to follow a stick-figure pose. What's the usual approach?</p>
+    <ol class="q-src">
+      <li>Describe the pose in more and more detail in the prompt</li>
+      <li>Retrain the whole model from scratch on posed images</li>
+      <li>Attach a small trainable network that reads the pose map and nudges the frozen model's features</li>
+      <li>It can't be done with diffusion models</li>
+    </ol>
+    <div class="q-explain">That's ControlNet (and similar adapters): leave the big model frozen and learn a side network that injects the new condition.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In "image-to-image" mode, a <em>strength</em> slider near 1.0 usually gives…</p>
+    <ol class="q-src">
+      <li>An image that ignores most of your input picture</li>
+      <li>An exact copy of your input</li>
+      <li>A higher-resolution version of your input</li>
+      <li>An error</li>
+    </ol>
+    <div class="q-explain">Strength says how much noise to add before denoising. Near 1.0 the input is almost entirely drowned, so the output follows the prompt and little else.</div>
+  </div>
+</section>
+
+<h2>ControlNet, image prompts and personalization</h2>
+<p>Text is a poor way to say <em>exactly where</em> things go. In February 2023, Zhang, Rao &amp; Agrawala ("Adding Conditional Control to Text-to-Image Diffusion Models") showed how to add spatial conditions to a pretrained Stable Diffusion model without retraining it. <strong>ControlNet</strong> accepts a control image of the same size as the output: Canny edges, a depth map, an OpenPose skeleton, a segmentation map, a scribble, surface normals. The generated image follows that structure while the prompt decides content and style.</p>
+<p>The design protects the base model, which took enormous compute to train:</p>
+<ul>
+  <li><strong>Freeze</strong> the original denoiser.</li>
+  <li><strong>Copy</strong> its encoder blocks and middle block into a trainable branch, initialised with the same weights, so the branch starts out already understanding images.</li>
+  <li>Feed the control image (through a few small convolutions) into the copy.</li>
+  <li>Add the copy's outputs to the frozen decoder through <strong>zero convolutions</strong>, 1×1 convolutions whose weights and biases start at 0. At the start of training ControlNet changes nothing, so no harmful noise reaches the frozen model; the connections grow as the copy learns.</li>
+</ul>
+
+<figure class="anim wide" data-anim="g1-7-controlnet"></figure>
+
+<p>Each ControlNet is trained for one kind of condition on (image, control map, caption) triples, which are cheap to make: run an edge detector or pose estimator over ordinary photos. Several ControlNets can be combined at inference. T2I-Adapter (Mou et al., 2023) does the same job with a much smaller side network, trading some fidelity for speed.</p>
+
+<h3>Image prompts and personalization</h3>
+<p><strong>IP-Adapter</strong> (Ye et al., 2023) lets you prompt with an <em>image</em>: "something in the style of this picture" or "this character". A frozen CLIP image encoder (V1.2) turns the reference into a few feature tokens. Each cross-attention layer gets a second, <strong>decoupled</strong> set of key and value projections for those image tokens, and its output is added to the ordinary text cross-attention. Only the new projections and a small mapping network are trained, about 22 million parameters, and the same adapter works with community fine-tunes of the base model.</p>
+<p><strong>Personalization</strong> teaches a model a new subject, such as your dog or your product, from a handful of photos:</p>
+<ul>
+  <li><strong>Textual inversion</strong> (Gal et al., 2022, "An Image is Worth One Word"): keep the whole model frozen and learn just one new token embedding, $S_*$, from 3–5 images. Tiny, but limited in how much detail one embedding can hold.</li>
+  <li><strong>DreamBooth</strong> (Ruiz et al., 2022): fine-tune the whole denoiser on 3–5 images captioned with a rare identifier ("a photo of [V] dog"), plus a <em>prior-preservation</em> loss on generated images of ordinary dogs so the model doesn't forget what dogs in general look like. High fidelity, but a full copy of the model per subject.</li>
+  <li><strong>LoRA</strong> (Hu et al., 2021; M3.7), applied to the denoiser's attention layers, became the community standard soon after Stable Diffusion's release: freeze $W$, learn $\Delta W = BA$ of rank $r$. Adapters are small files that can be shared, swapped and mixed, and DreamBooth-style training is often done with LoRA.</li>
+</ul>
+
+<h3>Worked example</h3>
+<p>A $320 \times 320$ attention projection (the width of Stable Diffusion 1.x's highest-resolution blocks), LoRA rank $r = 4$:</p>
+<ol class="steps">
+  <li>Full matrix: $320 \times 320 = 102{,}400$ weights.</li>
+  <li>LoRA: $A$ is $4 \times 320$ and $B$ is $320 \times 4$, so $2 \times 320 \times 4 = 2{,}560$ weights.</li>
+  <li>That's $2{,}560 / 102{,}400 = 2.5\%$ of the layer.</li>
+</ol>
+
+<section class="card" aria-labelledby="fd1">
+  <div class="card-label" id="fd1">Your turn · faded example</div>
+  <p>A $640 \times 640$ projection with rank $r = 8$.</p>
+  <ol class="steps">
+    <li>Full matrix weights: <span class="blank" data-answer="409600" data-tol="0.5" data-hint="640 × 640."></span></li>
+    <li>LoRA weights: <span class="blank" data-answer="10240" data-tol="0.5" data-hint="2 × 640 × 8."></span></li>
+    <li>Share of the layer, in percent: <span class="blank" data-answer="2.5" data-tol="0.05" data-hint="10,240 / 409,600 × 100. Same as before: 2r/d = 16/640."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Which personalization method leaves every model weight frozen and learns only a new word embedding?</p>
+  <ol class="q-src">
+    <li>DreamBooth</li>
+    <li>LoRA</li>
+    <li>ControlNet</li>
+    <li>Textual inversion</li>
+  </ol>
+  <div class="q-explain">Textual inversion optimises one token vector in the text encoder's input space. DreamBooth fine-tunes the denoiser; LoRA trains low-rank updates; ControlNet adds spatial conditions.</div>
+</div></div>
+
+<h2>Editing: inpainting and SDEdit</h2>
+<p><strong>Inpainting</strong> regenerates only a masked region. A training-free version works with any diffusion model: at every denoising step, overwrite the <em>unmasked</em> area with the original image noised to the current step, and let the model fill the hole so it blends in (RePaint, Lugmayr et al., 2022, refined this). Dedicated inpainting models do better by taking the mask as input: Stable Diffusion's inpainting variant reads 9 input channels instead of 4 (the noisy latent, the latent of the masked image, and the mask).</p>
+<p><strong>SDEdit</strong> (Meng et al., 2021, "Guided Image Synthesis and Editing with Stochastic Differential Equations") edits a whole image with no extra training. Take the input, perhaps a crude painting, and noise it to an intermediate step $t_0$ with the forward process (G1.3), then denoise from there. The noise wipes out fine detail but keeps the layout and colours; denoising fills in realistic detail. The <strong>strength</strong> $t_0/T$ is a trade-off: low strength stays faithful to the input but may look unrealistic; high strength looks realistic but forgets the input. Most "image-to-image" modes are SDEdit: in the common diffusers implementation, strength 0.6 with 50 sampling steps skips the first 20 and runs the last 30.</p>
+
+<div class="playground" id="sdedit-playground">
+  <h3>Playground: SDEdit on the toy</h3>
+  <p class="math-note" style="margin:0">The sketch is a ring of points that isn't on the data. Pick a strength: the ring is noised to $t_0 = 1000 \times$ strength, then denoised (DDIM, exact denoiser of the moons). Grey lines show how far each point moved.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Strength = <output>0.10</output></span>
+      <input type="range" min="0" max="1" step="0.05" value="0.1" aria-describedby="sd-hint">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Strength presets" style="margin-top:12px">
+    <button type="button" class="chip" data-s="0" aria-pressed="false">0</button>
+    <button type="button" class="chip" data-s="0.05" aria-pressed="false">0.05</button>
+    <button type="button" class="chip" data-s="0.2" aria-pressed="false">0.2</button>
+    <button type="button" class="chip" data-s="0.5" aria-pressed="false">0.5</button>
+    <button type="button" class="chip" data-s="1" aria-pressed="false">1.0</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="sd-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p>On this toy the data band is thin, so even small strengths snap points onto the moons; on real images the useful range is wider and depends on the model and schedule. Notice the two numbers in the readout move in opposite directions: that is the faithfulness–realism trade-off.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-g1-7.webp" alt="A child places a stencil over one corner of a meadow painting and repaints only the hole, turning a plain tree into a blossoming one." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You love your meadow painting, except for one plain tree. So you lay a <strong>stencil</strong> over the painting with a hole just where the tree is, and repaint only through the hole. The rest of the meadow stays exactly as it was.</p>
+      <p>Because you can see the meadow all around the hole, you paint the new <strong>blossoming tree</strong> so its colours and light match. That's inpainting: the mask is the stencil, and the model looks at everything outside it while it paints inside.</p>
+      <p>Where it breaks: the model doesn't "paint over" pixels. It fills the hole with noise and denoises it step by step, while keeping the outside fixed.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">In SDEdit, what happens as you raise the strength from 0.2 to 0.9?</p>
+  <ol class="q-src">
+    <li>The output gets closer to the input image</li>
+    <li>Nothing changes; strength only affects speed</li>
+    <li>More of the input is destroyed by noise, so the output looks more realistic but follows the input less</li>
+    <li>The mask grows</li>
+  </ol>
+  <div class="q-explain">Strength sets the starting noise level $t_0$. More noise means more freedom for the model and less of your input survives.</div>
+</div></div>
+
+<h2>Instruction editing and provenance</h2>
+<p>Masks and strength sliders are clumsy. You'd rather say "make it winter". <strong>InstructPix2Pix</strong> (Brooks, Holynski &amp; Efros, 2022) trained a diffusion model to do that, using entirely synthetic data. A fine-tuned GPT-3 wrote edit instructions and "after" captions for real captions; Stable Diffusion with Prompt-to-Prompt (Hertz et al., 2022), a technique for making two images that differ only where their prompts differ, turned each caption pair into a before/after image pair. That gave hundreds of thousands of (input image, instruction, edited image) examples.</p>
+<p>The model reads the input image (its latent is concatenated to the noisy latent) and the instruction (through cross-attention), and uses <strong>two guidance scales</strong> (G1.4): one for how closely to stick to the input image, one for how strongly to follow the instruction. As of 2026, instruction editing is mostly done conversationally by natively multimodal models (G1.6), where "now make it winter" is just the next message, though dedicated editing models remain popular for precise work.</p>
+
+<h3>Provenance and safety</h3>
+<p>Once images are easy to fake, people need ways to tell how an image was made. Two complementary tools are in use, and neither is a complete answer.</p>
+<ul>
+  <li><strong>Signed metadata (C2PA).</strong> The Coalition for Content Provenance and Authenticity, founded in 2021 by companies including Adobe and Microsoft, defines "Content Credentials": a cryptographically signed record, attached to the file, of which tool made or edited it. Several major generators and some cameras and editing apps write it. The weakness: metadata is easy to strip, and a screenshot removes it.</li>
+  <li><strong>Invisible watermarks.</strong> Google DeepMind's <strong>SynthID</strong> (2023) hides a signal in the pixels themselves, designed to survive common edits such as compression, cropping and colour changes, and later extended to text, audio and video. Watermarks can still be weakened by heavy edits, and a detector only recognises its own scheme, so a missing watermark proves little.</li>
+</ul>
+<p>Regulation is pushing in the same direction: the EU AI Act includes transparency rules requiring machine-readable marking of AI-generated content, phasing in from 2026. Providers also filter prompts and outputs (for example to block sexual imagery of real people and abuse material) and limit realistic depictions of public figures, with policies that differ by provider and change often. Copyright questions over training data and outputs are being argued in courts in several countries, with no settled global answer as of late 2026.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the toolkit here mirrors LLM practice. ControlNet's zero-initialised branch and LoRA's zero-initialised $B$ matrix (M3.7) use the same trick to add capacity without disturbing a frozen model; image prompts via extra cross-attention are how many vision-language models attach an image encoder (MM1); and watermarking and provenance are live questions for generated text too.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">An image has no C2PA Content Credentials and no SynthID watermark is detected. What can you conclude?</p>
+  <ol class="q-src">
+    <li>It is definitely a real photo</li>
+    <li>It is definitely AI-generated</li>
+    <li>It was made before 2021</li>
+    <li>Very little: metadata is easily stripped, and each watermark detector only finds its own scheme</li>
+  </ol>
+  <div class="q-explain">Provenance signals are useful when present, but their absence isn't evidence either way.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">You have a frozen text-to-image model. Explain how you'd make it (a) follow a pose skeleton and (b) draw your own dog, and what gets trained in each case.</p>
+  <div class="model-answer"><strong>Model answer:</strong> For the pose, attach a ControlNet: a trainable copy of the denoiser's encoder reads the skeleton and feeds the frozen decoder through zero-initialised convolutions, so only the copy is trained, on (image, pose map, caption) triples. For the dog, personalize from 3–5 photos: textual inversion trains just a new token embedding, DreamBooth fine-tunes the model with a rare identifier and a prior-preservation loss, and LoRA trains small low-rank updates to the attention layers, which is the usual choice.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which component does IP-Adapter add to each cross-attention layer?</p>
+    <ol class="q-src">
+      <li>A second U-Net</li>
+      <li>A separate key/value projection for image-prompt tokens, whose attention output is added to the text attention</li>
+      <li>A discriminator</li>
+      <li>A new noise schedule</li>
+    </ol>
+    <div class="q-explain">Decoupled cross-attention: image features from a CLIP image encoder get their own K and V, so the image prompt and the text prompt both steer the result.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">From M3.7: LoRA initialises $B = 0$, so $\Delta W = BA$ starts at zero. Which ControlNet design choice follows the same idea?</p>
+    <ol class="q-src">
+      <li>Zero convolutions connecting the trainable copy to the frozen model</li>
+      <li>Copying the encoder weights</li>
+      <li>Using an edge detector</li>
+      <li>Freezing the text encoder</li>
+    </ol>
+    <div class="q-explain">Both make the add-on an exact no-op at the start, so fine-tuning begins from the unmodified base model and can only move away from it as it learns.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What does DreamBooth's prior-preservation loss prevent?</p>
+    <ol class="q-src">
+      <li>The subject's identifier being forgotten</li>
+      <li>The model running out of memory</li>
+      <li>The model forgetting what the general class looks like, so every "dog" becomes your dog</li>
+      <li>Overly bright images</li>
+    </ol>
+    <div class="q-explain">Training on images the original model generates for "a dog" keeps the class concept intact while "[V] dog" learns your specific subject.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A training-free way to inpaint with any diffusion model is to…</p>
+    <ol class="q-src">
+      <li>Blur the masked region and upscale it</li>
+      <li>Run SDEdit at strength 1.0 on the whole image</li>
+      <li>Train a new ControlNet for masks</li>
+      <li>At every step, replace the unmasked area with the original noised to the current step, and let the model denoise the hole</li>
+    </ol>
+    <div class="q-explain">Keeping the known region pinned to the (noised) original at every step forces the generated hole to blend with its surroundings. Dedicated inpainting models do better by taking the mask as input.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>ControlNet</strong>: frozen denoiser + trainable encoder copy reading a control map, joined by <strong>zero convolutions</strong>; <strong>IP-Adapter</strong> adds image prompts via decoupled cross-attention.</li>
+    <li>Personalization: <strong>textual inversion</strong> (one embedding), <strong>DreamBooth</strong> (fine-tune + prior preservation), <strong>LoRA</strong> (small low-rank adapters, the common choice).</li>
+    <li>Editing: <strong>inpainting</strong> regenerates a masked region; <strong>SDEdit</strong> noises to strength $t_0/T$ then denoises (faithfulness vs realism); <strong>InstructPix2Pix</strong> edits from instructions.</li>
+    <li>Provenance: <strong>C2PA</strong> signed metadata and invisible watermarks like <strong>SynthID</strong> help, but both can be removed or missed.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"g1-7-a","front":"How does ControlNet add a condition to a frozen diffusion model?","back":"A trainable copy of the encoder and middle block reads the control map (edges, pose, depth…) and adds its features into the frozen decoder through zero-initialised 1×1 convolutions (Zhang et al., 2023)."},
+  {"id":"g1-7-b","front":"What are zero convolutions for?","back":"They start at exactly 0, so the add-on is a no-op at the start of training and can't damage the pretrained model; they grow as the branch learns."},
+  {"id":"g1-7-c","front":"Textual inversion vs DreamBooth vs LoRA?","back":"Textual inversion: learn one new token embedding, model frozen. DreamBooth: fine-tune the model with a rare identifier + prior-preservation loss. LoRA: train low-rank updates to attention layers; small, swappable files."},
+  {"id":"g1-7-d","front":"How does SDEdit edit an image, and what does strength control?","back":"Noise the input to step $t_0$, then denoise. Strength $t_0/T$: low = faithful but less realistic, high = realistic but forgets the input."},
+  {"id":"g1-7-e","front":"How was InstructPix2Pix trained?","back":"On synthetic (image, instruction, edited image) triples made with GPT-3 (instructions and captions) and Stable Diffusion + Prompt-to-Prompt (image pairs); sampled with separate image and text guidance scales."},
+  {"id":"g1-7-f","front":"C2PA vs SynthID?","back":"C2PA: cryptographically signed provenance metadata attached to the file (easily stripped). SynthID: invisible watermark in the pixels, robust to common edits but not all; detectors only find their own scheme."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/g1-toy.js"></script>
+<script src="../assets/js/anims/g1-7-controlnet.js"></script>
+<script src="../assets/js/anims/g1-7-sdedit-playground.js"></script>
+</body>
+</html>

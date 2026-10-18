@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="vd-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Video diffusion transformers · LLMs, Animated</title>
+<meta name="description" content="How text-to-video models work: from 3D U-Nets to diffusion transformers on space-time patches, text and image conditioning, any duration and aspect ratio, and what one clip costs to generate.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Video diffusion transformers</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Video</span></div>
+<p class="lede">Type a sentence, get a video. Today's text-to-video systems are, at their core, the image diffusion recipe applied to <strong>space-time latents</strong>: a video autoencoder, a diffusion transformer that denoises every frame at once, and a lot of compute. Here's how the pieces fit, how we got here, and what one clip costs.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Trace the path from early video diffusion models (2022) to diffusion transformers on space-time patches (2024–25).</li>
+    <li>Walk through one text-to-video generation, and explain how text and image conditioning get in.</li>
+    <li>Estimate the compute for one clip from its token count, and say why length and resolution are so expensive.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="vd-1.html">VD.1 Video as space-time patches</a> (video VAEs, token counts, full vs divided attention) and <a href="g1-6.html">G1.6 Diffusion transformers</a> (a transformer that denoises latent patches, conditioned on the timestep). Helpful but optional: <a href="g1-4.html">G1.4 Latent diffusion &amp; guidance</a> for classifier-free guidance and <a href="g1-5.html">G1.5 Flow matching</a>, the training objective many recent video models use.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; you'll find out below.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A video diffusion model generates a 5-second clip. How are the frames produced?</p>
+    <ol class="q-src">
+      <li>One frame at a time, each finished before the next starts</li>
+      <li>All frames together: the whole clip's latent is denoised step by step</li>
+      <li>Only the first and last frames are generated; the rest are interpolated</li>
+      <li>Each frame is generated independently from the same prompt</li>
+    </ol>
+    <div class="q-explain">Standard video diffusion denoises the entire space-time latent jointly, so every frame can "see" every other frame at every step. That's what keeps motion coherent. (Frame-by-frame generation comes back in <a href="vd-3.html">VD.3</a>, for long videos.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why do video generators usually train on still images as well as videos?</p>
+    <ol class="q-src">
+      <li>Images are needed to train the text encoder</li>
+      <li>Videos can't be captioned</li>
+      <li>Images make the model faster at inference</li>
+      <li>Captioned images are far more plentiful and varied; an image is just a one-frame video</li>
+    </ol>
+    <div class="q-explain">High-quality, well-captioned video is scarce compared with images. Treating an image as a one-frame video lets the model learn appearance from images and motion from video.</div>
+  </div>
+</section>
+
+<h2>From 3D U-Nets to diffusion transformers</h2>
+<p>Image diffusion took off in 2020–22, and video followed fast. The first wave extended image U-Nets with time:</p>
+<ul>
+  <li><strong>Video Diffusion Models</strong> (Ho et al., 2022) used a 3D U-Net that factorizes space and time (spatial layers inside each frame, attention across frames) and trained <strong>jointly on images and videos</strong>.</li>
+  <li><strong>Imagen Video</strong> (Ho et al., 2022) chained a base model with interleaved spatial and temporal super-resolution models, growing a tiny, low-frame-rate clip into 128 frames of 1280 × 768 at 24 fps.</li>
+  <li><strong>Make-A-Video</strong> (Singer et al., 2022) started from a text-to-image model and added temporal convolution and attention layers that learn motion from unlabelled video, so it needed no paired text-video data.</li>
+  <li><strong>Stable Video Diffusion</strong> (Blattmann et al., 2023) moved to a latent space and showed how much <strong>data curation</strong> matters, training in three stages: image pretraining, video pretraining on a large filtered set, then fine-tuning on a small high-quality set.</li>
+</ul>
+<p>Then in February 2024, OpenAI's Sora report, "Video generation models as world simulators", described a <strong>diffusion transformer</strong> operating on <strong>spacetime patches</strong> of a compressed latent, trained on videos and images of varying durations, resolutions and aspect ratios. The report gave few architecture details, but the recipe it sketched became the standard. Open models followed: CogVideoX (Yang et al., 2024), HunyuanVideo (Kong et al., 2024, about 13 billion parameters) and Wan (2025, 1.3B and 14B versions) are diffusion transformers over a 4 × 8 × 8 video VAE latent, with full space-time attention.</p>
+<p>Why transformers? As in <a href="g1-6.html">G1.6</a>: they scale predictably with parameters and data, and a sequence of patches handles any shape. Video adds one more reason: full attention lets any patch talk to any other patch, at any time and place, in a single layer.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What was the key idea of Make-A-Video (2022)?</p>
+  <ol class="q-src">
+    <li>Generate video one frame at a time with a GAN</li>
+    <li>Use a diffusion transformer on spacetime patches</li>
+    <li>Start from a text-to-image model and learn motion from unlabelled video, without paired text-video data</li>
+  </ol>
+  <div class="q-explain">Make-A-Video borrowed "what things look like and are called" from image-text data and learned "how things move" from video alone. Spacetime-patch DiTs came later, with Sora (2024).</div>
+</div></div>
+
+<h2>Inside one generation</h2>
+<p>At sampling time a video DiT runs the diffusion loop you know from images, just on a bigger tensor:</p>
+<ol class="steps">
+  <li>Pick the output shape, say 5 s of 720p, and fill a latent of that shape (21 latent frames × 90 × 160 × 16 channels for a 4 × 8 × 8 VAE) with <strong>pure noise</strong>.</li>
+  <li><strong>Patchify</strong> it into tokens ($1 \times 2 \times 2$ patches gives 75,600 here) and add positions. Many open models use a 3D version of RoPE, splitting each head's rotary dimensions into time, height and width parts.</li>
+  <li>The transformer predicts the noise (or, with flow matching, a velocity) from the noisy tokens, the <strong>timestep</strong> and the <strong>conditioning</strong>. A sampler takes a small step.</li>
+  <li>Repeat for tens of steps, then <strong>decode</strong> the clean latent with the VAE decoder.</li>
+</ol>
+
+<figure class="anim wide" data-anim="vd-2-pipeline"></figure>
+
+<p><strong>Text conditioning</strong> comes from a text encoder: a T5-style encoder in many models, or a multimodal LLM in HunyuanVideo. It enters in one of two ways. With <strong>cross-attention</strong> (Wan, for example), video tokens query the text tokens in dedicated layers. With a <strong>joint sequence</strong> (CogVideoX, and HunyuanVideo's later blocks), text tokens are concatenated with video tokens and everything attends to everything. Training captions matter enormously: the Sora report describes re-captioning training videos with a descriptive captioning model, a trick borrowed from DALL·E 3.</p>
+<p><strong>Image-to-video</strong> adds a picture as the first frame. Common recipes encode the image with the same VAE and either concatenate its latent to the noisy latent along the channels or place it as a clean first latent frame, often adding an image embedding through cross-attention too. Stable Video Diffusion, for example, conditions on the image both ways. <strong>Classifier-free guidance</strong> (<a href="g1-4.html">G1.4</a>) works as for images: run with and without the prompt and push the prediction further toward "with".</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Imagine a flipbook where every page is covered in TV static. A magic eraser rubs <strong>all the pages at once</strong>, a tiny bit each time, and each time it peeks at the neighbouring pages so a boat on page 3 is a little to the right of the boat on page 2.</p>
+    <p>After many gentle rubs the static is gone and the boat sails smoothly across the whole book. The pages are still tiny, so a photocopier blows each one up and adds in-between pages: that's the decoder.</p>
+    <p class="math-note">Where it breaks: the eraser isn't uncovering a picture that was hidden underneath. It invents the most likely picture for your sentence, and the "pages" it works on are compressed codes, not drawings.</p>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In a joint-sequence video DiT, how does the prompt influence the video tokens?</p>
+  <ol class="q-src">
+    <li>Text tokens sit in the same sequence, so video tokens attend to them directly in every attention layer</li>
+    <li>The prompt is decoded by the VAE into the first frame</li>
+    <li>The prompt sets the random seed of the noise</li>
+  </ol>
+  <div class="q-explain">Concatenating text and video tokens lets attention mix them freely. The alternative is cross-attention layers where video tokens query the text. The VAE never sees the prompt.</div>
+</div></div>
+
+<h2>Any length, any shape</h2>
+<p>Older generators trained on fixed-size squares, cropping everything else. A patch sequence doesn't care about shape: a vertical phone clip and a widescreen clip are just different grids of patches. The Sora report says it trained on videos at their <strong>native</strong> resolutions, durations and aspect ratios, and controls the output size by laying out the starting noise patches in a grid of the right shape. It reports that this improved framing compared with training on square crops, which can cut subjects out of the frame.</p>
+<p>Two engineering tricks make mixed shapes trainable:</p>
+<ul>
+  <li><strong>Bucketing:</strong> group training clips of similar shape and length into the same batch, so no padding is wasted.</li>
+  <li><strong>Packing</strong> (NaViT, Dehghani et al., 2023, "Patch n' Pack"): concatenate several clips' tokens into one long sequence and use an attention mask so each clip only attends to itself.</li>
+</ul>
+<p>The token count follows directly from <a href="vd-1.html">VD.1</a>. With a 4 × 8 × 8 VAE and $2 \times 2$ patches, each latent frame of a 1280 × 720 clip is $80 \times 45 = 3{,}600$ tokens, and so is a 720 × 1280 vertical clip: same pixels, same cost. But <em>duration</em> adds latent frames: about 2 s at 24 fps (49 frames) is 13 latent frames (46,800 tokens), while about 10 s (241 frames) is 61 (219,600 tokens). With full attention, the 10-second clip costs about 22× more attention per step than the 2-second one, which is why most systems generate clips of seconds, not minutes, in one pass.</p>
+<p>Images fit the same scheme: a single image is a one-frame video, so the same model trains on huge image datasets for appearance and on video for motion, often in the same run.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A model generates a 1280 × 720 clip and a 720 × 1280 clip of the same length. Compared with the landscape clip, the vertical one has…</p>
+  <ol class="q-src">
+    <li>about twice as many tokens</li>
+    <li>the same number of tokens</li>
+    <li>about half as many tokens</li>
+  </ol>
+  <div class="q-explain">Tokens depend on the number of pixels (and frames), not on orientation: $45 \times 80 = 80 \times 45$ patches per latent frame.</div>
+</div></div>
+
+<h2>What one clip costs</h2>
+<p>Labs rarely publish full training costs; Meta's Movie Gen paper (2024) is an exception, reporting a 30-billion-parameter model pretrained on up to 6,144 H100 GPUs. But you can estimate the cost of <em>generating</em> a clip yourself. Take an illustrative 14B-parameter DiT with hidden size $d = 5{,}120$ and $L = 40$ layers, roughly the shape of open 14B video models, generating 5 s of 720p: $N = 75{,}600$ tokens.</p>
+<p>One forward pass costs about $2PN$ FLOPs in the weight matrices plus about $4N^2 d$ per layer in attention (computing $QK^\top$ and multiplying by $V$):</p>
+$$C_{\text{pass}} \approx \underbrace{2PN}_{\text{weights}} + \underbrace{4N^2 d\,L}_{\text{attention}}$$
+<p class="math-note">$P$ is the parameter count, $N$ the number of tokens, $d$ the hidden size and $L$ the number of layers.</p>
+<ol class="steps">
+  <li>Weights: $2 \times 14 \times 10^9 \times 75{,}600 \approx 2.1 \times 10^{15}$ FLOPs.</li>
+  <li>Attention: $4 \times 75{,}600^2 \times 5{,}120 \times 40 \approx 4.7 \times 10^{15}$ FLOPs, more than the weights. At this length, attention dominates.</li>
+  <li>One clip: 50 steps × 2 passes for guidance = 100 passes, so about $6.8 \times 10^{17}$ FLOPs.</li>
+  <li>At an assumed sustained 400 teraFLOP/s on one modern GPU: $6.8 \times 10^{17} / 4 \times 10^{14} \approx 1{,}700$ s, close to half an hour.</li>
+</ol>
+<p>That's why services split each sequence across many GPUs, and why a lot of 2025–26 work goes into <strong>fewer steps</strong> (distilling the sampler down to a handful of steps), <strong>caching</strong> features that barely change between steps, and <strong>sparser attention</strong>. Real numbers vary widely with hardware and implementation; the shape of the arithmetic does not.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same model, but now 10 s of 720p at 16 fps: 161 frames, so $1 + 160/4$ latent frames of 3,600 tokens each.</p>
+  <ol class="steps">
+    <li>Tokens $N =$ <span class="blank" data-answer="147600" data-tol="1" data-hint="Latent frames = 1 + 40 = 41. Multiply by 3,600."></span></li>
+    <li>The attention term grows by a factor of about <span class="blank" data-answer="3.81" data-tol="0.06" data-hint="Attention scales with N²: (147,600 / 75,600)²."></span></li>
+    <li>The weights term grows by a factor of about <span class="blank" data-answer="1.95" data-tol="0.03" data-hint="Weights scale with N: 147,600 / 75,600."></span></li>
+  </ol>
+</section>
+
+<div class="why"><strong>Why this matters in practice:</strong> the same three levers you met for LLMs decide what video products can offer. Sequence length (here duration × resolution) sets the attention bill, exactly as in <a href="m1-1.html">M1.1</a>; the number of passes (steps × guidance) is the video version of output length; and serving tricks such as splitting sequences across GPUs and distilling to fewer steps play the role that KV caching and batching play for text. When a product limits clips to a few seconds or charges more for 1080p, this arithmetic is why.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">For long, high-resolution clips, which part of a video DiT's forward pass grows fastest as you add frames?</p>
+  <ol class="q-src">
+    <li>The text encoder</li>
+    <li>The weight matrices (MLPs and projections)</li>
+    <li>Attention, because it scales with the square of the token count</li>
+  </ol>
+  <div class="q-explain">The weights term grows linearly in $N$; attention grows as $N^2$. Past some length attention dominates, which is why sparse and windowed attention are active research for video.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Walk a colleague through what happens, step by step, when a video DiT turns a prompt into a 5-second clip.</p>
+  <div class="model-answer"><strong>Model answer:</strong> The system fills a latent of the target shape (frames × height × width, already compressed by the video VAE) with noise and cuts it into space-time patch tokens. A diffusion transformer, conditioned on the prompt's text tokens and the timestep, predicts how to denoise all frames at once with full space-time attention, and a sampler repeats this for tens of steps (twice per step with classifier-free guidance). Finally the VAE decoder expands the clean latent back into full-resolution frames.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What did OpenAI's February 2024 Sora report describe?</p>
+    <ol class="q-src">
+      <li>A diffusion transformer over spacetime patches of a compressed video latent, trained on native durations, resolutions and aspect ratios</li>
+      <li>A full architecture specification with layer counts and training compute</li>
+      <li>An autoregressive model that predicts one pixel at a time</li>
+      <li>A cascade of 3D U-Nets with separate super-resolution models</li>
+    </ol>
+    <div class="q-explain">The report sketched the recipe (compression network, spacetime patches, diffusion transformer, native-size training, re-captioning) but deliberately left out model and implementation details. The U-Net cascade describes Imagen Video (2022).</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">How does an image-to-video model typically use the input image?</p>
+    <ol class="q-src">
+      <li>It replaces the prompt with a caption of the image</li>
+      <li>It uses the image as the noise to start from</li>
+      <li>It appends the image after the last generated frame</li>
+      <li>It encodes the image with the VAE and feeds that latent in as conditioning (channel concatenation or a clean first frame), often plus an image embedding</li>
+    </ol>
+    <div class="q-explain">The image's latent gives the model the exact first frame to continue from; an image embedding through cross-attention adds a global summary of its content.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Interleaving with <a href="g1-4.html">G1.4</a>: why does classifier-free guidance double the cost of each denoising step?</p>
+    <ol class="q-src">
+      <li>It needs twice as many sampling steps</li>
+      <li>Each step runs the model twice, with and without the prompt, and combines the two predictions</li>
+      <li>It doubles the number of tokens by adding text</li>
+      <li>It runs the VAE decoder at every step</li>
+    </ol>
+    <div class="q-explain">Guidance extrapolates from the unconditional prediction toward the conditional one, so it needs both. Some distilled models bake guidance in and drop the second pass.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You double a clip's duration at fixed resolution. With full attention dominating, the generation cost grows by about…</p>
+    <ol class="q-src">
+      <li>2×</li>
+      <li>1.4×</li>
+      <li>4×</li>
+      <li>8×</li>
+    </ol>
+    <div class="q-explain">Twice the duration means about twice the latent frames and tokens, and attention scales with the square: about 4×. (The weights term only doubles, so the true total lands between 2× and 4×.)</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Video diffusion went from factorized 3D U-Nets and cascades (2022) to <strong>diffusion transformers on spacetime patches</strong> of a VAE latent (Sora, 2024; open models such as CogVideoX, HunyuanVideo and Wan).</li>
+    <li>All frames are <strong>denoised together</strong>, which is what keeps motion coherent within a clip.</li>
+    <li>Text enters by cross-attention or a joint token sequence; images enter as a VAE latent plus, often, an embedding.</li>
+    <li>Patch sequences allow <strong>native durations and aspect ratios</strong>, with bucketing or packing during training.</li>
+    <li>Cost per clip ≈ steps × guidance passes × (weights $2PN$ + attention $4N^2dL$); attention dominates for long, high-resolution clips.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"vd-2-a","front":"What recipe did OpenAI's Sora report (Feb 2024) describe, and what did it leave out?","back":"A diffusion transformer on spacetime patches of a compressed video latent, trained at native durations, resolutions and aspect ratios with re-captioned data. It gave few architecture or training details."},
+  {"id":"vd-2-b","front":"Name the steps of one text-to-video generation with a latent video DiT.","back":"Noise latent of the target shape → patchify into tokens → DiT predicts noise/velocity given text and timestep → sampler step, repeated tens of times (×2 with guidance) → VAE decoder to frames."},
+  {"id":"vd-2-c","front":"Two ways text conditioning enters a video DiT?","back":"Cross-attention (video tokens query text tokens, e.g. Wan) or a joint sequence where text and video tokens are concatenated and attend to each other (e.g. CogVideoX)."},
+  {"id":"vd-2-d","front":"How do video DiTs handle different durations and aspect ratios?","back":"Patches form a sequence of any length: train at native sizes with bucketing or packing (NaViT-style masks); at inference, lay out the noise patches in a grid of the desired shape."},
+  {"id":"vd-2-e","front":"Rough FLOPs for generating one clip with a video DiT?","back":"steps × (2 with CFG) × [$2PN$ for the weights + $4N^2dL$ for attention]. For long or high-resolution clips the $N^2$ attention term dominates."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/vd-2-pipeline.js"></script>
+</body>
+</html>

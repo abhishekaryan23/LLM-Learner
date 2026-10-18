@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p5-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Frequencies &amp; spectrograms · LLMs, Animated</title>
+<meta name="description" content="Sinusoids, sampling rates and the Nyquist limit, aliasing, the Fourier transform as a sum of sines, the short-time Fourier transform, mel scale and log-mel spectrograms, and why audio models use spectrograms or codec tokens. With a sine-mixing playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Frequencies &amp; spectrograms</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Math for generative models</span></div>
+<p class="lede">A microphone hands a computer 16,000 numbers per second. Speech models rarely look at those numbers directly. They look at a picture of <strong>which frequencies are present, moment by moment</strong>: a spectrogram. This lesson builds that picture from scratch, from a single sine wave to the log-mel spectrogram that Whisper reads.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe a sinusoid by amplitude, frequency and phase, and explain sampling rate, the Nyquist frequency and aliasing.</li>
+    <li>Explain what a Fourier transform and a short-time Fourier transform (window, hop) produce.</li>
+    <li>Explain how a log-mel spectrogram is built, and why audio models use spectrograms or learned codec tokens.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> sliding a window and taking a dot product at each position, from <a href="p5-4.html">Convolution (P5.4)</a>. Helpful but optional: <a href="p1-1.html">Vectors &amp; dot products (P1.1)</a>. This lesson feeds the audio module, starting with <a href="a1-1.html">Sound as data (A1.1)</a> and <a href="a1-2.html">Speech recognition (A1.2)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">CD audio stores 44,100 samples per second. What is the highest frequency it can represent?</p>
+    <ol class="q-src">
+      <li>44,100 Hz</li>
+      <li>22,050 Hz</li>
+      <li>11,025 Hz</li>
+      <li>There's no limit; more samples just mean better quality</li>
+    </ol>
+    <div class="q-explain">Half the sampling rate, the <strong>Nyquist frequency</strong>: 22,050 Hz, just above the roughly 20 kHz limit of human hearing. That's why 44.1 kHz was chosen.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In a spectrogram of someone speaking, what do the axes and colour show?</p>
+    <ol class="q-src">
+      <li>Horizontal: frequency; vertical: loudness; colour: time</li>
+      <li>Horizontal: time; vertical: air pressure; colour: pitch</li>
+      <li>Horizontal: word number; vertical: volume; colour: speaker</li>
+      <li>Horizontal: time; vertical: frequency; colour: how much energy there is at that frequency and time</li>
+    </ol>
+    <div class="q-explain">A spectrogram is a heat map of energy over time and frequency. You'll build one step by step below.</div>
+  </div>
+</section>
+
+<h2>Sound is a wave of numbers</h2>
+<p>In 1807 Joseph Fourier, studying how heat spreads through metal, claimed that almost any function can be written as a sum of sine waves. The idea was contested for years (his 1807 memoir was only published, in expanded form, as a book in 1822) and is now everywhere: in JPEG and MP3 compression, in radio, and in every speech model's front end.</p>
+<p>The building block is the <strong>sinusoid</strong>:</p>
+$$x(t) = A \sin(2\pi f t + \varphi)$$
+<p>$A$ is the <strong>amplitude</strong> (how loud), $f$ the <strong>frequency</strong> in hertz, cycles per second (the pitch: concert A is 440 Hz, and human hearing spans roughly 20 Hz to 20 kHz), $t$ is time in seconds, and $\varphi$ the <strong>phase</strong>, which shifts the wave sideways without changing its pitch.</p>
+<p>A microphone turns air pressure into a voltage, and a converter <strong>samples</strong> it $f_s$ times per second. Common rates: 8 kHz for telephone audio, 16 kHz for most speech models, 44.1 kHz for CDs and 48 kHz for video. The catch was spelled out by Harry Nyquist (1928) and proved in general by Claude Shannon (1949): a sampled signal can only represent frequencies below $f_s / 2$, the <strong>Nyquist frequency</strong>. At 16 kHz that's 8 kHz, which keeps most of what makes speech intelligible; at 44.1 kHz it's 22.05 kHz, covering human hearing.</p>
+
+<figure class="anim wide" data-anim="p5-5-aliasing"></figure>
+
+<p>A tone above the Nyquist frequency doesn't vanish; it masquerades as a lower one, $|f - k f_s|$ for whole numbers $k$. That's <strong>aliasing</strong>, the same effect that makes wagon wheels seem to spin backwards on film. Real converters put a low-pass filter before the sampler to remove anything above $f_s/2$ first.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">A 7 kHz tone is sampled at 10 kHz. Where does it appear?</p>
+  <ol class="q-src">
+    <li>At 7 kHz; it's below the sampling rate</li>
+    <li>At 17 kHz</li>
+    <li>At 3 kHz</li>
+    <li>It disappears completely</li>
+  </ol>
+  <div class="q-explain">The Nyquist frequency is 5 kHz, so 7 kHz is too high. It folds to $|7 - 10| = 3$ kHz. Being below the sampling rate isn't enough; it must be below <em>half</em> of it.</div>
+</div></div>
+
+<h2>Fourier: every sound is a sum of sines</h2>
+<p>The <strong>discrete Fourier transform</strong> (DFT) takes $N$ samples and finds the sinusoids they're made of:</p>
+$$X[k] = \sum_{n=0}^{N-1} x[n]\; e^{-2\pi i\, k n / N}, \qquad k = 0, 1, \dots, N/2$$
+<p>It looks exotic, but $e^{-i\theta} = \cos\theta - i\sin\theta$, so $X[k]$ is just two <strong>dot products</strong> (<a href="p1-1.html">P1.1</a>): the signal against a cosine and against a sine that each complete $k$ cycles in the window. If the signal contains that frequency, the products line up and the sum is large; otherwise they cancel. It's the same multiply-and-add as a convolution kernel (<a href="p5-4.html">P5.4</a>), with sinusoids as the kernels.</p>
+<ul>
+  <li>Bin $k$ corresponds to frequency $k \cdot f_s / N$. The bins are $f_s / N$ apart and run from 0 up to the Nyquist frequency: $N/2 + 1$ of them.</li>
+  <li>The <strong>magnitude</strong> $|X[k]|$ says how much of that frequency there is; its angle is the phase. A spectrum plot usually shows magnitude only, so phase is thrown away.</li>
+  <li>Computed naively it costs $N^2$ operations; the <strong>fast Fourier transform</strong> (Cooley &amp; Tukey, 1965) does it in about $N \log N$.</li>
+</ul>
+
+<div class="playground" id="p5-5-mix-playground">
+  <h3>Playground: mix three tones</h3>
+  <p class="math-note" style="margin:0">One second sampled at $f_s = 40$ Hz, so the spectrum runs from 0 to the Nyquist frequency, 20 Hz. Try a tone above 20 Hz and watch where its bar lands.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+    <label><span>Tone 1: <output data-fo="0">3</output> Hz</span><input type="range" min="1" max="30" step="1" value="3" data-f="0"></label>
+    <label><span>Amplitude: <output data-ao="0">1.0</output></span><input type="range" min="0" max="1" step="0.1" value="1" data-a="0" aria-label="Tone 1 amplitude"></label>
+    <label><span>Tone 2: <output data-fo="1">7</output> Hz</span><input type="range" min="1" max="30" step="1" value="7" data-f="1"></label>
+    <label><span>Amplitude: <output data-ao="1">0.5</output></span><input type="range" min="0" max="1" step="0.1" value="0.5" data-a="1" aria-label="Tone 2 amplitude"></label>
+    <label><span>Tone 3: <output data-fo="2">12</output> Hz</span><input type="range" min="1" max="30" step="1" value="12" data-f="2"></label>
+    <label><span>Amplitude: <output data-ao="2">0.3</output></span><input type="range" min="0" max="1" step="0.1" value="0.3" data-a="2" aria-label="Tone 3 amplitude"></label>
+  </div>
+  <div class="chips" role="group" aria-label="Presets" style="margin-top:12px">
+    <button type="button" class="chip" data-preset="chord" aria-pressed="true">Three tones</button>
+    <button type="button" class="chip" data-preset="single" aria-pressed="false">One tone</button>
+    <button type="button" class="chip" data-preset="alias" aria-pressed="false">Aliasing: 27 Hz</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<p>The waveform of three tones looks like a mess, yet the spectrum shows exactly three bars at the right heights: the Fourier transform un-mixes them. The 27 Hz preset shows aliasing in action, with a bar at $40 - 27 = 13$ Hz.</p>
+
+<h3>Worked example</h3>
+<p>A speech model takes windows of $N = 400$ samples at $f_s = 16$ kHz:</p>
+<ol class="steps">
+  <li>Window length: $400 / 16{,}000 = 0.025$ s, or 25 ms.</li>
+  <li>Bin spacing: $f_s / N = 16{,}000 / 400 = 40$ Hz.</li>
+  <li>Number of bins: $N/2 + 1 = 201$, covering 0 to 8,000 Hz.</li>
+</ol>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">You take the DFT of 1,000 samples recorded at 8 kHz. How far apart are the frequency bins?</p>
+  <ol class="q-src">
+    <li>8 Hz</li>
+    <li>1,000 Hz</li>
+    <li>4 Hz</li>
+    <li>0.125 Hz</li>
+  </ol>
+  <div class="q-explain">$f_s / N = 8{,}000 / 1{,}000 = 8$ Hz. A longer window gives finer frequency bins, which matters in the next byte.</div>
+</div></div>
+
+<h2>Short-time Fourier transform: the spectrogram</h2>
+<p>One Fourier transform of a whole 10-second clip tells you which frequencies occur, but not <em>when</em>. Speech sounds change every few tens of milliseconds, so we need the frequencies moment by moment. In the 1940s Bell Labs engineers built a machine for exactly this, the sound spectrograph (Koenig, Dunn &amp; Lacy, 1946), and it became the standard tool of phonetics.</p>
+<p>The <strong>short-time Fourier transform</strong> (STFT) does it digitally:</p>
+<ol class="steps">
+  <li>Cut out a short <strong>window</strong> of samples, typically 25 ms for speech.</li>
+  <li>Multiply it by a taper such as the Hann window, which fades the edges to zero so the abrupt cut doesn't smear energy across frequencies.</li>
+  <li>Take its DFT and keep the magnitudes (or their squares, the power): one column.</li>
+  <li>Slide along by the <strong>hop</strong>, typically 10 ms, and repeat. With a hop shorter than the window, neighbouring windows overlap.</li>
+</ol>
+<p>Stack the columns side by side and you have a <strong>spectrogram</strong>. With a 10 ms hop there are 100 columns per second.</p>
+
+<figure class="anim wide" data-anim="p5-5-stft"></figure>
+
+<p>Window length is a trade-off. A longer window gives finer frequency bins ($f_s / N$ shrinks), but each column then blurs together everything that happened during the window. A shorter window pins down timing but smears frequency. 25 ms is a compromise that suits speech.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-p5-5.webp" alt="A child plays a toy xylophone; notes float out and land as stripes on an unrolling paper roll, low notes near the bottom, high notes near the top." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A child plays a toy xylophone next to a long roll of paper that keeps unrolling. Every note they hit floats out and lands on the paper as a stripe: <strong>low notes near the bottom</strong>, <strong>high notes near the top</strong>. Loud notes make dark stripes; soft notes make pale ones.</p>
+      <p>Later you can "read" the tune from the paper: which notes, in what order, and which ones were played together. That paper is a <strong>spectrogram</strong>.</p>
+      <p class="math-note">Where it breaks: a real sound isn't one clean note; even a single xylophone bar rings at several frequencies at once, and a voice makes dozens. The spectrogram shows all of them, not just the note you meant to play.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Your turn (faded example)</h3>
+<p>Whisper-style settings: 16 kHz audio, 25 ms window, 10 ms hop, a 30-second clip.</p>
+<ol class="steps">
+  <li>Samples per window: <span class="blank" data-answer="400" data-tol="0.5" data-hint="0.025 s × 16,000 samples per second."></span></li>
+  <li>Samples per hop: <span class="blank" data-answer="160" data-tol="0.5" data-hint="0.010 s × 16,000."></span></li>
+  <li>Frames (columns) in 30 seconds: <span class="blank" data-answer="3000" data-tol="1" data-hint="One frame per 10 ms hop: 30 / 0.01."></span></li>
+</ol>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">You switch the STFT window from 25 ms to 100 ms. What happens?</p>
+  <ol class="q-src">
+    <li>Finer timing and coarser frequency bins</li>
+    <li>Finer frequency bins, but quick changes in time get blurred together</li>
+    <li>Both time and frequency get sharper</li>
+    <li>Nothing; the window length only affects speed</li>
+  </ol>
+  <div class="q-explain">Bin spacing is $f_s / N$, so 4× more samples gives 4× finer bins. But each column now averages over 100 ms, smearing fast events. That's the time–frequency trade-off.</div>
+</div></div>
+
+<h2>Mel scale and log-mel spectrograms</h2>
+<p>Raw spectrograms waste effort on detail people can't hear. Two adjustments, both modelled on human perception, give the standard input to speech models.</p>
+<p><strong>The mel scale.</strong> We hear the step from 100 to 200 Hz as a big change in pitch, but 8,000 to 8,100 Hz as almost none. Stevens, Volkmann &amp; Newman (1937) measured perceived pitch and defined the <strong>mel</strong> scale; the formula most software uses is</p>
+$$m = 2595 \log_{10}\!\left(1 + \frac{f}{700}\right)$$
+<p>It's roughly linear below 1 kHz (1,000 Hz ≈ 1,000 mel) and logarithmic above: 4 kHz is about 2,146 mel and 8 kHz about 2,840, so the whole top half of a 16 kHz recording, 4 to 8 kHz, gets only about a quarter of the mel range. A <strong>mel filterbank</strong> of triangular filters, evenly spaced in mel, pools the 201 linear bins into a few dozen bands: narrow at low frequencies, wide at high ones.</p>
+<p><strong>The log.</strong> Perceived loudness also grows roughly with the logarithm of power, and speech energy spans a huge range. Taking the log (decibels) compresses it, so quiet consonants and overtones aren't drowned out by loud vowels.</p>
+<p>The result, a <strong>log-mel spectrogram</strong>, is what Whisper (Radford et al., 2022) reads: 16 kHz audio, 25 ms windows, a 10 ms hop and 80 mel bands (128 in the large-v3 model), in 30-second chunks of 3,000 frames. That's 8,000 numbers per second instead of 16,000 raw samples, arranged like an image, ready for convolutions (<a href="p5-4.html">P5.4</a>) and a transformer (<a href="a1-2.html">A1.2</a>).</p>
+<p><strong>Spectrograms or tokens?</strong> A magnitude spectrogram throws phase away, so you can't play it back directly. Text-to-speech systems such as Tacotron 2 (Shen et al., 2018) predict a mel spectrogram and hand it to a separate neural <strong>vocoder</strong>, like HiFi-GAN (Kong et al., 2020), to rebuild the waveform. Many newer generative audio models skip spectrograms and use <strong>neural audio codecs</strong> instead, such as SoundStream (Zeghidour et al., 2021) and EnCodec (Défossez et al., 2022). These are learned stacks of strided convolutions that turn audio into a short sequence of discrete tokens (EnCodec's 24 kHz model produces 75 frames per second, each a small stack of codebook tokens) and decode tokens back into sound. A language model can then generate audio token by token (<a href="a1-3.html">A1.3</a>, <a href="a1-4.html">A1.4</a>, <a href="a1-5.html">A1.5</a>).</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> voice assistants and speech-to-speech models (<a href="a1-6.html">A1.6</a>) bolt audio onto LLMs through exactly these representations: a log-mel spectrogram feeding an audio encoder for listening, and codec tokens for speaking. When a multimodal model "hears", its first layer sees a picture of frequencies over time, not raw air pressure.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why do speech models use mel bands rather than equally spaced frequency bins?</p>
+  <ol class="q-src">
+    <li>Mel bands remove the need for a Fourier transform</li>
+    <li>Mel bands keep the phase, which linear bins discard</li>
+    <li>Mel bands are evenly spaced in hertz, which is simpler</li>
+    <li>They give fine resolution at low frequencies, where pitch differences matter most to listeners, and fewer, wider bands at high frequencies</li>
+  </ol>
+  <div class="q-explain">The mel scale follows perceived pitch: roughly linear up to about 1 kHz, logarithmic above. It's computed <em>from</em> the Fourier magnitudes and, like them, ignores phase.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Describe how a log-mel spectrogram is made from a waveform, step by step.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Slide a short tapered window (say 25 ms, hop 10 ms) along the samples and take the Fourier transform of each window to get its energy at each frequency. Pool those frequencies into mel bands (narrow at low frequencies, wide at high) and take the log. The result is a time-by-mel-band grid, about 100 columns per second.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Speech is recorded at 16 kHz. What is the highest frequency the recording can contain?</p>
+    <ol class="q-src">
+      <li>8 kHz</li>
+      <li>16 kHz</li>
+      <li>32 kHz</li>
+      <li>20 kHz, the limit of human hearing</li>
+    </ol>
+    <div class="q-explain">The Nyquist frequency is $f_s / 2 = 8$ kHz. Anything higher must be filtered out before sampling, or it aliases.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In the playground ($f_s = 40$ Hz), you set a tone to 30 Hz. Where does its bar appear?</p>
+    <ol class="q-src">
+      <li>At 30 Hz</li>
+      <li>Nowhere; it's filtered out</li>
+      <li>At 10 Hz</li>
+      <li>At 20 Hz, the Nyquist frequency</li>
+    </ol>
+    <div class="q-explain">It's above the 20 Hz Nyquist limit, so it folds to $40 - 30 = 10$ Hz. The sampled data simply can't tell the two apart.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Why do many text-to-speech systems that predict mel spectrograms need a separate vocoder?</p>
+    <ol class="q-src">
+      <li>Because mel spectrograms are too large to store</li>
+      <li>Because a magnitude spectrogram discards phase (and pools frequencies), so the waveform must be reconstructed</li>
+      <li>Because spectrograms can only represent speech, not music</li>
+      <li>Because the vocoder adds the mel scale</li>
+    </ol>
+    <div class="q-explain">Many waveforms share the same magnitude spectrogram. A vocoder such as HiFi-GAN learns to produce a natural-sounding waveform that matches it.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">(From P5.4) Which description of one STFT column is most accurate?</p>
+    <ol class="q-src">
+      <li>A single convolution with a learned 3-wide kernel</li>
+      <li>The average of the samples in the window</li>
+      <li>A max-pooling of the waveform</li>
+      <li>A set of dot products between the windowed samples and sinusoids of different frequencies, one per frequency bin</li>
+    </ol>
+    <div class="q-explain">Each $X[k]$ multiplies the window by a fixed sinusoid and adds up, exactly the multiply-and-add of a convolution. Sliding the window by the hop is like a convolution with stride equal to the hop.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A <strong>sinusoid</strong> $A\sin(2\pi f t + \varphi)$ has an amplitude, a frequency and a phase.</li>
+    <li>Sampling at $f_s$ captures frequencies below $f_s/2$ (<strong>Nyquist</strong>); higher ones <strong>alias</strong> to lower ones. 16 kHz for speech, 44.1 kHz for music.</li>
+    <li>The <strong>Fourier transform</strong> writes a window of samples as a sum of sinusoids; bins are $f_s/N$ apart.</li>
+    <li>The <strong>STFT</strong> repeats it on short overlapping windows (25 ms, hop 10 ms) to make a <strong>spectrogram</strong>.</li>
+    <li><strong>Log-mel</strong> spectrograms (e.g. Whisper's 80 bands) mimic hearing; generative audio often uses <strong>codec tokens</strong> instead, because spectrograms drop phase.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p5-5-a","front":"Write a sinusoid and name its three parameters.","back":"$x(t) = A\\sin(2\\pi f t + \\varphi)$: amplitude $A$ (loudness), frequency $f$ in Hz (pitch), phase $\\varphi$ (sideways shift)."},
+  {"id":"p5-5-b","front":"What is the Nyquist frequency, and what is aliasing?","back":"$f_s/2$, the highest frequency a sampling rate $f_s$ can represent (8 kHz at 16 kHz, 22.05 kHz at 44.1 kHz). Higher frequencies fold back and masquerade as lower ones, $|f - k f_s|$: aliasing."},
+  {"id":"p5-5-c","front":"What does bin $k$ of an $N$-point DFT measure, and how far apart are the bins?","back":"How much of the frequency $k f_s / N$ the window contains (two dot products, with a cosine and a sine). Bins are $f_s/N$ apart: 40 Hz for 400 samples at 16 kHz."},
+  {"id":"p5-5-d","front":"How is an STFT spectrogram built, and what does the window length trade off?","back":"Slide a tapered window (e.g. 25 ms) by a hop (e.g. 10 ms), Fourier-transform each window, stack the magnitudes as columns. Longer windows: finer frequency, blurrier timing."},
+  {"id":"p5-5-e","front":"What is a log-mel spectrogram, and what does Whisper use?","back":"Spectrogram energies pooled into mel-spaced bands (mel $= 2595\\log_{10}(1 + f/700)$) and log-compressed. Whisper: 16 kHz, 25 ms windows, 10 ms hop, 80 mel bands (128 in large-v3), 3,000 frames per 30 s."},
+  {"id":"p5-5-f","front":"Why do generative audio models often use codec tokens instead of spectrograms?","back":"Magnitude spectrograms drop phase, so they need a separate vocoder to become sound. Neural codecs (SoundStream, EnCodec) turn audio into discrete tokens and back, so a language model can generate audio token by token."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p5-5-aliasing.js"></script>
+<script src="../assets/js/anims/p5-5-stft.js"></script>
+<script src="../assets/js/anims/p5-5-mix-playground.js"></script>
+</body>
+</html>

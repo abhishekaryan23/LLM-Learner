@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="rl-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Q-learning &amp; DQN · LLMs, Animated</title>
+<meta name="description" content="Learn values from experience with temporal-difference learning and Q-learning, then scale up to Atari from pixels with DQN: experience replay, target networks and Double DQN.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Q-learning &amp; DQN</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Reinforcement learning</span></div>
+<p class="lede">Value iteration needs a perfect model of the world. Real agents don't have one: they just act and see what happens. <strong>Q-learning</strong> learns optimal action values from that raw experience, one transition at a time. Put a neural network in place of its table and you get <strong>DQN</strong>, the system that learned to play Atari games from pixels.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain temporal-difference learning and compute a Q-learning update by hand.</li>
+    <li>Say why Q-learning is <em>off-policy</em> and why it still needs exploration.</li>
+    <li>Name DQN's three key ingredients and explain how Double DQN reduces overestimation.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="rl-2.html">Value functions &amp; the Bellman equation</a> (RL.2): $Q^*(s,a)$, the Bellman optimality equation and value iteration on the gridworld; and <a href="p3-1.html">MLPs</a> (P3.1), because DQN's Q-function is a neural network. ε-greedy exploration comes from <a href="rl-1.html">RL.1</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You estimate a trip home takes 30 minutes. Ten minutes in, traffic is bad and you now expect 25 more. When should you revise your estimate of the whole trip?</p>
+    <ol class="q-src">
+      <li>Only when you arrive and know the true time</li>
+      <li>Never: first estimates are best</li>
+      <li>Right now: 10 + 25 = 35 is already a better guess than 30</li>
+      <li>Only if you take a different route</li>
+    </ol>
+    <div class="q-explain">Updating a guess from a better-informed later guess, without waiting for the final outcome, is <strong>temporal-difference learning</strong>. Sutton used this commute example himself.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">An agent learns from games played by a random, clumsy policy. Can it still learn the values of the <em>best</em> policy?</p>
+    <ol class="q-src">
+      <li>Yes, if its update assumes the best action will be taken next, whatever the clumsy policy actually does</li>
+      <li>No, you can only learn about the policy that generated the data</li>
+      <li>Only if the clumsy policy wins most games</li>
+      <li>Only with a perfect model of the game</li>
+    </ol>
+    <div class="q-explain">That's Q-learning's trick: its target uses $\max_{a'}$, the best next action, so it learns about the optimal policy from anyone's experience. This is called <strong>off-policy</strong> learning.</div>
+  </div>
+</section>
+
+<h2>Learning from experience: temporal differences</h2>
+<p>Value iteration (RL.2) sweeps every state and needs the transition probabilities $P(s' \mid s,a)$. A robot, a game player or a chatbot has neither: it can only <em>try</em> actions and observe one next state and one reward at a time. How do you estimate values from samples?</p>
+<p>The obvious way is <strong>Monte Carlo</strong>: play a whole episode, compute the actual return $G_t$, and nudge $V(s_t)$ toward it. It works, but you must wait until the episode ends, and returns are noisy because they add up many random steps.</p>
+<p>Richard Sutton's <strong>temporal-difference (TD) learning</strong> (1988) updates after <em>every</em> step instead. It replaces the unknown rest of the return with the agent's own current estimate of the next state, a trick called <strong>bootstrapping</strong>:</p>
+$$V(s) \leftarrow V(s) + \alpha\,\big[\,\underbrace{r + \gamma V(s')}_{\text{TD target}} - V(s)\,\big]$$
+<p>$\alpha$ is a small step size (a learning rate). The bracket is the <strong>TD error</strong> $\delta$: how much better or worse things look one step later than you expected. It's the Bellman expectation equation (RL.2) used as an update on a single sample, with no model required. TD-Gammon (RL.1) was trained with exactly this idea, in a version called TD($\lambda$).</p>
+<p>TD targets are biased at first (they lean on estimates that may be wrong), but much less noisy than full returns. That trade-off between <strong>bias and variance</strong> will follow us through the rest of the module.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">$V(s) = 0.5$, the agent gets $r = 1$ and lands in $s'$ with $V(s') = 0$ (terminal). With $\alpha = 0.1$ and $\gamma = 0.9$, what is the new $V(s)$?</p>
+  <ol class="q-src">
+    <li>1.0</li>
+    <li>0.55</li>
+    <li>0.45</li>
+    <li>0.6</li>
+  </ol>
+  <div class="q-explain">TD target $= 1 + 0.9 \times 0 = 1$; TD error $= 1 - 0.5 = 0.5$; new value $= 0.5 + 0.1 \times 0.5 = 0.55$. A small step toward the target, not a jump.</div>
+</div></div>
+
+<h2>Q-learning</h2>
+<p>Learning $V$ isn't enough to act without a model: to pick the best action from $V$ you'd need to know where each action leads. So Chris Watkins, in his 1989 PhD thesis <em>Learning from Delayed Rewards</em>, applied the TD idea to <strong>action values</strong> and the Bellman <em>optimality</em> equation:</p>
+$$Q(s,a) \leftarrow Q(s,a) + \alpha\,\Big[\, r + \gamma \max_{a'} Q(s', a') - Q(s,a) \,\Big]$$
+<ul>
+  <li>$(s, a, r, s')$: one observed transition: state, action taken, reward, next state.</li>
+  <li>$r + \gamma \max_{a'} Q(s',a')$: the <strong>TD target</strong>, reward plus the discounted value of the <em>best</em> action at $s'$ (0 if $s'$ is terminal).</li>
+  <li>The bracket is the TD error $\delta$, and $\alpha$ sets how far to move toward the target.</li>
+</ul>
+<p>Watkins and Dayan proved in 1992 that tabular Q-learning converges to $Q^*$, provided every state-action pair keeps being tried and the step sizes shrink appropriately. Then the greedy policy $\arg\max_a Q(s,a)$ is optimal.</p>
+
+<figure class="anim wide" data-anim="rl-3-q-update"></figure>
+
+<p><strong>Off-policy.</strong> The agent <em>behaves</em> $\varepsilon$-greedily (it must explore, or it never discovers better actions), but its target uses $\max_{a'}$, the greedy choice, regardless of what it does next. So it learns the values of the optimal policy while following a different, exploratory one. Its on-policy cousin <strong>SARSA</strong> (Rummery &amp; Niranjan, 1994) instead uses the action actually taken next, $Q(s',a_{t+1})$, and so learns the value of the exploring policy itself.</p>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>Same cell and action as the animation, a few episodes later: now $Q(s,\uparrow) = 0.6$ and the best estimate at $s'$ is $\max_{a'} Q(s',a') = 0.9$. Reward $r = 0$, $\gamma = 0.9$, $\alpha = 0.5$.</p>
+  <ol class="steps">
+    <li>TD target $r + \gamma \max_{a'} Q(s',a')$: <span class="blank" data-answer="0.81" data-tol="0.002" data-hint="0 + 0.9 × 0.9."></span></li>
+    <li>TD error $\delta$: <span class="blank" data-answer="0.21" data-tol="0.002" data-hint="Target minus the current 0.6."></span></li>
+    <li>New $Q(s,\uparrow)$: <span class="blank" data-answer="0.705" data-tol="0.002" data-hint="0.6 + 0.5 × 0.21."></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">It keeps climbing toward $0.9$, the true $Q^*(s,\uparrow)$: once $s'$ is worth 1.0, the target becomes $0.9 \times 1.0$.</p>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">What makes Q-learning <em>off-policy</em>?</p>
+  <ol class="q-src">
+    <li>It never explores</li>
+    <li>It needs a model of the environment</li>
+    <li>It updates only at the end of each episode</li>
+    <li>Its target uses $\max_{a'} Q(s',a')$, the greedy action, not the action the behaviour policy actually takes next</li>
+  </ol>
+  <div class="q-explain">The data comes from an exploring policy, but the target always assumes the best next action. That's what lets it learn $Q^*$ from exploratory (or even someone else's) experience.</div>
+</div></div>
+
+<h2>Watch Q-learning learn the gridworld</h2>
+<p>Here is the whole algorithm running on our gridworld, starting from a table of zeros. Each cell shows its best Q-value and the greedy arrow. Run one episode at a time first: the early ones are long random walks, and value only appears near the goal. Then run 50.</p>
+
+<div class="playground" id="qlearn-playground">
+  <h3>Playground: tabular Q-learning</h3>
+  <p class="math-note" style="margin:0">$\alpha = 0.5$, $\gamma = 0.9$. The dot and grey line show the latest episode. Try $\varepsilon = 0$ from a fresh start, then a large $\varepsilon$.</p>
+  <div class="pg-stage" style="margin-top:10px"></div>
+  <div class="pg-controls">
+    <label><span>Exploration ε = <output>0.20</output></span>
+      <input type="range" min="0" max="1" step="0.05" value="0.2">
+    </label>
+    <div class="pg-buttons">
+      <button type="button" class="btn" data-act="one">1 episode</button>
+      <button type="button" class="btn btn-primary" data-act="many">50 episodes</button>
+      <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<p>A few things to notice. Value spreads <strong>backwards</strong> from the goal, one cell per visit, just as it did in value iteration, but only along paths the agent actually walked. The learned values head toward the same $V^*$ numbers (1.00, 0.90, 0.81 …). And cells the agent rarely visits keep poor estimates and wrong arrows for a long time: exploration decides what gets learned.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>You're learning the way to the ice-cream shop in a new town. At every corner you keep a little note: "turning left here gets me ice cream <em>this</em> fast".</p>
+    <p>You don't wait until you're home to fix your notes. As soon as you turn a corner and see the next street, you think: "oh, the next corner's note says it's close from there", and you <strong>update this corner's note right away</strong> to match.</p>
+    <p>Sometimes you try a street you've never walked, just in case it's a shortcut. Over many trips, every corner's note ends up right, and you just follow the best note.</p>
+    <p class="math-note">Where it breaks: real Q-learning nudges each note only part of the way ($\alpha$), and in a random world the same corner can lead to different streets, so the notes average over many trips.</p>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">In the playground, with $\varepsilon = 0$ and all Q-values starting at 0, why can learning stall?</p>
+  <ol class="q-src">
+    <li>The discount factor is too high</li>
+    <li>The learning rate $\alpha$ is zero</li>
+    <li>Once some actions look best, a purely greedy agent never tries the others, so their estimates (and maybe better routes) are never corrected</li>
+    <li>Q-learning only works with a neural network</li>
+  </ol>
+  <div class="q-explain">It's the bandit problem from RL.1 again, in every cell. Convergence to $Q^*$ requires every state-action pair to keep being tried.</div>
+</div></div>
+
+<h2>DQN: from tables to pixels</h2>
+<p>A table needs one entry per state. An Atari screen is 210×160 pixels in colour, so the number of possible states is astronomical. The fix is <strong>function approximation</strong>: a neural network $Q_\theta(s,a)$ that takes the state as input and generalizes to states it has never seen. Training it is regression: make $Q_\theta(s,a)$ match the TD target, by gradient descent on the squared TD error.</p>
+<p>People had tried this for decades, and it was notoriously unstable: combining function approximation, bootstrapping and off-policy learning (Sutton and Barto call it the "deadly triad") can make the estimates diverge. In 2013 Volodymyr Mnih and colleagues at DeepMind made it work on Atari games from raw pixels (<em>Playing Atari with Deep Reinforcement Learning</em>, 7 games), and in 2015 their <strong>Nature</strong> paper reached a level comparable to a professional human games tester across 49 games, using the <em>same</em> network and settings for every game. The input was the last 4 frames, downscaled to 84×84 greyscale; a small convolutional network output one Q-value for each of up to 18 joystick actions.</p>
+
+<figure class="anim wide" data-anim="rl-3-dqn"></figure>
+
+<p>The two stabilizers, in plain words:</p>
+<ul>
+  <li><strong>Experience replay</strong> (Lin, 1992; used in both DQN papers): store transitions in a buffer and train on random minibatches. This breaks the correlation between consecutive frames, makes the data look closer to the i.i.d. samples gradient descent expects (P2.2), and reuses every experience many times.</li>
+  <li><strong>Target network</strong> (added in the 2015 paper): compute targets with a frozen copy $\theta^-$ that is refreshed only every $C$ steps. Otherwise each update moves the very target it's chasing, like a dog chasing its tail.</li>
+</ul>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What is the job of DQN's target network?</p>
+  <ol class="q-src">
+    <li>To keep the TD target fixed for a while, so the online network isn't chasing a target that moves with every update</li>
+    <li>To choose which actions to explore</li>
+    <li>To store past transitions</li>
+    <li>To process the pixels into features</li>
+  </ol>
+  <div class="q-explain">The target $r + \gamma \max_{a'} Q_{\theta^-}(s',a')$ uses frozen weights $\theta^-$, copied from $\theta$ only every $C$ steps. Replay (not the target net) stores transitions.</div>
+</div></div>
+
+<h2>Overestimation and Double DQN</h2>
+<p>There's a subtle bias hiding in $\max_{a'}$. Suppose all three actions in some state are truly worth 0, but your estimates are noisy: $+0.3$, $-0.2$, $-0.1$. The max picks $+0.3$, so the target says the state is worth $0.3$ when it is worth 0. Noise in either direction is equally likely, but the max <em>systematically</em> selects the lucky overestimates. The error then spreads backwards through bootstrapping, and DQN was shown to grossly overestimate values on several Atari games.</p>
+<p><strong>Double Q-learning</strong> (van Hasselt, 2010) separates choosing from scoring. <strong>Double DQN</strong> (van Hasselt, Guez &amp; Silver, 2016) does it with networks DQN already has: the online network picks the best next action, and the target network evaluates it:</p>
+$$y = r + \gamma\, Q_{\theta^-}\Big(s',\ \arg\max_{a'} Q_\theta(s', a')\Big)$$
+<p>If the online net's favourite action was only lucky noise, the target net's independent-ish estimate of it is usually lower, so the lucky bias mostly cancels. It's a one-line change that improved scores across Atari. Many more fixes followed (prioritized replay, duelling networks, distributional values…), and <strong>Rainbow</strong> (Hessel et al., 2018) combined six of them.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> modern LLM post-training mostly uses <strong>policy-gradient</strong> methods (RL.4, RL.5), not Q-learning. With a vocabulary of 100k+ tokens and a pretrained model that already writes well, it's more natural to adjust the policy directly than to learn a Q-value for every token in every context. But the ideas here are everywhere: PPO's critic in <a href="m3-3.html">RLHF</a> is trained with TD-style targets, the bias-variance trade-off between bootstrapped and full returns shapes how advantages are computed (RL.5), and the warning about maximizing over noisy estimates is exactly the reward-hacking story of <a href="m3-2.html">reward models</a>: push hard on an imperfect scorer and you find its lucky overestimates.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why does $\max_{a'} Q(s',a')$ over noisy estimates tend to <em>over</em>estimate?</p>
+  <ol class="q-src">
+    <li>Because rewards are usually positive</li>
+    <li>Because the max preferentially picks whichever estimates happen to be too high</li>
+    <li>Because $\gamma &lt; 1$</li>
+    <li>It doesn't: positive and negative errors cancel exactly</li>
+  </ol>
+  <div class="q-explain">Errors average out for a single estimate, but not after a max: $\mathbb{E}[\max_a \hat Q(a)] \ge \max_a \mathbb{E}[\hat Q(a)]$. Double DQN decouples selection from evaluation to cut this bias.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain the Q-learning update in words, and say why DQN needed experience replay and a target network to make it work with a neural network.</p>
+  <div class="model-answer"><strong>Model answer:</strong> After each transition, Q-learning moves $Q(s,a)$ a step $\alpha$ toward the TD target $r + \gamma \max_{a'} Q(s',a')$, the reward plus the best estimated value of the next state. With a neural network, consecutive samples are highly correlated and the target shifts with every weight update, which makes training unstable; replay trains on random past transitions, and a frozen target network holds the target still between periodic copies.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">$Q(s,a) = 1.0$, $r = 0.5$, $\max_{a'} Q(s',a') = 2.0$, $\gamma = 0.9$, $\alpha = 0.1$. What is the updated $Q(s,a)$?</p>
+    <ol class="q-src">
+      <li>2.3</li>
+      <li>1.23</li>
+      <li>1.13</li>
+      <li>1.05</li>
+    </ol>
+    <div class="q-explain">Target $= 0.5 + 0.9 \times 2.0 = 2.3$; TD error $= 2.3 - 1.0 = 1.3$; new $Q = 1.0 + 0.1 \times 1.3 = 1.13$.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Connect to RL.2: Q-learning's update is a sample-based version of which equation?</p>
+    <ol class="q-src">
+      <li>The Bellman optimality equation for $Q^*$</li>
+      <li>The Bellman expectation equation for $V^\pi$</li>
+      <li>The discounted return with $\gamma = 1$</li>
+      <li>The policy gradient</li>
+    </ol>
+    <div class="q-explain">$Q^*(s,a) = \mathbb{E}[r + \gamma \max_{a'} Q^*(s',a')]$. Q-learning replaces the expectation with one sampled transition and takes a small step toward it. (TD(0) on $V$ is the sampled <em>expectation</em> equation.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Connect to P3.1: what does DQN's network output for one input state?</p>
+    <ol class="q-src">
+      <li>A single number: the state's value</li>
+      <li>The next frame of the game</li>
+      <li>A probability for each action, summing to 1</li>
+      <li>One Q-value per action, so the greedy action is an argmax over one forward pass</li>
+    </ol>
+    <div class="q-explain">The final layer has one output unit per action (up to 18 on Atari). They are value estimates, not probabilities, so there's no softmax.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In Double DQN, which network picks the next action and which scores it?</p>
+    <ol class="q-src">
+      <li>The target net picks; the online net scores</li>
+      <li>The online net picks ($\arg\max$); the target net scores it</li>
+      <li>Both are averaged</li>
+      <li>A third network is trained just to pick actions</li>
+    </ol>
+    <div class="q-explain">$y = r + \gamma\,Q_{\theta^-}(s', \arg\max_{a'} Q_\theta(s',a'))$. Decoupling selection from evaluation removes most of the max's upward bias.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>TD learning</strong> updates estimates from the next step's estimate (bootstrapping): no model, no waiting for the episode to end.</li>
+    <li><strong>Q-learning</strong>: $Q(s,a) \leftarrow Q(s,a) + \alpha[r + \gamma \max_{a'} Q(s',a') - Q(s,a)]$. Off-policy: it learns $Q^*$ while exploring $\varepsilon$-greedily.</li>
+    <li><strong>DQN</strong> = Q-learning with a neural network, plus <strong>experience replay</strong> and a <strong>target network</strong> for stability.</li>
+    <li>The max over noisy estimates <strong>overestimates</strong>; <strong>Double DQN</strong> lets the online net pick and the target net score.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Build the gridworld in NumPy, solve it with value iteration, then train tabular Q-learning with ε-greedy exploration and check that its greedy policy matches the optimal one. About 20 minutes; no installs.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="rl-3-q-learning.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"rl-3-a","front":"What is temporal-difference (TD) learning?","back":"Updating a value estimate toward a target built from the next reward plus the current estimate of the next state: $V(s) \\leftarrow V(s) + \\alpha[r + \\gamma V(s') - V(s)]$. It bootstraps instead of waiting for the full return (Sutton, 1988)."},
+  {"id":"rl-3-b","front":"Write the Q-learning update and name its parts.","back":"$Q(s,a) \\leftarrow Q(s,a) + \\alpha[r + \\gamma \\max_{a'} Q(s',a') - Q(s,a)]$. TD target = reward + discounted best next value; bracket = TD error $\\delta$; $\\alpha$ = step size (Watkins, 1989)."},
+  {"id":"rl-3-c","front":"Why is Q-learning off-policy, and how does SARSA differ?","back":"Its target uses $\\max_{a'}$ (the greedy action) regardless of the action actually taken next, so it learns $Q^*$ while exploring. SARSA uses the next action actually taken, so it learns the value of the exploring policy."},
+  {"id":"rl-3-d","front":"What are DQN's two stabilizing tricks?","back":"Experience replay: train on random minibatches of stored transitions (breaks correlation, reuses data). Target network: compute targets with a frozen copy $\\theta^-$, refreshed every $C$ steps (Mnih et al., 2015)."},
+  {"id":"rl-3-e","front":"Why does Q-learning overestimate, and what does Double DQN change?","back":"The max over noisy estimates picks lucky overestimates. Double DQN: the online net selects $\\arg\\max_{a'} Q_\\theta(s',a')$ and the target net evaluates it (van Hasselt et al., 2016)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/rl-gridworld.js"></script>
+<script src="../assets/js/anims/rl-3-q-update.js"></script>
+<script src="../assets/js/anims/rl-3-dqn.js"></script>
+<script src="../assets/js/anims/rl-3-qlearn-playground.js"></script>
+</body>
+</html>

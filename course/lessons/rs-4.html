@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="rs-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Process vs outcome rewards &amp; verifiers · LLMs, Animated</title>
+<meta name="description" content="Outcome reward models grade the final answer; process reward models grade every step. How each is trained (PRM800K, Math-Shepherd), how verifiers drive reranking and search, generative verifiers, and why reward hacking pushed RL toward rule-based rewards.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Process vs outcome rewards &amp; verifiers</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Reasoning &amp; test-time compute</span></div>
+<p class="lede">Every method in this module needs a judge: best-of-N needs a scorer, search needs to rate partial solutions, RL needs a reward. You can grade only the <strong>final answer</strong>, or grade <strong>every step</strong>. Each choice has a price, and any learned judge can be fooled by a model that is optimized against it.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Contrast <strong>outcome reward models</strong> (ORMs) and <strong>process reward models</strong> (PRMs): what they score, how they're trained, what labels cost.</li>
+    <li>Build process labels automatically with rollouts (Math-Shepherd) and combine step scores with min or product.</li>
+    <li>Explain how verifiers drive reranking and search, why optimizing against a learned verifier invites <strong>reward hacking</strong>, and why RL moved to rule-based rewards.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="rs-3.html">Training reasoning models</a> (RL with verifiable rewards). Helpful but optional: <a href="m3-2.html">Reward models</a> for Bradley–Terry training and reward overoptimization.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A solution reaches the right final answer, but one of its middle steps is wrong (two mistakes happened to cancel). A grader that sees only the final answer gives it…</p>
+    <ol class="q-src">
+      <li>A low score, because of the mistakes</li>
+      <li>Full marks: the final answer is right</li>
+      <li>Half marks</li>
+      <li>No score; it refuses to grade</li>
+    </ol>
+    <div class="q-explain">An outcome grader can't see the steps. That's cheap, but it rewards lucky reasoning, which is exactly what process supervision tries to fix.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">You rerank samples with a learned verifier and raise the number of samples from 4 to 1,000. What risk grows?</p>
+    <ol class="q-src">
+      <li>The verifier gets tired and scores everything 0.5</li>
+      <li>None: more samples can only help</li>
+      <li>The answers get shorter</li>
+      <li>You become more likely to pick a wrong answer that happens to fool the verifier</li>
+    </ol>
+    <div class="q-explain">The more candidates you search through, the more likely one of them hits a blind spot of the verifier, and the top score goes to it. You'll plot this in the playground.</div>
+  </div>
+</section>
+
+<h2>Grading the answer, or grading the work</h2>
+<p>When Cobbe et al. (2021) released the GSM8K maths benchmark, they also trained a <strong>verifier</strong>: a model that reads a question and a full candidate solution and predicts whether the final answer is correct. Sample 100 solutions, keep the one the verifier likes best. Its training labels were cheap: sample solutions, check each final answer against the key. That is an <strong>outcome reward model</strong> (ORM):</p>
+$$\text{ORM}(q, s) \approx P(\text{final answer of } s \text{ is correct} \mid q, s)$$
+<p>Here $q$ is the question and $s$ the whole solution. The problem: a solution can reach the right answer with wrong reasoning, and an ORM trained on final answers learns to like those too.</p>
+<p>A <strong>process reward model</strong> (PRM) instead scores every step. For a solution with steps $s_1, \dots, s_T$ it outputs $p_t \approx P(\text{step } t \text{ is correct} \mid q, s_1, \dots, s_t)$, and a single score for the solution comes from combining the steps, usually with the weakest link or the product:</p>
+$$\text{score}_{\min}(q, s) = \min_{t}\, p_t \qquad \text{score}_{\prod}(q, s) = \prod_{t=1}^{T} p_t$$
+<p>The product reads as "the chance that every step is correct", if the step judgements were independent; the minimum just asks "how bad is the worst step?".</p>
+<p><strong>Uesato et al. (2022)</strong> compared the two kinds of supervision on GSM8K. Outcome-based supervision reached similar <em>final-answer</em> error rates with far fewer labels. But among solutions with the right final answer, many still contained reasoning errors, and getting those down needed process-based feedback (or a reward model trained to imitate it): their best setup lowered that reasoning-error rate from the previous best of 14.0% to 3.4%.</p>
+
+<figure class="anim wide" data-anim="rs-4-prm"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-rs-4.webp" alt="Two teachers grading homework drawn as a staircase of boxes: one looks only at the top box, the other checks every step and spots one wobbly step." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Two teachers grade the same homework, drawn as a <strong>staircase of boxes</strong>: each box is one step of working, and the answer sits on the top box.</p>
+      <p>The first teacher looks <strong>only at the top box</strong>. Right answer? Gold star. Quick, but she can't tell a careful climber from a lucky one.</p>
+      <p>The second teacher <strong>checks every step</strong> and spots the <strong>wobbly one</strong> in the middle. Now she knows the answer was luck, and she can tell the student exactly which step to fix.</p>
+      <p class="math-note">Where it breaks: a real process reward model is itself a model making guesses, not a teacher who knows the maths. It can miss wobbly steps or flag good ones, and a student who studies its habits can learn to fool it.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A PRM gives a 3-step solution step scores 0.9, 0.2 and 0.95. What is its min-aggregated score, and what does it say?</p>
+  <ol class="q-src">
+    <li>0.2: the solution is only as trustworthy as its weakest step</li>
+    <li>0.95: the last step decides</li>
+    <li>0.68: the average of the steps</li>
+    <li>1: the final answer was right</li>
+  </ol>
+  <div class="q-explain">Min aggregation takes the weakest link. A PRM can flag a bad middle step even when the final answer happens to be right.</div>
+</div></div>
+
+<h2>Where process labels come from</h2>
+<p><strong>From people: PRM800K.</strong> Lightman et al. (2023, "Let's Verify Step by Step", OpenAI) had human labellers mark each step of model-written solutions to MATH problems as positive, negative or neutral, about 800,000 step labels in all. To spend labels where they matter, they mostly showed labellers <em>convincing wrong</em> solutions (an active-learning trick). In their setup, the process-supervised reward model clearly beat an outcome-supervised one at picking the right solution from many samples; reranking the best of 1,860 samples, it solved 78.2% of a representative subset of MATH test problems. The catch is cost: expert step-by-step labels are slow and expensive to collect for every new domain.</p>
+<p><strong>From rollouts: Math-Shepherd.</strong> Wang et al. (2023; ACL 2024) labelled steps automatically. To judge step $t$ of a solution, let a model <em>finish</em> the solution from that step $K$ times, and check each completion's final answer:</p>
+<ul>
+  <li><strong>Soft label:</strong> the fraction of the $K$ completions that reach the correct answer, an estimate of "how promising is this partial solution?".</li>
+  <li><strong>Hard label:</strong> 1 if <em>any</em> completion reaches the correct answer, else 0.</li>
+</ul>
+<p>A PRM trained on these labels needs no human annotation, just a lot of generation. They used it both to rerank samples and as the reward for step-by-step RL.</p>
+<p>Rollout labels are noisy in a specific way: they measure whether <em>this completer</em> can rescue the solution, not whether the step is logically correct. A wrong step can still be followed by a right answer, and a correct step can lead nowhere for a weak completer. Later analyses (for example Zhang et al., 2025, from the Qwen team) found that PRMs trained on such labels were worse at pinpointing the first wrong step than ones trained on human or LLM-judged labels, a skill that benchmarks such as ProcessBench (Zheng et al., 2024) now test directly.</p>
+
+<h3>Worked example: rollout labels</h3>
+<p>A solution has 4 steps. From the end of each step, a model writes $K = 8$ completions.</p>
+<ol class="steps">
+  <li><strong>After step 1:</strong> 7 of 8 reach the correct answer. Soft label $7/8 = 0.875$, hard label 1.</li>
+  <li><strong>After step 2:</strong> 6 of 8. Soft label $0.75$, hard label 1.</li>
+  <li><strong>After step 3:</strong> 0 of 8. Soft label $0$, hard label 0. Something went wrong <em>in step 3</em>: that's the first step whose label collapses.</li>
+  <li><strong>After step 4:</strong> also 0 of 8, as expected once the solution is off track.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A PRM scores two 4-step solutions. A: $[0.95, 0.90, 0.30, 0.92]$. B: $[0.80, 0.75, 0.85, 0.70]$.</p>
+  <ol class="steps">
+    <li>A's min score: <span class="blank" data-answer="0.30" data-tol="0.001" data-hint="The smallest of A's four step scores."></span></li>
+    <li>A's product score: <span class="blank" data-answer="0.236" data-tol="0.002" data-hint="0.95 × 0.90 × 0.30 × 0.92"></span></li>
+    <li>B's min score: <span class="blank" data-answer="0.70" data-tol="0.001" data-hint="The smallest of B's four step scores."></span></li>
+    <li>B's product score: <span class="blank" data-answer="0.357" data-tol="0.002" data-hint="0.80 × 0.75 × 0.85 × 0.70"></span></li>
+  </ol>
+  <p class="math-note">Both rules prefer B, even though A has three excellent steps: one bad step sinks a solution. The product also shrinks with length, so it slightly favours shorter solutions; the min doesn't.</p>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">In Math-Shepherd-style labelling, 3 of 8 completions started after step 2 reach the correct answer. What is step 2's soft label, and what does it really measure?</p>
+  <ol class="q-src">
+    <li>1, because some completion succeeded; it proves step 2 is correct</li>
+    <li>0.5; it measures how long step 2 is</li>
+    <li>0.375; it measures how often this completer can still reach the right answer from there, not strict logical correctness</li>
+    <li>0; one failed completion makes the step wrong</li>
+  </ol>
+  <div class="q-explain">$3/8 = 0.375$ (the hard label would be 1). It is an estimate of the partial solution's promise under one particular completer, which is useful but noisy as a correctness label.</div>
+</div></div>
+
+<h2>Using verifiers: reranking, search and generative judges</h2>
+<p>A verifier, outcome or process, plugs into the test-time methods of RS.2:</p>
+<ul>
+  <li><strong>Reranking (best-of-N):</strong> score $N$ finished solutions, return the top one.</li>
+  <li><strong>Weighted voting:</strong> add up the verifier scores of all samples that give the same final answer, and return the answer with the highest total. This combines self-consistency's "many paths agree" with the verifier's judgement.</li>
+  <li><strong>Step-level search:</strong> only a PRM can score partial solutions, so it can steer a beam search or tree search, keeping the best few partial solutions after each step. Snell et al. (2024) found this especially useful on harder questions at modest budgets.</li>
+</ul>
+<p><strong>Generative verifiers.</strong> Instead of bolting a scoring head onto a model, ask the model itself. Zhang et al. (2024, "Generative Verifiers") fine-tune an LLM to answer "Is the answer correct? Yes or No", and use the probability of "Yes" as the score. A chain-of-thought version first <em>writes</em> a verification ("step 2: 3 × 7 is 21, not 24…") before its verdict, and averaging several sampled verifications spends test-time compute on judging, not just on generating. In their experiments these beat classifier-style verifiers at best-of-N. LLM-as-a-judge (<a href="m4-4.html">M4.4</a>) is the untrained cousin of the same idea.</p>
+<p>Every learned verifier has blind spots. The playground models one: a small share $q$ of samples are wrong answers that the verifier scores <em>above</em> every correct one.</p>
+
+<div class="playground" id="bon-playground">
+  <h3>Playground: best&#8209;of&#8209;N with a fooled verifier</h3>
+  <p class="math-note" style="margin:0">Each sample is right with probability $p$; with probability $q$ it is a wrong answer that fools the verifier. Best-of-N is right only if no fooler was sampled and at least one right answer was: $(1-q)^N - (1-p-q)^N$. Set $q = 0$ for a perfect verifier.</p>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr">
+    <label><span>sample accuracy p = <output data-op>0.30</output></span><input data-p type="range" min="0.05" max="0.9" step="0.01" value="0.3"></label>
+    <label><span>fooling rate q = <output data-oq>0.020</output></span><input data-q type="range" min="0" max="0.1" step="0.005" value="0.02"></label>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<p>With $p = 0.3$ and $q = 0.02$, accuracy climbs from $0.30$ at $N = 1$ to about $0.81$ at $N = 8$, then <em>falls</em>: $0.52$ at $N = 32$ and under $0.01$ at $N = 256$. A perfect verifier would keep climbing to 1. This is Goodhart's law at test time, and RL pushes far harder than any best-of-N.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In the playground with $q &gt; 0$, why does best-of-N accuracy eventually fall as $N$ grows?</p>
+  <ol class="q-src">
+    <li>The model gets worse when it samples more</li>
+    <li>With more samples, it becomes almost certain that at least one verifier-fooling answer is among them, and it gets the top score</li>
+    <li>The verifier's scores are averaged over more samples</li>
+    <li>Temperature rises with $N$</li>
+  </ol>
+  <div class="q-explain">The chance of seeing no fooler is $(1-q)^N$, which shrinks toward 0. Searching harder against an imperfect judge finds its mistakes.</div>
+</div></div>
+
+<h2>Reward hacking, and why rule-based rewards won</h2>
+<p>A learned reward is a <strong>proxy</strong>. Optimize hard against it and the policy finds what the proxy over-rates: Gao et al. (2022) showed the proxy score keeps rising while the true quality peaks and falls (<a href="m3-2.html">M3.2</a>). RL is the strongest optimizer of all: millions of samples, each nudging the policy toward whatever the reward model likes. A PRM or ORM that is right 95% of the time still has a 5% that a policy can learn to live in, for example steps that <em>sound</em> careful, or a confident final line.</p>
+<p>The DeepSeek-R1 report (2025) spelled out why its RL used rule-based rewards instead of neural ones. For PRMs specifically, it is hard to define what a "step" is in general reasoning, hard to judge whether an intermediate step is correct (automatic labels were not good enough, human labels don't scale), and a model-based reward invites reward hacking while retraining it adds cost and complexity. They concluded that PRMs remain useful for reranking and guided search, but their benefit in large-scale RL was limited compared to the extra cost.</p>
+<p>So <strong>verifiable rewards</strong> took over RL for reasoning: exact-match answers, unit tests, format checks. They aren't perfect either. Loose checkers get gamed (M3.5), and they only exist for tasks with checkable answers. As of 2026, the frontier is extending verification to fuzzier tasks, with generative verifiers, rubrics and model-based graders, while trying to keep them hard to hack. PRMs live on mostly at test time: reranking, step-level search, and finding where a solution first went wrong.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> if you use a verifier, it is now part of your system's specification. Measure it separately: how often does it accept wrong answers, and on which kinds? Cap the search budget against a learned verifier, or validate the chosen answers on a held-out check; more samples are not free accuracy. When training with RL, prefer rewards that a program can check, make the checker strict, and read samples regularly. If the reward climbs while held-out quality doesn't, assume the policy found a hole before assuming it got smarter.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Which reason did the DeepSeek-R1 authors give for <em>not</em> using a neural process reward model in their large-scale RL?</p>
+  <ol class="q-src">
+    <li>PRMs can only score code, not maths</li>
+    <li>PRMs need a value network the size of the policy</li>
+    <li>PRMs always give every step the same score</li>
+    <li>Steps are hard to define and label, and a model-based reward invites reward hacking plus retraining cost</li>
+  </ol>
+  <div class="q-explain">They still saw value in PRMs for reranking and guided search, but not enough in RL to justify the overhead. Rule-based accuracy and format rewards were simpler and harder to hack.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What can a process reward model do that an outcome reward model can't, and why didn't PRMs become the standard reward for RL on reasoning?</p>
+  <div class="model-answer"><strong>Model answer:</strong> A PRM scores each step, so it can catch a lucky solution whose final answer is right but whose reasoning is wrong, and it can rate partial solutions to guide search. But step labels are expensive (humans) or noisy (rollouts), "steps" are hard to define in general, and any learned reward can be exploited when a policy is optimized hard against it, so large-scale RL for reasoning mostly uses rule-based, verifiable rewards and keeps PRMs for reranking and search.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why are ORM training labels so much cheaper than PRM labels?</p>
+    <ol class="q-src">
+      <li>An ORM only needs each sampled solution's final answer checked against the key; a PRM needs a judgement on every step, from people or from many rollouts</li>
+      <li>ORMs are smaller networks</li>
+      <li>ORMs don't need any labels at all</li>
+      <li>PRMs must be trained with RL</li>
+    </ol>
+    <div class="q-explain">Outcome labels come free wherever there's an answer key. Step labels need experts (PRM800K) or $K$ extra completions per step (Math-Shepherd).</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Lightman et al. (2023) found that, in their setup on MATH…</p>
+    <ol class="q-src">
+      <li>Outcome supervision clearly beat process supervision</li>
+      <li>Both were equal, so step labels are wasted effort</li>
+      <li>A process-supervised reward model picked correct solutions from many samples better than an outcome-supervised one</li>
+      <li>Neither beat majority voting</li>
+    </ol>
+    <div class="q-explain">Process supervision won for reranking in their setup, using about 800,000 human step labels (PRM800K). Results with other models, data and label sources vary.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In M3.2 you saw a proxy reward model's score keep rising while the gold score fell. What is the test-time version of that in this lesson?</p>
+    <ol class="q-src">
+      <li>Majority voting with correlated errors</li>
+      <li>Best-of-N against an imperfect verifier: as $N$ grows, the chosen answer's verifier score rises while its real accuracy can peak and fall</li>
+      <li>Thinking budgets that are too short</li>
+      <li>Rollout labels with $K = 8$</li>
+    </ol>
+    <div class="q-explain">Both are Goodhart's law: optimize harder against a proxy and you increasingly select for its errors. The playground's curve is the best-of-N version of Gao et al.'s overoptimization curve.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What makes a verifier "generative" in the sense of Zhang et al. (2024)?</p>
+    <ol class="q-src">
+      <li>It generates new training problems</li>
+      <li>It is a diffusion model</li>
+      <li>It writes the solution instead of the policy</li>
+      <li>It is an LLM trained to answer "is this correct?" as next-token prediction (using P(Yes) as the score), optionally writing a verification chain of thought first</li>
+    </ol>
+    <div class="q-explain">Generative verifiers reuse the LLM's own text interface, so they can reason before judging and can sample several verifications and average them.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>ORM</strong>: scores the whole solution by its final answer; cheap labels, but it rewards lucky reasoning. <strong>PRM</strong>: scores each step; combine with $\min$ or $\prod$.</li>
+    <li>Process labels come from people (<strong>PRM800K</strong>, Lightman et al., 2023) or from rollouts (<strong>Math-Shepherd</strong>: share of completions that still reach the answer), which are cheaper but noisier.</li>
+    <li>Verifiers power <strong>reranking</strong>, <strong>weighted voting</strong> and <strong>step-level search</strong>; <strong>generative verifiers</strong> judge in text and can think first.</li>
+    <li>Optimizing against a learned verifier invites <strong>reward hacking</strong>, so large-scale RL for reasoning prefers <strong>rule-based, verifiable rewards</strong>.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"rs-4-a","front":"ORM vs PRM: what does each score?","back":"Outcome reward model: the whole solution, as the probability its final answer is correct. Process reward model: each step, as the probability that step is correct; aggregate with min or product."},
+  {"id":"rs-4-b","front":"PRM step scores $[0.95, 0.90, 0.30, 0.92]$: min and product?","back":"Min 0.30; product ≈ 0.236. One bad step sinks the solution."},
+  {"id":"rs-4-c","front":"What is PRM800K, and what did Lightman et al. (2023) find?","back":"About 800,000 human step-level labels on model-written MATH solutions. In their setup, process supervision beat outcome supervision at picking correct solutions from many samples."},
+  {"id":"rs-4-d","front":"How does Math-Shepherd label a step automatically?","back":"Complete the solution $K$ times from that step and check final answers. Soft label = fraction correct; hard label = 1 if any is correct. Cheap but noisy: it depends on the completer."},
+  {"id":"rs-4-e","front":"Why does best-of-N against an imperfect verifier eventually get worse with more samples?","back":"With more samples, a verifier-fooling wrong answer is ever more likely to be among them and take the top score. With fooling rate $q$: accuracy $= (1-q)^N - (1-p-q)^N$."},
+  {"id":"rs-4-f","front":"Why did RL for reasoning move to rule-based rewards?","back":"Learned ORMs/PRMs get reward-hacked under heavy optimization and cost effort to label and retrain; steps are hard to define. Exact-match answers and unit tests are cheap and hard to fool (though strict checkers are still needed)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/rs-4-prm.js"></script>
+<script src="../assets/js/anims/rs-4-bon-playground.js"></script>
+</body>
+</html>

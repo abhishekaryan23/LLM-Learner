@@ -41,13 +41,13 @@ LC.course = {
       { id: "m0-2", title: "The learning loop", mins: 6, pre: [], ready: true },
       { id: "m0-3", title: "Your review routine", mins: 5, pre: [], ready: true }
     ]},
-    h1: { code: "H1", title: "The story of AI", tags: ["history of ai", "perceptron", "alexnet", "imagenet", "word2vec", "transformer"], lessons: [
-      { id: "h1-1", title: "From perceptrons to backprop (1943–1986)", mins: 8, pre: [] },
-      { id: "h1-2", title: "The deep-learning breakthrough (2006–2014)", mins: 8, pre: ["h1-1"] },
-      { id: "h1-3", title: "Attention and the Transformer (2014–2017)", mins: 8, pre: ["h1-2"] },
-      { id: "h1-4", title: "The scaling era (2018–2022)", mins: 8, pre: ["h1-3"] },
-      { id: "h1-5", title: "Today's landscape (2023–2026)", mins: 10, pre: ["h1-4"] },
-      { id: "h1-6", title: "The AI family tree", mins: 8, pre: ["h1-5"] }
+    h1: { code: "H1", title: "The story of AI", cover: "cover-h1.webp", tags: ["history of ai", "perceptron", "alexnet", "imagenet", "word2vec", "transformer"], lessons: [
+      { id: "h1-1", title: "From perceptrons to backprop (1943–1986)", mins: 8, pre: [], ready: true, colab: "h1-1-perceptron.ipynb" },
+      { id: "h1-2", title: "The deep-learning breakthrough (2006–2014)", mins: 8, pre: ["h1-1"], ready: true },
+      { id: "h1-3", title: "Attention and the Transformer (2014–2017)", mins: 8, pre: ["h1-2"], ready: true },
+      { id: "h1-4", title: "The scaling era (2018–2022)", mins: 8, pre: ["h1-3"], ready: true },
+      { id: "h1-5", title: "Today's landscape (2023–2026)", mins: 10, pre: ["h1-4"], ready: true },
+      { id: "h1-6", title: "The AI family tree", mins: 8, pre: ["h1-5"], ready: true }
     ]},
     p1: { code: "P1", title: "Math you actually need", cover: "cover-p1.webp", tags: [], lessons: [
       { id: "p1-1", title: "Vectors & dot products", mins: 10, pre: [], ready: true, colab: "p1-1-vectors.ipynb" },
@@ -73,18 +73,18 @@ LC.course = {
       { id: "p4-1", title: "Tensors & autograd", mins: 12, pre: ["p1-2", "p2-3"], ready: true, colab: "p4-1-tensors-autograd.ipynb" },
       { id: "p4-2", title: "A training loop", mins: 12, pre: ["p4-1", "p2-2"], ready: true, colab: "p4-2-training-loop.ipynb" }
     ]},
-    p5: { code: "P5", title: "Math for generative models", tags: [], lessons: [
-      { id: "p5-1", title: "Gaussians & noise", mins: 8, pre: ["p1-5"] },
-      { id: "p5-2", title: "Bayes' rule & latent variables", mins: 10, pre: ["p1-5"] },
-      { id: "p5-3", title: "Markov chains & sampling", mins: 8, pre: ["p1-5"] },
-      { id: "p5-4", title: "Convolution", mins: 8, pre: ["p1-2"] },
-      { id: "p5-5", title: "Frequencies & spectrograms", mins: 10, pre: ["p5-4"] }
+    p5: { code: "P5", title: "Math for generative models", cover: "cover-p5.webp", tags: [], lessons: [
+      { id: "p5-1", title: "Gaussians & noise", mins: 8, pre: ["p1-5"], ready: true, colab: "p5-1-gaussians-noise.ipynb" },
+      { id: "p5-2", title: "Bayes' rule & latent variables", mins: 10, pre: ["p1-5"], ready: true },
+      { id: "p5-3", title: "Markov chains & sampling", mins: 8, pre: ["p1-5"], ready: true },
+      { id: "p5-4", title: "Convolution", mins: 8, pre: ["p1-2"], ready: true, colab: "p5-4-convolution.ipynb" },
+      { id: "p5-5", title: "Frequencies & spectrograms", mins: 10, pre: ["p5-4"], ready: true }
     ]},
-    p6: { code: "P6", title: "Classic deep-learning architectures", tags: ["convolutional", "resnet", "lstm", "recurrent", "autoencoder"], lessons: [
-      { id: "p6-1", title: "CNNs: filters, pooling & receptive fields", mins: 10, pre: ["p3-1", "p5-4"] },
-      { id: "p6-2", title: "ResNets & normalization", mins: 8, pre: ["p6-1"] },
-      { id: "p6-3", title: "RNNs & LSTMs (and why Transformers won)", mins: 10, pre: ["p3-1"] },
-      { id: "p6-4", title: "Autoencoders & representation learning", mins: 8, pre: ["p3-1"] }
+    p6: { code: "P6", title: "Classic deep-learning architectures", cover: "cover-p6.webp", tags: ["convolutional", "resnet", "lstm", "recurrent", "autoencoder"], lessons: [
+      { id: "p6-1", title: "CNNs: filters, pooling & receptive fields", mins: 10, pre: ["p3-1", "p5-4"], ready: true, colab: "p6-1-cnn.ipynb" },
+      { id: "p6-2", title: "ResNets & normalization", mins: 8, pre: ["p6-1"], ready: true },
+      { id: "p6-3", title: "RNNs & LSTMs (and why Transformers won)", mins: 10, pre: ["p3-1"], ready: true, colab: "p6-3-rnn.ipynb" },
+      { id: "p6-4", title: "Autoencoders & representation learning", mins: 8, pre: ["p3-1"], ready: true }
     ]},
     m1: { code: "M1", title: "Transformers", cover: "cover-m1.webp", tags: ["attention", "transformer", "positional encoding", "rope", "kv cache", "sampling"], lessons: [
       { id: "m1-1", title: "Attention", mins: 15, pre: ["p1-1", "p3-2", "p3-4"], ready: true, colab: "m1-1-attention.ipynb" },
@@ -127,7 +127,7 @@ LC.course = {
       { id: "m5-5", title: "Speculative decoding", mins: 10, pre: ["m1-5"], ready: true, colab: "m5-5-speculative-decoding.ipynb" },
       { id: "m5-6", title: "Batching & serving metrics", mins: 10, pre: ["m1-5"], ready: true }
     ]},
-    ar: { code: "AR", title: "Beyond the dense transformer", tags: ["mixture of experts", "moe", "state space model", "mamba", "linear attention", "long context", "hybrid architecture"], lessons: [
+    ar: { code: "AR", title: "Beyond the dense transformer", cover: "cover-ar.webp", tags: ["mixture of experts", "moe", "state space model", "mamba", "linear attention", "long context", "hybrid architecture"], lessons: [
       { id: "ar-1", title: "MoE deep dive: routing & expert design", mins: 12, pre: ["m5-3"] },
       { id: "ar-2", title: "Training & serving MoE at scale", mins: 10, pre: ["ar-1", "m2-5"] },
       { id: "ar-3", title: "State-space models & Mamba", mins: 12, pre: ["p6-3", "m1-4"] },
@@ -137,56 +137,56 @@ LC.course = {
     cap: { code: "★", title: "Capstone: build an LLM pipeline", cover: "cover-cap.webp", tags: [], lessons: [
       { id: "cap-1", title: "Fine-tune → evaluate → optimize", mins: 30, pre: ["m3-7", "m4-6", "m5-1"], ready: true, colab: "cap-1-capstone-starter.ipynb" }
     ]},
-    v1: { code: "V1", title: "Vision", tags: ["vision transformer", "vit", "clip", "contrastive", "self-supervised", "segmentation", "image recognition"], lessons: [
-      { id: "v1-1", title: "Vision Transformers: images as patches", mins: 10, pre: ["m1-4", "p6-1"] },
-      { id: "v1-2", title: "Contrastive learning & CLIP", mins: 10, pre: ["v1-1", "p3-4"] },
-      { id: "v1-3", title: "Self-supervised vision (MAE, DINO)", mins: 10, pre: ["v1-1"] },
-      { id: "v1-4", title: "Detection & segmentation (SAM)", mins: 8, pre: ["v1-3"] }
+    v1: { code: "V1", title: "Vision", cover: "cover-v1.webp", tags: ["vision transformer", "vit", "clip", "contrastive", "self-supervised", "segmentation", "image recognition"], lessons: [
+      { id: "v1-1", title: "Vision Transformers: images as patches", mins: 10, pre: ["m1-4", "p6-1"], ready: true, colab: "v1-1-vit-patches.ipynb" },
+      { id: "v1-2", title: "Contrastive learning & CLIP", mins: 10, pre: ["v1-1", "p3-4"], ready: true, colab: "v1-2-clip-loss.ipynb" },
+      { id: "v1-3", title: "Self-supervised vision (MAE, DINO)", mins: 10, pre: ["v1-1"], ready: true },
+      { id: "v1-4", title: "Detection & segmentation (SAM)", mins: 8, pre: ["v1-3"], ready: true }
     ]},
-    g1: { code: "G1", title: "Image generation", tags: ["diffusion", "image generation", "text-to-image", "gan", "vae", "flow matching", "rectified flow", "guidance"], lessons: [
-      { id: "g1-1", title: "Variational autoencoders", mins: 10, pre: ["p6-4", "p5-2"] },
-      { id: "g1-2", title: "GANs", mins: 10, pre: ["p6-1"] },
-      { id: "g1-3", title: "Diffusion from scratch", mins: 14, pre: ["p5-1", "p5-3", "p6-1"] },
-      { id: "g1-4", title: "Latent diffusion & guidance", mins: 12, pre: ["g1-3", "g1-1", "v1-2"] },
-      { id: "g1-5", title: "Flow matching & rectified flow", mins: 12, pre: ["g1-3"] },
-      { id: "g1-6", title: "Diffusion transformers & autoregressive images", mins: 10, pre: ["g1-4", "v1-1"] },
-      { id: "g1-7", title: "Controlling & editing images", mins: 10, pre: ["g1-4", "m3-7"] }
+    g1: { code: "G1", title: "Image generation", cover: "cover-g1.webp", tags: ["diffusion", "image generation", "text-to-image", "gan", "vae", "flow matching", "rectified flow", "guidance"], lessons: [
+      { id: "g1-1", title: "Variational autoencoders", mins: 10, pre: ["p6-4", "p5-2"], ready: true },
+      { id: "g1-2", title: "GANs", mins: 10, pre: ["p6-1"], ready: true },
+      { id: "g1-3", title: "Diffusion from scratch", mins: 14, pre: ["p5-1", "p5-3", "p6-1"], ready: true, colab: "g1-3-diffusion-2d.ipynb" },
+      { id: "g1-4", title: "Latent diffusion & guidance", mins: 12, pre: ["g1-3", "g1-1", "v1-2"], ready: true },
+      { id: "g1-5", title: "Flow matching & rectified flow", mins: 12, pre: ["g1-3"], ready: true, colab: "g1-5-flow-matching.ipynb" },
+      { id: "g1-6", title: "Diffusion transformers & autoregressive images", mins: 10, pre: ["g1-4", "v1-1"], ready: true },
+      { id: "g1-7", title: "Controlling & editing images", mins: 10, pre: ["g1-4", "m3-7"], ready: true }
     ]},
-    a1: { code: "A1", title: "Audio & speech", tags: ["speech", "audio", "text-to-speech", "asr", "speech recognition", "audio codec", "music generation", "voice"], lessons: [
-      { id: "a1-1", title: "Sound as data", mins: 8, pre: ["p5-5"] },
-      { id: "a1-2", title: "Speech recognition: CTC to Whisper", mins: 12, pre: ["a1-1", "m1-4"] },
-      { id: "a1-3", title: "Neural audio codecs & audio tokens", mins: 10, pre: ["a1-1", "p6-4"] },
-      { id: "a1-4", title: "Text-to-speech & voice", mins: 10, pre: ["a1-3", "m1-5"] },
-      { id: "a1-5", title: "Music & sound generation", mins: 10, pre: ["a1-3", "g1-3"] },
-      { id: "a1-6", title: "Real-time speech-to-speech models", mins: 10, pre: ["a1-2", "a1-4"] }
+    a1: { code: "A1", title: "Audio & speech", cover: "cover-a1.webp", tags: ["speech", "audio", "text-to-speech", "asr", "speech recognition", "audio codec", "music generation", "voice"], lessons: [
+      { id: "a1-1", title: "Sound as data", mins: 8, pre: ["p5-5"], ready: true, colab: "a1-1-sound-as-data.ipynb" },
+      { id: "a1-2", title: "Speech recognition: CTC to Whisper", mins: 12, pre: ["a1-1", "m1-4"], ready: true, colab: "a1-2-ctc.ipynb" },
+      { id: "a1-3", title: "Neural audio codecs & audio tokens", mins: 10, pre: ["a1-1", "p6-4"], ready: true },
+      { id: "a1-4", title: "Text-to-speech & voice", mins: 10, pre: ["a1-3", "m1-5"], ready: true },
+      { id: "a1-5", title: "Music & sound generation", mins: 10, pre: ["a1-3", "g1-3"], ready: true },
+      { id: "a1-6", title: "Real-time speech-to-speech models", mins: 10, pre: ["a1-2", "a1-4"], ready: true }
     ]},
-    mm: { code: "MM", title: "Multimodal models", tags: ["multimodal", "vision-language", "vlm", "any-to-any", "document understanding", "gui agent"], lessons: [
-      { id: "mm-1", title: "Connecting vision to LLMs", mins: 12, pre: ["v1-2", "m1-4"] },
-      { id: "mm-2", title: "Native multimodal & any-to-any models", mins: 10, pre: ["mm-1", "a1-3"] },
-      { id: "mm-3", title: "Documents, charts & screens", mins: 10, pre: ["mm-1"] },
-      { id: "mm-4", title: "Multimodal evaluation & hallucination", mins: 10, pre: ["mm-1", "m4-4"] }
+    mm: { code: "MM", title: "Multimodal models", cover: "cover-mm.webp", tags: ["multimodal", "vision-language", "vlm", "any-to-any", "document understanding", "gui agent"], lessons: [
+      { id: "mm-1", title: "Connecting vision to LLMs", mins: 12, pre: ["v1-2", "m1-4"], ready: true, colab: "mm-1-projector.ipynb" },
+      { id: "mm-2", title: "Native multimodal & any-to-any models", mins: 10, pre: ["mm-1", "a1-3"], ready: true },
+      { id: "mm-3", title: "Documents, charts & screens", mins: 10, pre: ["mm-1"], ready: true },
+      { id: "mm-4", title: "Multimodal evaluation & hallucination", mins: 10, pre: ["mm-1", "m4-4"], ready: true }
     ]},
-    vd: { code: "VD", title: "Video", tags: ["video generation", "text-to-video", "world model", "video understanding"], lessons: [
-      { id: "vd-1", title: "Video as space-time patches", mins: 8, pre: ["v1-1"] },
-      { id: "vd-2", title: "Video diffusion transformers", mins: 12, pre: ["vd-1", "g1-6"] },
-      { id: "vd-3", title: "Consistency, length & world models", mins: 10, pre: ["vd-2"] },
-      { id: "vd-4", title: "Video understanding", mins: 8, pre: ["vd-1", "mm-1"] }
+    vd: { code: "VD", title: "Video", cover: "cover-vd.webp", tags: ["video generation", "text-to-video", "world model", "video understanding"], lessons: [
+      { id: "vd-1", title: "Video as space-time patches", mins: 8, pre: ["v1-1"], ready: true, colab: "vd-1-spacetime-patches.ipynb" },
+      { id: "vd-2", title: "Video diffusion transformers", mins: 12, pre: ["vd-1", "g1-6"], ready: true },
+      { id: "vd-3", title: "Consistency, length & world models", mins: 10, pre: ["vd-2"], ready: true },
+      { id: "vd-4", title: "Video understanding", mins: 8, pre: ["vd-1", "mm-1"], ready: true }
     ]},
-    rl: { code: "RL", title: "Reinforcement learning from scratch", tags: ["reinforcement learning", "policy gradient", "q-learning", "actor-critic", "self-play", "alphazero"], lessons: [
-      { id: "rl-1", title: "Agents, environments & rewards", mins: 8, pre: ["p1-5"] },
-      { id: "rl-2", title: "Value functions & the Bellman equation", mins: 10, pre: ["rl-1"] },
-      { id: "rl-3", title: "Q-learning & DQN", mins: 10, pre: ["rl-2", "p3-1"] },
-      { id: "rl-4", title: "Policy gradients & REINFORCE", mins: 12, pre: ["rl-1", "p2-2"] },
-      { id: "rl-5", title: "Actor-critic & PPO", mins: 12, pre: ["rl-4", "rl-2"] },
-      { id: "rl-6", title: "Self-play & search: AlphaGo to MuZero", mins: 10, pre: ["rl-3", "rl-5"] }
+    rl: { code: "RL", title: "Reinforcement learning from scratch", cover: "cover-rl.webp", tags: ["reinforcement learning", "policy gradient", "q-learning", "actor-critic", "self-play", "alphazero"], lessons: [
+      { id: "rl-1", title: "Agents, environments & rewards", mins: 8, pre: ["p1-5"], ready: true },
+      { id: "rl-2", title: "Value functions & the Bellman equation", mins: 10, pre: ["rl-1"], ready: true },
+      { id: "rl-3", title: "Q-learning & DQN", mins: 10, pre: ["rl-2", "p3-1"], ready: true, colab: "rl-3-q-learning.ipynb" },
+      { id: "rl-4", title: "Policy gradients & REINFORCE", mins: 12, pre: ["rl-1", "p2-2"], ready: true, colab: "rl-4-reinforce.ipynb" },
+      { id: "rl-5", title: "Actor-critic & PPO", mins: 12, pre: ["rl-4", "rl-2"], ready: true },
+      { id: "rl-6", title: "Self-play & search: AlphaGo to MuZero", mins: 10, pre: ["rl-3", "rl-5"], ready: true }
     ]},
-    rs: { code: "RS", title: "Reasoning & test-time compute", tags: ["reasoning", "chain-of-thought", "test-time compute", "inference-time scaling", "verifier", "process reward"], lessons: [
-      { id: "rs-1", title: "Chain of thought", mins: 8, pre: ["m3-1"] },
-      { id: "rs-2", title: "Test-time compute: sampling, voting & search", mins: 10, pre: ["rs-1", "m1-5"] },
-      { id: "rs-3", title: "Training reasoning models", mins: 12, pre: ["rs-2", "m3-5", "rl-5"] },
-      { id: "rs-4", title: "Process vs outcome rewards & verifiers", mins: 10, pre: ["rs-3"] }
+    rs: { code: "RS", title: "Reasoning & test-time compute", cover: "cover-rs.webp", tags: ["reasoning", "chain-of-thought", "test-time compute", "inference-time scaling", "verifier", "process reward"], lessons: [
+      { id: "rs-1", title: "Chain of thought", mins: 8, pre: ["m3-1"], ready: true },
+      { id: "rs-2", title: "Test-time compute: sampling, voting & search", mins: 10, pre: ["rs-1", "m1-5"], ready: true, colab: "rs-2-self-consistency.ipynb" },
+      { id: "rs-3", title: "Training reasoning models", mins: 12, pre: ["rs-2", "m3-5", "rl-5"], ready: true },
+      { id: "rs-4", title: "Process vs outcome rewards & verifiers", mins: 10, pre: ["rs-3"], ready: true }
     ]},
-    sy: { code: "SY", title: "Building with LLMs", tags: ["retrieval-augmented", "rag", "agent", "tool use", "function calling", "prompt engineering", "vector search", "guardrail"], lessons: [
+    sy: { code: "SY", title: "Building with LLMs", cover: "cover-sy.webp", tags: ["retrieval-augmented", "rag", "agent", "tool use", "function calling", "prompt engineering", "vector search", "guardrail"], lessons: [
       { id: "sy-1", title: "Prompting that works", mins: 8, pre: ["m3-1"] },
       { id: "sy-2", title: "Embeddings & vector search", mins: 10, pre: ["p3-4"] },
       { id: "sy-3", title: "Retrieval-augmented generation", mins: 12, pre: ["sy-2", "sy-1"] },
@@ -195,22 +195,22 @@ LC.course = {
       { id: "sy-6", title: "Prompt, RAG or fine-tune?", mins: 8, pre: ["sy-3", "m3-7"] },
       { id: "sy-7", title: "Guardrails & safety in products", mins: 10, pre: ["sy-5", "m4-8"] }
     ]},
-    ag: { code: "AG", title: "The agent toolkit: MCP, skills & more", tags: ["model context protocol", "mcp", "agent skills", "agents.md", "context engineering", "multi-agent", "agent2agent", "a2a", "llm wiki", "computer use", "coding agent", "subagent"], lessons: [
-      { id: "ag-1", title: "Where to use what: the agent toolkit on one page", mins: 8, pre: [] },
-      { id: "ag-2", title: "Context engineering: what the model sees", mins: 8, pre: ["ag-1", "sy-1"] },
-      { id: "ag-3", title: "MCP: one plug for every tool", mins: 10, pre: ["ag-1", "sy-4"] },
-      { id: "ag-4", title: "Agent Skills: expertise loaded on demand", mins: 8, pre: ["ag-2"] },
-      { id: "ag-5", title: "AGENTS.md & project memory files", mins: 8, pre: ["ag-2"] },
-      { id: "ag-6", title: "The LLM wiki: knowledge that compounds", mins: 8, pre: ["ag-5", "sy-3"] },
-      { id: "ag-7", title: "Subagents, multi-agent systems & A2A", mins: 10, pre: ["ag-3", "sy-5"] },
-      { id: "ag-8", title: "Starter kit: a server, a skill and a rules file", mins: 12, pre: ["ag-3", "ag-4", "ag-5"] }
+    ag: { code: "AG", title: "The agent toolkit: MCP, skills & more", cover: "cover-ag.webp", tags: ["model context protocol", "mcp", "agent skills", "agents.md", "context engineering", "multi-agent", "agent2agent", "a2a", "llm wiki", "computer use", "coding agent", "subagent"], lessons: [
+      { id: "ag-1", title: "Where to use what: the agent toolkit on one page", mins: 8, pre: [], ready: true },
+      { id: "ag-2", title: "Context engineering: what the model sees", mins: 8, pre: ["ag-1", "sy-1"], ready: true },
+      { id: "ag-3", title: "MCP: one plug for every tool", mins: 10, pre: ["ag-1", "sy-4"], ready: true, colab: "ag-3-mcp-from-scratch.ipynb" },
+      { id: "ag-4", title: "Agent Skills: expertise loaded on demand", mins: 8, pre: ["ag-2"], ready: true },
+      { id: "ag-5", title: "AGENTS.md & project memory files", mins: 8, pre: ["ag-2"], ready: true },
+      { id: "ag-6", title: "The LLM wiki: knowledge that compounds", mins: 8, pre: ["ag-5", "sy-3"], ready: true },
+      { id: "ag-7", title: "Subagents, multi-agent systems & A2A", mins: 10, pre: ["ag-3", "sy-5"], ready: true },
+      { id: "ag-8", title: "Starter kit: a server, a skill and a rules file", mins: 12, pre: ["ag-3", "ag-4", "ag-5"], ready: true, colab: "ag-8-starter-kit.ipynb" }
     ]},
-    in: { code: "IN", title: "Interpretability", tags: ["interpretability", "sparse autoencoder", "circuits", "probing", "superposition"], lessons: [
+    in: { code: "IN", title: "Interpretability", cover: "cover-in.webp", tags: ["interpretability", "sparse autoencoder", "circuits", "probing", "superposition"], lessons: [
       { id: "in-1", title: "Features & superposition", mins: 10, pre: ["m1-4", "p1-1"] },
       { id: "in-2", title: "Probing & circuits", mins: 10, pre: ["in-1"] },
       { id: "in-3", title: "Sparse autoencoders", mins: 10, pre: ["in-2", "p6-4"] }
     ]},
-    cx: { code: "★", title: "More capstones", tags: [], lessons: [
+    cx: { code: "★", title: "More capstones", cover: "cover-cx.webp", tags: [], lessons: [
       { id: "cap-2", title: "Build a tiny diffusion model", mins: 30, pre: ["g1-3", "p4-2"] },
       { id: "cap-3", title: "Build a RAG agent with evals", mins: 30, pre: ["sy-5", "m4-7"] }
     ]}

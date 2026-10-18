@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="vd-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Video as space-time patches · LLMs, Animated</title>
+<meta name="description" content="How a transformer reads video: the T×H×W×3 tensor, tubelets (space-time patches), video VAEs that compress before generation, token counts you can compute yourself, and full vs factorized attention.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Video as space-time patches</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Video</span></div>
+<p class="lede">An image transformer reads a picture as a grid of patches. A video adds a third axis, time, and with it a flood of data. This lesson shows how models cut video into <strong>space-time patches</strong>, why they compress it first, and how to count the tokens (and the attention bill) yourself.</p>
+
+<div class="cover"><img src="../assets/img/cover-vd.webp" alt="Illustration: a film strip of a paper boat sailing across a pond curves through the air, divided into translucent cubes through time, watched by a small robot director." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute how much raw data a clip holds, and why codecs and models can shrink it so much.</li>
+    <li>Turn a video into tubelet tokens and count them for any duration, frame rate, resolution and compression.</li>
+    <li>Compare the cost of full space-time attention with factorized (divided) attention.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="v1-1.html">V1.1 Vision Transformers: images as patches</a>. You should be comfortable with cutting an image into 16×16 patches and projecting each one to a token. Helpful but optional: <a href="m1-1.html">M1.1 Attention</a> for why attention cost grows with the square of the sequence length.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Roughly how much raw data is <em>one second</em> of 1080p video at 30 frames per second, stored as plain 8-bit RGB pixels?</p>
+    <ol class="q-src">
+      <li>About 2 MB</li>
+      <li>About 19 MB</li>
+      <li>About 187 MB</li>
+      <li>About 1.9 GB</li>
+    </ol>
+    <div class="q-explain">One frame is 1920 × 1080 pixels × 3 bytes ≈ 6.2 MB, and 30 of them make about 187 MB. A streaming service typically sends that second in about 1 MB or less, because neighbouring frames are almost identical.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A transformer attends over every token of a clip. You double the clip's length, which doubles its tokens. The attention cost becomes…</p>
+    <ol class="q-src">
+      <li>about the same</li>
+      <li>about 4× larger</li>
+      <li>about 2× larger</li>
+      <li>about 8× larger</li>
+    </ol>
+    <div class="q-explain">Full attention scores every pair of tokens, so it costs about $n^2$. Twice the tokens means four times the pairs. That one fact drives most of the design choices in this lesson.</div>
+  </div>
+</section>
+
+<h2>A video is a very big tensor</h2>
+<p>When the Vision Transformer (Dosovitskiy et al., 2020) showed that an image could be read as a sequence of patches, video researchers asked the obvious next question. In 2021 two papers answered it: <strong>ViViT</strong> (Arnab et al., 2021) and <strong>TimeSformer</strong> (Bertasius et al., 2021) turned clips into sequences of space-time patches for action recognition. Before that, video models were mostly 3D convolutional networks (more on those in <a href="vd-4.html">VD.4</a>). In February 2024 OpenAI's Sora report put the same idea at the centre of video <em>generation</em>: its transformer works on "spacetime patches" of a compressed video.</p>
+<p>Start with the raw object. A colour video is a 4-D tensor of shape $T \times H \times W \times 3$: $T$ frames, each $H$ pixels tall and $W$ wide, with 3 colour channels (red, green, blue). With 8-bit colour, each number is one byte.</p>
+<p><strong>Worked example.</strong> A 10-second clip at 24 frames per second (fps), 1280 × 720 pixels:</p>
+<ol class="steps">
+  <li>Frames: $T = 10 \times 24 = 240$.</li>
+  <li>One frame: $1280 \times 720 \times 3 = 2{,}764{,}800$ bytes, about 2.8 MB.</li>
+  <li>The clip: $240 \times 2.76\text{ MB} \approx 664$ MB, or about 530 megabits every second.</li>
+</ol>
+<p>Yet a 720p stream on the web typically needs only a few megabits per second, so the same 10 seconds arrive as a few megabytes: on the order of 100× smaller. Codecs such as H.264 get there because video is <strong>massively redundant</strong>. Consecutive frames are nearly identical, so a codec stores an occasional full key frame and, for the rest, mostly the motion and small differences.</p>
+<p>Models exploit the same redundancy in two ways you'll meet next: <strong>tubelets</strong>, which bundle a few frames into one token, and <strong>video autoencoders</strong>, which compress in time and space before a generator ever sees the data.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why can a video codec make a clip about 100× smaller than its raw pixels, while a single photo usually compresses far less?</p>
+  <ol class="q-src">
+    <li>Consecutive frames are nearly identical, so most frames can be stored as small changes from earlier ones</li>
+    <li>Codecs drop most of the frames and the player invents them</li>
+    <li>Video uses fewer colour channels than photos</li>
+  </ol>
+  <div class="q-explain">The big win is <em>temporal</em> redundancy: store a key frame, then motion and small residuals. Codecs don't simply delete frames, and video uses the same three colour channels.</div>
+</div></div>
+
+<h2>Tubelets: patches that span time</h2>
+<p>Recall the ViT recipe from <a href="v1-1.html">V1.1</a>: cut a 224 × 224 image into 16 × 16 patches, flatten each patch ($16 \cdot 16 \cdot 3 = 768$ numbers), multiply by a learned matrix to get a token, add a position embedding. For video, ViViT compared two ways to make tokens:</p>
+<ul>
+  <li><strong>Uniform frame sampling:</strong> pick some frames and patchify each one like an image. Time only enters later, through attention.</li>
+  <li><strong>Tubelet embedding:</strong> cut the video into small boxes that span $t$ frames as well as $h \times w$ pixels, for example $2 \times 16 \times 16$. Each box, a <strong>tubelet</strong> or <strong>space-time patch</strong>, becomes one token. In code this is a 3D convolution whose stride equals its kernel size.</li>
+</ul>
+<p>A tubelet fuses a little motion into every token from the very first layer, and it halves (for $t = 2$) the number of tokens. The token count is simply the number of boxes:</p>
+$$N = \frac{T}{t} \cdot \frac{H}{h} \cdot \frac{W}{w}$$
+<p class="math-note">$N$ is the number of tokens; $T, H, W$ are frames, height and width in pixels; $t, h, w$ are the tubelet's depth in frames and its size in pixels. Round each fraction up if it doesn't divide evenly.</p>
+
+<figure class="anim wide" data-anim="vd-1-tubelets"></figure>
+
+<p>For the 10-second 720p clip with $2 \times 16 \times 16$ tubelets: $\frac{240}{2} \cdot \frac{720}{16} \cdot \frac{1280}{16} = 120 \cdot 45 \cdot 80 = 432{,}000$ tokens. Each token summarizes $2 \cdot 16 \cdot 16 \cdot 3 = 1{,}536$ pixel values. That is a lot of tokens: about 13 times the length of a 32K-token text prompt.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-vd-1.webp" alt="A flipbook of a bouncing ball whose stacked pages are cut into little cubes, each holding a piece of the picture across a few pages." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Take a flipbook of a bouncing ball. Stack the pages and cut straight down through the stack, so you get <strong>little cubes</strong>. Each cube holds one small square of the picture, on a few pages in a row.</p>
+      <p>A cube from the middle of the bounce shows a bit of ball <em>moving</em>, not just sitting there. The computer reads the cubes one by one, like words in a sentence, and each cube is one <strong>token</strong>.</p>
+      <p class="math-note">Where it breaks: real cubes are cut from pixels the model never looks at directly. Modern generators first squash the flipbook with an autoencoder, then cut the squashed version.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">A 4-second clip at 16 fps, 512 × 512 pixels, is cut into $2 \times 16 \times 16$ tubelets. How many tokens?</p>
+  <ol class="q-src">
+    <li>1,024</li>
+    <li>16,384</li>
+    <li>32,768</li>
+    <li>65,536</li>
+  </ol>
+  <div class="q-explain">$T = 64$ frames, so $\frac{64}{2} \cdot \frac{512}{16} \cdot \frac{512}{16} = 32 \cdot 32 \cdot 32 = 32{,}768$. Forgetting to divide time by 2 gives 65,536.</div>
+</div></div>
+
+<h2>Compress first: video autoencoders</h2>
+<p>Video <em>generators</em> rarely patchify raw pixels. Like latent image diffusion, they first train a <strong>video VAE</strong> (variational autoencoder): an encoder that squeezes the clip into a much smaller <strong>latent</strong> tensor and a decoder that turns latents back into pixels. The generator then works entirely in latent space.</p>
+<p>A typical recipe compresses <strong>4× in time and 8 × 8 in space</strong>, keeping 16 numbers (channels) per latent position. CogVideoX (Yang et al., 2024), HunyuanVideo (Kong et al., 2024) and Wan (2025) all report this 4 × 8 × 8 setting with 16 channels; Meta's Movie Gen (2024) compresses 8× along each of time, height and width. The transformer then cuts the latent into patches, usually $1 \times 2 \times 2$ (one latent frame, 2 × 2 latent pixels).</p>
+<p>Many of these encoders are <strong>causal in time</strong>: the first frame is encoded on its own, then every 4 frames become one latent frame. That lets the same VAE encode a still image as a one-frame video, and it gives $1 + \frac{T-1}{4}$ latent frames.</p>
+<p><strong>Worked example.</strong> 241 frames (just over 10 s at 24 fps) at 1280 × 720, with a 4 × 8 × 8 VAE and $1 \times 2 \times 2$ patches:</p>
+<ol class="steps">
+  <li>Latent frames: $1 + 240/4 = 61$. Latent size: $720/8 = 90$ by $1280/8 = 160$, with 16 channels.</li>
+  <li>Numbers: $61 \cdot 90 \cdot 160 \cdot 16 \approx 14.1$ million, versus $241 \cdot 720 \cdot 1280 \cdot 3 \approx 666$ million raw. About 47× fewer.</li>
+  <li>Tokens: $2 \times 2$ patches give $45 \cdot 80 = 3{,}600$ per latent frame, so $61 \cdot 3{,}600 = 219{,}600$ tokens.</li>
+</ol>
+<p>Notice the shortcut: one token covers 4 frames and a $16 \times 16$ pixel square ($8 \times 2$). The VAE's real gift is not fewer tokens than a $4 \times 16 \times 16$ tubelet would give; it is that each token now describes a compact, smooth latent instead of 3,072 raw pixel values, which makes generation far easier to learn.</p>
+<p class="math-note">Sanity check against a published figure: Movie Gen reports about 73K tokens for a 16-second clip at 16 fps. Assuming 8× compression on every axis (as reported) and 2 × 2 patches on a 768 × 768 frame: $\frac{256}{8} \cdot \frac{768}{16} \cdot \frac{768}{16} = 32 \cdot 48 \cdot 48 = 73{,}728$.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A common open-model setting: 81 frames (about 5 s at 16 fps) at 832 × 480, with a causal 4 × 8 × 8 VAE and $1 \times 2 \times 2$ patches.</p>
+  <ol class="steps">
+    <li>Latent frames $1 + \frac{T-1}{4} =$ <span class="blank" data-answer="21" data-tol="0.01" data-hint="T − 1 = 80, and 80 / 4 = 20. Don't forget the first frame."></span></li>
+    <li>Tokens per latent frame $= \frac{480}{16} \cdot \frac{832}{16} =$ <span class="blank" data-answer="1560" data-tol="0.01" data-hint="8× from the VAE times 2× from the patch = 16 pixels per token side: 30 × 52."></span></li>
+    <li>Total tokens $=$ <span class="blank" data-answer="32760" data-tol="0.5" data-hint="Latent frames × tokens per latent frame: 21 × 1,560."></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="vd1-token-playground">
+  <h3>Playground: how many tokens is a video?</h3>
+  <p class="math-note" style="margin:0">One token covers some frames and an $s \times s$ pixel square (VAE factor × patch size). Bars use a log scale. For simplicity the playground ignores the extra first latent frame.</p>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="pg-controls" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr))">
+    <label><span>Duration = <output data-k="dur">10 s</output></span>
+      <input type="range" data-k="dur" min="1" max="60" step="1" value="10" aria-label="Duration in seconds">
+    </label>
+    <label><span>Frames per second = <output data-k="fps">24</output></span>
+      <input type="range" data-k="fps" min="0" max="5" step="1" value="3" aria-label="Frames per second">
+    </label>
+    <label><span>Resolution = <output data-k="res">720p</output></span>
+      <input type="range" data-k="res" min="0" max="4" step="1" value="2" aria-label="Resolution">
+    </label>
+    <label><span>Frames per token = <output data-k="ft">4</output></span>
+      <input type="range" data-k="ft" min="0" max="4" step="1" value="2" aria-label="Frames per token">
+    </label>
+    <label><span>Pixels per token = <output data-k="sp">16×16</output></span>
+      <input type="range" data-k="sp" min="0" max="3" step="1" value="1" aria-label="Pixels per token side">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Tokenizer presets" style="margin-top:12px">
+    <button type="button" class="chip" data-preset="2,16" aria-pressed="false" style="min-height:44px">ViViT tubelet 2×16×16</button>
+    <button type="button" class="chip" data-preset="4,16" aria-pressed="false" style="min-height:44px">VAE 4×8×8 + 2×2 patch</button>
+    <button type="button" class="chip" data-preset="8,16" aria-pressed="false" style="min-height:44px">VAE 8×8×8 + 2×2 patch</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A video VAE compresses 4× in time and 8 × 8 in space, and the transformer uses $1 \times 2 \times 2$ patches. Each token therefore covers…</p>
+  <ol class="q-src">
+    <li>1 frame and an 8 × 8 pixel square</li>
+    <li>4 frames and a 16 × 16 pixel square</li>
+    <li>4 frames and an 8 × 8 pixel square</li>
+  </ol>
+  <div class="q-explain">Multiply the factors along each axis: time $4 \times 1 = 4$ frames, space $8 \times 2 = 16$ pixels per side.</div>
+</div></div>
+
+<h2>Attention over space and time: full or divided?</h2>
+<p>Once a clip is a sequence of $N$ tokens, a transformer can treat it like text. <strong>Full space-time attention</strong> (also called joint or 3D attention) lets every token attend to every other one, so it scores $N^2$ pairs per head, per layer. For the 219,600-token clip above that is about $4.8 \times 10^{10}$ pairs. A 32K-token text prompt needs about $1.1 \times 10^9$: the video costs some 45× more, in every head of every layer.</p>
+<p>TimeSformer (Bertasius et al., 2021) tested cheaper patterns and found <strong>divided space-time attention</strong> worked best for classification: each block first attends <em>across time</em> (to the tokens at the same place in other frames) and then <em>across space</em> (to the tokens in its own frame). With $S$ tokens per frame and $T'$ time steps, each token makes about $S + T'$ comparisons instead of $S \cdot T'$:</p>
+$$\text{full: } N^2 = (S\,T')^2 \qquad \text{divided: } N\,(S + T')$$
+<p class="math-note">$S$ is the number of tokens per time step (places), $T'$ the number of time steps, and $N = S\,T'$ the total.</p>
+<p>For our clip, $S = 3{,}600$ and $T' = 61$: divided attention needs $219{,}600 \times 3{,}661 \approx 8.0 \times 10^8$ pairs, about 60× fewer. ViViT explored similar factorized variants, such as a spatial encoder followed by a separate temporal encoder.</p>
+<p>The catch: in a divided block, information from a different place at a different time must take two hops (time, then space) and can be diluted on the way. Early video generators used exactly this split, adding temporal layers to image networks. Many recent open generators, including CogVideoX, HunyuanVideo and Wan, report <strong>full 3D attention</strong> instead and pay the quadratic bill with fast attention kernels and by splitting each sequence across GPUs. Sparse and windowed attention patterns are an active research area as of 2026.</p>
+
+<div class="why"><strong>Why this matters for LLM practice:</strong> video is where the quadratic cost from <a href="m1-1.html">M1.1</a> bites hardest. Video-capable LLMs face the same arithmetic when they <em>read</em> video (<a href="vd-4.html">VD.4</a>), and generators face it at every denoising step (<a href="vd-2.html">VD.2</a>). Every trick you'll meet, from VAEs and bigger patches to sparse frame sampling and token pooling, is a way to shrink $N$ before paying $N^2$.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A clip has 100 time steps of 1,000 tokens each. Roughly how many times cheaper is divided attention than full attention?</p>
+  <ol class="q-src">
+    <li>About 90×</li>
+    <li>About 10×</li>
+    <li>About 1,000×</li>
+  </ol>
+  <div class="q-explain">$N = 100{,}000$. Full: $N^2 = 10^{10}$. Divided: $N(S + T') = 10^5 \times 1{,}100 = 1.1 \times 10^8$. The ratio is about 91.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a teammate how a 10-second clip becomes a sequence of tokens for a video generator, and why the token count matters so much.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A video VAE first compresses the clip, typically 4× in time and 8 × 8 in space, into a small latent tensor. The transformer cuts that latent into space-time patches (often 1 × 2 × 2), and each patch becomes one token, so the count is latent frames × patches per frame, around 220,000 for 10 s of 720p. Full attention costs about the square of that number in every layer, so halving the tokens roughly quarters the attention cost.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What is a tubelet?</p>
+    <ol class="q-src">
+      <li>A single 16 × 16 patch from one frame</li>
+      <li>A whole frame, treated as one token</li>
+      <li>The optical flow between two frames</li>
+      <li>A box of pixels spanning a few frames and a small square of each, embedded as one token</li>
+    </ol>
+    <div class="q-explain">A tubelet, or space-time patch, extends a ViT patch through time, for example $2 \times 16 \times 16$. Flattened and projected, it becomes one token.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You keep everything else fixed and go from 720p to 1440p (twice the width and twice the height). With full attention, the attention cost grows by about…</p>
+    <ol class="q-src">
+      <li>2×</li>
+      <li>16×</li>
+      <li>4×</li>
+      <li>8×</li>
+    </ol>
+    <div class="q-explain">Twice the width and height means 4× the tokens, and full attention scales with the square: $4^2 = 16$. This is why high-resolution video is usually made by generating at a lower resolution and upsampling.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Interleaving with <a href="v1-1.html">V1.1</a>: a ViT reads a 224 × 224 image as 196 tokens. A video model reads 16 frames of 224 × 224 with $2 \times 16 \times 16$ tubelets. How many tokens?</p>
+    <ol class="q-src">
+      <li>196</li>
+      <li>3,136</li>
+      <li>1,568</li>
+      <li>12,544</li>
+    </ol>
+    <div class="q-explain">Each frame has $14 \times 14 = 196$ patch positions, and 16 frames make 8 tubelet steps: $8 \times 196 = 1{,}568$. Per-frame patches (no tubelets) would give 3,136.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why do video generators use a causal VAE that encodes the first frame on its own?</p>
+    <ol class="q-src">
+      <li>So the same encoder handles still images (one-frame videos) and videos, which lets the model train on both</li>
+      <li>Because the first frame is always the most important</li>
+      <li>To make the latent larger and more detailed</li>
+      <li>Because attention cannot handle the first frame</li>
+    </ol>
+    <div class="q-explain">With $1 + \frac{T-1}{4}$ latent frames, a single image is a valid one-frame video. Image data is far more plentiful than video, so sharing one latent space for both helps a lot.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A video is a $T \times H \times W \times 3$ tensor; 10 s of raw 720p is about 664 MB, but it is hugely redundant over time.</li>
+    <li><strong>Tubelets</strong> (space-time patches, e.g. $2 \times 16 \times 16$) turn video into tokens: $N = \frac{T}{t}\cdot\frac{H}{h}\cdot\frac{W}{w}$.</li>
+    <li>Generators first compress with a <strong>video VAE</strong>, typically 4× in time and 8 × 8 in space, then patchify the latent (often $1 \times 2 \times 2$).</li>
+    <li>Full attention costs $N^2$; <strong>divided</strong> space-time attention costs about $N(S + T')$, far less, at some cost in how freely information moves.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Build a synthetic video of a moving square, cut it into tubelets and put it back together exactly, then count tokens and attention pairs for real settings and compare full with divided attention. About 20 minutes with NumPy; runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="vd-1-spacetime-patches.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"vd-1-a","front":"What is the shape of a raw colour video tensor, and roughly how big is 10 s of 720p at 24 fps?","back":"$T \\times H \\times W \\times 3$. 240 frames × 1280 × 720 × 3 bytes ≈ 664 MB of 8-bit RGB; a codec stores it in a few MB because frames are so similar."},
+  {"id":"vd-1-b","front":"What is a tubelet (space-time patch)?","back":"A box of pixels spanning $t$ frames and an $h \\times w$ square (e.g. $2 \\times 16 \\times 16$), flattened and linearly projected into one token (ViViT, Arnab et al., 2021)."},
+  {"id":"vd-1-c","front":"Token count for a video cut into $t \\times h \\times w$ tubelets?","back":"$N = \\frac{T}{t} \\cdot \\frac{H}{h} \\cdot \\frac{W}{w}$ (round up). 10 s of 720p at 24 fps with $2 \\times 16 \\times 16$: 120 × 45 × 80 = 432,000."},
+  {"id":"vd-1-d","front":"What does a typical video VAE do before a video generator, and what does one token then cover?","back":"Compresses about 4× in time and 8 × 8 in space (16 channels). With $1 \\times 2 \\times 2$ patches, each token covers 4 frames and a 16 × 16 pixel square."},
+  {"id":"vd-1-e","front":"Full vs divided space-time attention: cost for $N = S\\,T'$ tokens?","back":"Full: $N^2$ pairs. Divided (TimeSformer): attend over time, then over space, about $N(S + T')$ pairs. Cheaper, but information takes two hops."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/vd-1-tubelets.js"></script>
+<script src="../assets/js/anims/vd-1-token-playground.js"></script>
+</body>
+</html>

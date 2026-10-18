@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="a1-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Speech recognition: CTC to Whisper · LLMs, Animated</title>
+<meta name="description" content="How machines turn speech into text: the alignment problem, CTC's blank token and collapse rule, attention encoder-decoders, RNN-T, wav2vec 2.0, Whisper and word error rate.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Speech recognition: CTC to Whisper</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Audio &amp; speech</span></div>
+<p class="lede">Speech arrives as 100 frames a second; its transcript is a dozen letters. Nobody tells you which frames belong to which letter. This lesson follows how speech recognition solved that <em>alignment problem</em>, from hand-built pipelines to CTC, attention, self-supervised pretraining and Whisper, and how we score the results.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Apply the CTC collapse rule and explain why the blank token is needed.</li>
+    <li>Explain how CTC training sums over alignments, and how attention models and RNN-T differ from it.</li>
+    <li>Describe Whisper's input, architecture and task tokens, and compute a word error rate by hand.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> you'll need <a href="a1-1.html">Sound as data (A1.1)</a> for frames and log-mel spectrograms, and <a href="m1-4.html">The decoder-only transformer (M1.4)</a>, since Whisper's decoder is one with cross-attention added. Helpful but optional: <a href="p1-6.html">cross-entropy (P1.6)</a> for the loss.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. Being wrong now helps the right answer stick.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A one-second recording becomes 100 frames; its transcript "hello" has 5 letters. What makes training a frame-by-frame letter classifier hard?</p>
+    <ol class="q-src">
+      <li>There are too few frames to fit 5 letters</li>
+      <li>We don't know which frames belong to which letter; the transcript has no timings</li>
+      <li>Letters can't be predicted from audio</li>
+      <li>Softmax can't output letters</li>
+    </ol>
+    <div class="q-explain">This is the <strong>alignment problem</strong>. Transcripts say <em>what</em> was said, not <em>when</em>. CTC, attention and RNN-T are three ways around it.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">The reference transcript has 4 words; the system gets one of them wrong (a substitution). What is the word error rate?</p>
+    <ol class="q-src">
+      <li>4%</li>
+      <li>75%</li>
+      <li>25%</li>
+      <li>1%</li>
+    </ol>
+    <div class="q-explain">WER $=$ (substitutions $+$ deletions $+$ insertions) $/$ reference words $= 1/4 = 25\%$. You'll compute a harder one below.</div>
+  </div>
+</section>
+
+<h2>Before deep learning: pipelines and the alignment problem</h2>
+<p>For roughly thirty years, from the 1980s to the early 2010s, speech recognizers were pipelines of separately built parts. An <strong>acoustic model</strong> scored short frames of audio features against the states of <strong>hidden Markov models (HMMs)</strong>, with <strong>Gaussian mixture models (GMMs)</strong> describing what each state sounds like. A hand-written <strong>pronunciation lexicon</strong> mapped words to phonemes, an <strong>n-gram language model</strong> scored word sequences, and a search decoder combined them all. In 2012, Hinton et al. showed that replacing the GMMs with deep neural networks cut error rates substantially; these "hybrid" DNN-HMM systems ran most products for the next few years.</p>
+<p>Hybrids still needed a frame-level target for every frame, obtained by <strong>forced alignment</strong> with an older model. That's the core difficulty:</p>
+<ul>
+  <li>At 100 frames per second, saying "hello" might take 40 frames. The transcript has 5 letters and <strong>no timings</strong>.</li>
+  <li>Sounds have different lengths (vowels stretch, stops are short), and silence sits between words.</li>
+  <li>A plain classifier needs one label per frame, so you must invent an alignment before you can train.</li>
+</ul>
+<p>In 2014, Baidu's <strong>Deep Speech</strong> (Hannun et al., 2014) skipped the pipeline: one recurrent network read spectrogram frames and directly output characters, trained end to end on thousands of hours of speech. The trick that made it possible, without any alignment, was a loss from 2006: <strong>CTC</strong>.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What did classic hybrid systems need that end-to-end CTC training does not?</p>
+  <ol class="q-src">
+    <li>A frame-by-frame alignment of the transcript, produced by an earlier model</li>
+    <li>Audio features computed from frames</li>
+    <li>A neural network</li>
+    <li>Transcribed training data</li>
+  </ol>
+  <div class="q-explain">Hybrids trained a per-frame classifier, so every frame needed a label from forced alignment. CTC learns from (audio, transcript) pairs alone. Both still need transcribed audio and frame features.</div>
+</div></div>
+
+<h2>CTC: blanks and the collapse rule</h2>
+<p><strong>Connectionist Temporal Classification</strong> (Graves et al., 2006) lets the network emit <strong>one symbol per frame</strong>, from the alphabet plus one extra symbol, the <strong>blank</strong> (written ε or _), meaning "nothing new here". A frame-level output sequence is called an <strong>alignment</strong> or path. To turn a path into text, apply the <strong>collapse rule</strong> $\mathcal{B}$:</p>
+<ol class="steps">
+  <li><strong>Merge repeats:</strong> runs of the same symbol become one (hh → h).</li>
+  <li><strong>Drop blanks.</strong></li>
+</ol>
+<p>The order matters. Because repeats are merged <em>before</em> blanks are dropped, a blank between two identical letters keeps them apart. That's the only way to spell a double letter:</p>
+<ul>
+  <li><code>hhe_ll_loo__</code> → merge → <code>he_l_lo_</code> → drop → <strong>hello</strong></li>
+  <li><code>hhelllloo</code> (no blank) → merge → <code>helo</code>. The double l is lost.</li>
+  <li><code>_cc_aa_t_</code> → merge → <code>_c_a_t_</code> → drop → <strong>cat</strong></li>
+</ul>
+
+<figure class="anim wide" data-anim="a1-2-ctc"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-a1-2.webp" alt="A big-eared rabbit listens to a child speaking and drops matching picture tiles (sun, apple, dog) onto a conveyor belt in the order they were said." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A rabbit with huge ears listens to a child talking. Every tick of a clock, the rabbit may drop a picture tile on a conveyor belt: a sun when it hears "sun", an apple for "apple", a dog for "dog". If it hears nothing new, it drops <strong>nothing</strong>.</p>
+      <p>When the child says "suuun" slowly, the rabbit might drop three sun tiles in a row, so we squash a row of the same tile into one. And if the child really says "sun, sun", the rabbit leaves an empty gap between the two, so we know there were two.</p>
+      <p>Where it breaks: the real model doesn't drop one sure tile per tick. It gives a probability to every tile at every tick, and training adds up all the ways of dropping tiles that spell the right sentence.</p>
+    </div>
+  </div>
+</details>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>A network's per-frame best symbols are <code>bb_oo_okk</code> (9 frames).</p>
+  <ol class="steps">
+    <li>After merging repeats, how many symbols remain (blanks included)? <span class="blank" data-answer="6" data-tol="0.01" data-hint="bb → b, oo → o, kk → k: b _ o _ o k."></span></li>
+    <li>After dropping blanks, how many letters does the transcript have? <span class="blank" data-answer="4" data-tol="0.01" data-hint="b _ o _ o k → book."></span></li>
+    <li>If the frames were <code>bb_ooookk</code> instead (no blank between the o's), how many letters? <span class="blank" data-answer="3" data-tol="0.01" data-hint="oooo merges into a single o: bok."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Which frame sequence collapses to "too"?</p>
+  <ol class="q-src">
+    <li><code>tt_ooo_</code></li>
+    <li><code>_t_oooo</code></li>
+    <li><code>t_oo_o_</code></li>
+    <li><code>ttoo__</code></li>
+  </ol>
+  <div class="q-explain"><code>t_oo_o_</code> → merge → <code>t_o_o_</code> → drop → "too". The others have no blank between the o's, so they collapse to "to".</div>
+</div></div>
+
+<h2>Training CTC: summing over every alignment</h2>
+<p>We still don't know the right alignment, and CTC never picks one. For each frame $t$ the network outputs a softmax $p_t(\cdot)$ over the symbols. Assuming frames are conditionally independent given the audio $x$, a path $a = (a_1, \dots, a_T)$ has probability $\prod_t p_t(a_t)$, and the probability of a transcript $y$ is the sum over <strong>every</strong> path that collapses to it:</p>
+$$P(y \mid x) = \sum_{a \,\in\, \mathcal{B}^{-1}(y)} \; \prod_{t=1}^{T} p_t(a_t), \qquad \mathcal{L}_{\text{CTC}} = -\log P(y \mid x)$$
+<p class="math-note">$\mathcal{B}^{-1}(y)$ is the set of all frame paths that collapse to $y$; $T$ is the number of frames. There can be astronomically many paths, but a dynamic-programming <strong>forward algorithm</strong> (like the one for HMMs) computes the sum in time proportional to $T \times |y|$. Gradients flow through it, so the model learns its own alignments.</p>
+
+<h3>Worked example</h3>
+<p>Two frames, symbols {a, blank}, target "a". At frame 1, $p(\text{a}) = 0.6$; at frame 2, $p(\text{a}) = 0.7$ (so blank gets 0.4 and 0.3).</p>
+<ol class="steps">
+  <li>Paths that collapse to "a": <code>aa</code>, <code>a_</code>, <code>_a</code>. (<code>__</code> collapses to nothing.)</li>
+  <li>Their probabilities: $0.6 \times 0.7 = 0.42$, $\;0.6 \times 0.3 = 0.18$, $\;0.4 \times 0.7 = 0.28$.</li>
+  <li>$P(\text{"a"}) = 0.42 + 0.18 + 0.28 = 0.88$, so the loss is $-\ln 0.88 \approx 0.128$ nats.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>Same setup, but now $p(\text{a}) = 0.5$ at frame 1 and $0.8$ at frame 2.</p>
+  <ol class="steps">
+    <li>Probability of the path <code>aa</code>: <span class="blank" data-answer="0.4" data-tol="0.001" data-hint="0.5 × 0.8."></span></li>
+    <li>Probability of <code>_a</code>: <span class="blank" data-answer="0.4" data-tol="0.001" data-hint="Blank at frame 1 is 1 − 0.5 = 0.5; times 0.8."></span></li>
+    <li>$P(\text{"a"})$, summing all three paths: <span class="blank" data-answer="0.9" data-tol="0.001" data-hint="Add a_ = 0.5 × 0.2 = 0.1 to the two above."></span></li>
+  </ol>
+</section>
+
+<p><strong>Decoding</strong> is simpler. <em>Greedy</em> decoding takes the most likely symbol per frame and collapses (exactly what the animation showed). <em>Beam search</em> keeps several candidate transcripts and can add an external language model's score, which helps because CTC's independence assumption means the network itself has no built-in model of which words follow which.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why does CTC training sum over alignments instead of choosing one?</p>
+  <ol class="q-src">
+    <li>Because summing is faster than taking a maximum</li>
+    <li>Because the true alignment is unknown, so every path that spells the transcript counts as correct</li>
+    <li>Because only one alignment ever exists</li>
+    <li>Because the loss must be positive</li>
+  </ol>
+  <div class="q-explain">Any path that collapses to the transcript is a valid way to say it. Summing their probabilities (efficiently, with dynamic programming) lets the model discover good alignments by itself.</div>
+</div></div>
+
+<h2>Attention, RNN-T and learning from unlabeled audio</h2>
+<p>CTC assumes each frame's output is independent of the others given the audio. Two other designs drop that assumption.</p>
+<ul>
+  <li><strong>Attention encoder–decoders.</strong> <em>Listen, Attend and Spell</em> (Chan et al., 2015) encodes the audio, then a decoder emits characters one at a time, each step <strong>attending</strong> over all encoder frames to find the relevant audio. The alignment is learned implicitly as attention weights, and the decoder conditions on what it has already written, so it acts as its own language model. The cost: it needs the whole utterance before it starts, and it can skip or repeat words on long or unusual inputs.</li>
+  <li><strong>RNN-Transducer (RNN-T)</strong> (Graves, 2012). Like CTC it walks through the frames and can emit blanks, but a <em>prediction network</em> conditions on the labels already emitted, and a small <em>joint network</em> combines it with the current audio frame. It's trained, like CTC, by summing over alignments. Because it works frame by frame it can <strong>stream</strong>, so transducers became a common choice for on-device and live captioning systems.</li>
+</ul>
+<p>Encoders also improved. The <strong>Conformer</strong> (Gulati et al., 2020) mixed convolutions (good at local patterns) into Transformer blocks (good at long-range context) and became a standard ASR encoder.</p>
+<p>The biggest shift was <strong>self-supervised pretraining</strong>. Transcribed speech is expensive; untranscribed speech is plentiful. <strong>wav2vec 2.0</strong> (Baevski et al., 2020) reads the raw 16 kHz waveform with a convolutional encoder (one vector about every 20 ms), masks spans of those vectors, and trains a Transformer to pick out the true quantized vector for each masked spot from distractors: BERT-style masked prediction, for audio. Fine-tuned with a CTC head, it reached 4.8% / 8.2% WER on LibriSpeech's clean / other test sets using just <strong>10 minutes</strong> of labelled audio on top of 53,000 hours of unlabelled audio (with a language model in decoding).</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">You need live captions that appear while someone is still talking. Which design fits best?</p>
+  <ol class="q-src">
+    <li>An attention encoder–decoder that reads the whole utterance first</li>
+    <li>A hand-built HMM–GMM system with no language model</li>
+    <li>A model that only runs after the speaker has finished</li>
+    <li>A transducer (RNN-T) with a streaming encoder</li>
+  </ol>
+  <div class="q-explain">Transducers emit labels (or blanks) as frames arrive, so they can stream. Classic attention models wait for the full input before decoding; streaming variants exist but need extra machinery.</div>
+</div></div>
+
+<h2>Whisper: weak supervision at scale</h2>
+<p><strong>Whisper</strong> (Radford et al., 2022, OpenAI) took the opposite bet from wav2vec 2.0: rather than learn from unlabelled audio, train on a huge amount of <em>imperfectly</em> labelled audio. Its training set was about <strong>680,000 hours</strong> of audio paired with transcripts found on the internet ("weak supervision": noisy, not hand-checked, but plentiful), covering many languages and including speech paired with English translations.</p>
+<ul>
+  <li><strong>Input:</strong> audio resampled to 16 kHz and cut into <strong>30-second windows</strong> (shorter clips are padded), turned into a log-mel spectrogram with 25 ms windows and a 10 ms hop: 3,000 frames of <strong>80 mel bins</strong> in the original models (large-v3, released in late 2023, uses 128).</li>
+  <li><strong>Encoder:</strong> two convolution layers (the second with stride 2) shrink the 3,000 frames to 1,500 positions, followed by a Transformer encoder.</li>
+  <li><strong>Decoder:</strong> a Transformer decoder much like <a href="m1-4.html">M1.4</a>'s, plus cross-attention to the encoder, predicting text tokens one at a time with a byte-level BPE tokenizer.</li>
+</ul>
+<p>One model handles many tasks because the decoder's prompt is a sequence of <strong>special task tokens</strong>:</p>
+<p><code>&lt;|startoftranscript|&gt; &lt;|en|&gt; &lt;|transcribe|&gt; &lt;|notimestamps|&gt; …text… &lt;|endoftext|&gt;</code></p>
+<p>Swap <code>&lt;|en|&gt;</code> for another language tag, <code>&lt;|transcribe|&gt;</code> for <code>&lt;|translate|&gt;</code> (speech in any supported language to English text), or drop <code>&lt;|notimestamps|&gt;</code> so the model interleaves timestamp tokens with the text. If the language isn't given, the model predicts the language token itself, which is how it does language identification.</p>
+<p>The paper's headline finding was <strong>robustness</strong>: evaluated zero-shot on many datasets it was never tuned on, Whisper made far fewer errors on unfamiliar accents, noise and domains than models fine-tuned on one benchmark, even when those models scored better on that benchmark itself.</p>
+
+<h3>Scoring a transcript: word error rate</h3>
+<p>Align the hypothesis to the reference with the minimum number of edits (a word-level edit distance), then</p>
+$$\text{WER} = \frac{S + D + I}{N}$$
+<p class="math-note">$S$, $D$, $I$ are substituted, deleted and inserted words; $N$ is the number of words in the <em>reference</em>. Because insertions count, WER can exceed 100%. Text normalization (case, punctuation, "ten" vs "10") changes WER a lot, so compare systems only under the same normalizer.</p>
+<p><strong>Worked example.</strong> Reference "turn the kitchen lights off" ($N = 5$). Hypothesis "turn kitchen light off please". Edits: "the" deleted ($D = 1$), "lights" → "light" ($S = 1$), "please" inserted ($I = 1$). WER $= 3/5 = 60\%$.</p>
+
+<section class="card" aria-labelledby="ft3">
+  <div class="card-label" id="ft3">Your turn · faded example</div>
+  <p>Reference: "please set a timer for ten minutes now". Hypothesis: "please set timer for tan minutes now".</p>
+  <ol class="steps">
+    <li>Words in the reference, $N$: <span class="blank" data-answer="8" data-tol="0.01" data-hint="Count: please, set, a, timer, for, ten, minutes, now."></span></li>
+    <li>Total edits $S + D + I$: <span class="blank" data-answer="2" data-tol="0.01" data-hint="'a' was deleted, 'ten' became 'tan'."></span></li>
+    <li>WER in percent: <span class="blank" data-answer="25" data-tol="0.1" data-hint="2 / 8."></span></li>
+  </ol>
+</section>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> Whisper-style encoders became a standard "ear" for language models. Several open audio-language models start from a pretrained Whisper encoder and feed its output vectors, through a small adapter, into an LLM's input sequence, the same pattern vision-language models use for images (MM track). And cascaded voice assistants (A1.6) usually begin with a recognizer like this, so its errors and latency flow into everything downstream.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">How does a single Whisper model know whether to transcribe French audio as French or translate it into English?</p>
+  <ol class="q-src">
+    <li>Special tokens at the start of the decoder's sequence (language, then &lt;|transcribe|&gt; or &lt;|translate|&gt;)</li>
+    <li>A separate translation model is loaded for each language</li>
+    <li>The encoder detects the user's intent from the audio</li>
+    <li>It always transcribes; translation is done by a later system</li>
+  </ol>
+  <div class="q-explain">Task and language are just tokens in the decoder's prefix, the same way a text LLM is steered by its prompt. Training data for each task was formatted with the matching tokens.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain how CTC gets around the alignment problem, including what the blank is for, and say one way Whisper differs from a CTC model.</p>
+  <div class="model-answer"><strong>Model answer:</strong> CTC lets the network output one symbol per frame, including a blank for "nothing new", and maps any frame path to text by merging repeats and then dropping blanks; the blank both fills silent or in-between frames and separates genuine double letters. Since the alignment is unknown, training maximizes the summed probability of all paths that collapse to the transcript, computed with a forward algorithm. Whisper instead uses an encoder–decoder Transformer that attends over 30-second log-mel windows and generates text tokens autoregressively, steered by task tokens, and it's trained on about 680,000 hours of weakly labelled web audio.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Apply the CTC collapse rule to <code>_aa_pp_pll_e</code>.</p>
+    <ol class="q-src">
+      <li>aple</li>
+      <li>apple</li>
+      <li>appple</li>
+      <li>aplle</li>
+    </ol>
+    <div class="q-explain">Merge repeats: <code>_a_p_pl_e</code>. Drop blanks: <code>apple</code>. The blank between "pp" and "p" keeps the double p; "ll" is one run, so it merges to a single l.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Reference: 10 words. The hypothesis has 2 substitutions, 1 deletion and 3 insertions. WER?</p>
+    <ol class="q-src">
+      <li>30%</li>
+      <li>50%</li>
+      <li>40%</li>
+      <li>60%</li>
+    </ol>
+    <div class="q-explain">$(2 + 1 + 3)/10 = 60\%$. Insertions count too, which is why WER can go above 100%.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Whisper's decoder generates text one token at a time, attending to earlier tokens with a causal mask (M1.4). What does it attend to that a decoder-only LLM doesn't?</p>
+    <ol class="q-src">
+      <li>The audio encoder's output vectors, through cross-attention</li>
+      <li>Future text tokens</li>
+      <li>The raw 16 kHz waveform samples directly</li>
+      <li>Nothing else; it's identical to a text LLM</li>
+    </ol>
+    <div class="q-explain">Each decoder layer adds cross-attention whose keys and values come from the 1,500 encoder positions. The self-attention over text is still causal.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What was the key idea of wav2vec 2.0?</p>
+    <ol class="q-src">
+      <li>Train on 680,000 hours of web transcripts</li>
+      <li>Replace neural networks with HMMs</li>
+      <li>Pretrain on unlabelled audio by predicting masked parts, then fine-tune with very little labelled data</li>
+      <li>Generate speech from text</li>
+    </ol>
+    <div class="q-explain">Masked prediction on unlabelled audio learns useful speech representations; a CTC head fine-tuned on as little as 10 minutes of transcribed audio then gives usable recognition.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Transcripts have no timings: the <strong>alignment problem</strong>. Old pipelines forced an alignment; end-to-end losses learn it.</li>
+    <li><strong>CTC</strong> outputs a symbol or <strong>blank</strong> per frame; collapse = merge repeats, then drop blanks. Training sums over all paths: $-\log \sum_{a \in \mathcal{B}^{-1}(y)} \prod_t p_t(a_t)$.</li>
+    <li><strong>Attention encoder–decoders</strong> (LAS) learn alignment as attention; <strong>RNN-T</strong> adds a label-conditioned predictor and streams.</li>
+    <li><strong>wav2vec 2.0</strong> pretrains on unlabelled audio; <strong>Whisper</strong> trains an encoder–decoder on ~680k hours of weakly labelled audio, steered by task tokens.</li>
+    <li><strong>WER</strong> $= (S + D + I)/N$, and it depends on text normalization.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 30 minutes: implement the collapse rule and greedy decoding, check PyTorch's <code>CTCLoss</code> against a brute-force sum over every alignment, write the forward algorithm, and score transcripts with WER. Runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="a1-2-ctc.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"a1-2-a","front":"What is the alignment problem in speech recognition?","back":"Audio has ~100 frames per second but transcripts have no timings, so you don't know which frames belong to which label. Frame classifiers need an alignment; CTC, attention and RNN-T learn it."},
+  {"id":"a1-2-b","front":"State CTC's collapse rule and why the blank is needed.","back":"Merge repeated symbols, then drop blanks. A blank between identical letters keeps them separate (hel_lo → hello), and blanks fill frames with nothing new."},
+  {"id":"a1-2-c","front":"Write the CTC loss.","back":"$-\\log P(y|x)$ with $P(y|x) = \\sum_{a \\in \\mathcal{B}^{-1}(y)} \\prod_t p_t(a_t)$: the sum over all frame paths that collapse to $y$, computed by a forward (dynamic-programming) algorithm."},
+  {"id":"a1-2-d","front":"How do attention encoder–decoders and RNN-T differ from CTC?","back":"LAS-style models attend over all encoder frames and condition on previous outputs (implicit alignment, no streaming by default). RNN-T adds a prediction network over emitted labels plus a joint network, sums over alignments like CTC, and can stream."},
+  {"id":"a1-2-e","front":"Whisper in one card.","back":"Radford et al., 2022: encoder–decoder Transformer on 30 s windows of 16 kHz log-mel (80 bins; 128 in large-v3), trained on ~680k hours of weakly supervised web audio; task tokens choose language, transcribe vs translate, timestamps."},
+  {"id":"a1-2-f","front":"Word error rate formula?","back":"WER = (S + D + I) / N, with substitutions, deletions, insertions from a minimum word edit alignment and N reference words. Can exceed 100%; depends on normalization."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/a1-2-ctc.js"></script>
+</body>
+</html>

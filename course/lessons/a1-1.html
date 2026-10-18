@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="a1-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sound as data · LLMs, Animated</title>
+<meta name="description" content="How sound becomes numbers: waveforms, sample rate, Nyquist and aliasing, bit depth and PCM, and why raw audio is far too long for a Transformer. With a sampling playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Sound as data</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Audio &amp; speech</span></div>
+<p class="lede">Before a model can transcribe, speak or compose, sound has to become numbers. This lesson follows a sound from air pressure to a list of integers, shows what can go wrong when you sample too slowly, and explains why one second of audio is thousands of times longer than one second of text.</p>
+
+<div class="cover"><img src="../assets/img/cover-a1.webp" alt="Illustration: a vintage microphone and a modern headset facing each other, with sound waves between them turning into a ribbon of colored bars and back into waves." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute the data rate and the number of samples of raw digital audio from its sample rate, bit depth and channels.</li>
+    <li>Explain the Nyquist limit and predict the frequency an undersampled tone aliases to.</li>
+    <li>Say which representation (raw waveform, log-mel spectrogram, codec tokens) different audio models use, and why.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> this lesson builds on <a href="p5-5.html">Frequencies &amp; spectrograms (P5.5)</a>: sinusoids, the Nyquist rate, the short-time Fourier transform and mel scales. We recap what we need. Helpful but optional: <a href="m1-1.html">Attention (M1.1)</a>, for why long sequences are expensive.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take a guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Speech recognizers usually take audio at 16 kHz, mono. How many numbers is one second of it?</p>
+    <ol class="q-src">
+      <li>16</li>
+      <li>1,600</li>
+      <li>16,000</li>
+      <li>256,000</li>
+    </ol>
+    <div class="q-explain">16 kHz means 16,000 measurements ("samples") per second, one number each. 256,000 is the number of <em>bits</em> per second if each sample is stored with 16 bits.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You record a pure 7 kHz whistle with a device that samples only 10,000 times per second. What do the samples look like?</p>
+    <ol class="q-src">
+      <li>A perfect 7 kHz tone</li>
+      <li>A 3 kHz tone</li>
+      <li>Silence</li>
+      <li>A 10 kHz tone</li>
+    </ol>
+    <div class="q-explain">10 kHz sampling can only represent tones below 5 kHz. The 7 kHz tone "folds back" and its samples are identical to those of a $10 - 7 = 3$ kHz tone. That's <strong>aliasing</strong>, and you'll make it happen below.</div>
+  </div>
+</section>
+
+<h2>From air pressure to a list of numbers</h2>
+<p>Sound is a tiny, fast wobble in air pressure. For most of history the only way to keep it was as an <em>analog</em> copy: Edison's phonograph (1877) cut the wobble into a groove, tape stored it as magnetism. Copies of copies got noisier every time. In 1937 the engineer Alec Reeves proposed <strong>pulse-code modulation (PCM)</strong>: measure the signal at regular moments and send each measurement as a number. Numbers can be copied perfectly. The theory of <em>how often</em> to measure came from Harry Nyquist (1928) and Claude Shannon (1949), and the audio CD (1982) put PCM in every living room.</p>
+<p>A microphone turns pressure into a voltage that rises and falls over time: the <strong>waveform</strong>. An analog-to-digital converter then does two things:</p>
+<ul>
+  <li><strong>Sampling:</strong> it measures the voltage at a fixed <strong>sample rate</strong> $f_s$, in samples per second (hertz). At $f_s = 16$ kHz that's one measurement every $1/16{,}000$ s $= 62.5$ microseconds.</li>
+  <li><strong>Quantization:</strong> it rounds each measurement to the nearest of $2^b$ allowed levels, where $b$ is the <strong>bit depth</strong>. With $b = 16$ there are 65,536 levels.</li>
+</ul>
+<p>The result is a plain list of integers. A <code>.wav</code> file is mostly exactly that list, plus a short header saying the sample rate, bit depth and number of channels.</p>
+
+<figure class="anim wide" data-anim="a1-1-pcm"></figure>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Which two choices fully decide how faithfully a PCM recording captures a sound?</p>
+  <ol class="q-src">
+    <li>How often you measure (sample rate) and how finely you round each measurement (bit depth)</li>
+    <li>The file format and the playback volume</li>
+    <li>The number of channels and the file name</li>
+    <li>The length of the recording and the microphone's colour</li>
+  </ol>
+  <div class="q-explain">Sample rate limits the highest frequency you can capture; bit depth limits how small a detail survives the rounding. Channels (mono, stereo) multiply the data but don't change per-channel fidelity.</div>
+</div></div>
+
+<h2>Sample rate, Nyquist and aliasing</h2>
+<p>How often must you measure? The <strong>sampling theorem</strong> (the P5.5 recap): a signal whose highest frequency is $f_{\max}$ can be rebuilt exactly from its samples if</p>
+$$f_s > 2\,f_{\max}$$
+<p>Half the sample rate, $f_s/2$, is the <strong>Nyquist frequency</strong>: the highest tone a given rate can represent. Real systems pick rates to match what matters:</p>
+<ul>
+  <li><strong>Telephone, 8 kHz:</strong> Nyquist 4 kHz, enough for intelligible speech (the classic phone band is about 300–3,400 Hz) but it sounds muffled, and "s" and "f" blur.</li>
+  <li><strong>Speech recognition, 16 kHz:</strong> Nyquist 8 kHz keeps nearly all the information that distinguishes speech sounds. Whisper and wav2vec 2.0 both resample their input to 16 kHz.</li>
+  <li><strong>Music, 44.1 or 48 kHz:</strong> Nyquist above 20 kHz, the upper limit of human hearing. Music generators and codecs for music typically work at 32–48 kHz.</li>
+</ul>
+<p>Sample too slowly and something worse than "missing detail" happens. A tone above $f_s/2$ doesn't vanish: its samples are <em>identical</em> to those of a lower tone, so it comes back in disguise. A tone at frequency $f$ shows up at</p>
+$$f_{\text{alias}} = \left|\,f - k\,f_s\,\right|, \quad k = \text{the whole number nearest } f/f_s$$
+<p class="math-note">For the warm-up: $f = 7$ kHz, $f_s = 10$ kHz, $f/f_s = 0.7$, so $k = 1$ and $f_{\text{alias}} = |7 - 10| = 3$ kHz. Once sampled, nothing can tell the two apart. That's why converters put a <strong>low-pass (anti-aliasing) filter</strong> in front of the sampler, and why resampling audio from 44.1 kHz down to 16 kHz must filter first.</p>
+
+<div class="playground" id="a1-1-alias-playground">
+  <h3>Playground: sample a tone, then sample it too slowly</h3>
+  <p class="math-note" style="margin:0">Blue is the real tone over 2 milliseconds; orange dots are the samples; the dashed orange line is the lowest-frequency wave that passes through those samples, which is what you'd hear back. Drop the sample rate below twice the tone and watch the orange wave slow down.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr">
+    <label><span>Sample rate $f_s$ = <output data-out="fs">16</output> kHz</span>
+      <input type="range" data-in="fs" min="2" max="48" step="0.1" value="16" aria-describedby="alias-hint">
+    </label>
+    <label><span>Tone = <output data-out="f">5</output> kHz</span>
+      <input type="range" data-in="f" min="1" max="10" step="0.5" value="5" aria-describedby="alias-hint">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Sample-rate presets" style="margin-top:12px">
+    <button type="button" class="chip" data-fs="44.1" aria-pressed="false">CD · 44.1 kHz</button>
+    <button type="button" class="chip" data-fs="16" aria-pressed="false">Speech · 16 kHz</button>
+    <button type="button" class="chip" data-fs="8" aria-pressed="false">Phone · 8 kHz</button>
+    <button type="button" class="chip" data-fs="6" aria-pressed="false">Too slow · 6 kHz</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="alias-hint" style="margin:4px 0 0"></p>
+</div>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>Sound is a wiggly line drawn in the air. To save it, you put a <strong>dot on the line at every tick of a clock</strong>, and write down how high each dot is using a <strong>ruler with marks</strong>.</p>
+      <p>More ticks per second (sample rate) catch faster wiggles. More marks on the ruler (bit depth) record each height more exactly.</p>
+      <p>If the clock ticks too slowly, a fast wiggle gets dots that look like a slow wiggle, just like a spinning wheel in a film can look as if it turns backwards. That's aliasing.</p>
+      <p>Where it breaks: to play the sound back, you don't join the dots with straight lines. With enough ticks, the smooth curve through the dots is <em>exactly</em> the original sound.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Audio is sampled at 8 kHz. Which tone comes back as a 1 kHz alias?</p>
+  <ol class="q-src">
+    <li>3 kHz</li>
+    <li>4 kHz</li>
+    <li>9 kHz played at half volume</li>
+    <li>7 kHz</li>
+  </ol>
+  <div class="q-explain">$7/8 \approx 0.9$, so the nearest whole multiple is $k = 1$ and $|7 - 8| = 1$ kHz. A 3 kHz tone is below the 4 kHz Nyquist frequency, so it is captured correctly. (A 9 kHz tone would also alias to 1 kHz, but volume has nothing to do with it.)</div>
+</div></div>
+
+<h2>Bit depth and the data rate</h2>
+<p>Each sample is rounded to one of $2^b$ levels. The rounding error sounds like a faint hiss, <strong>quantization noise</strong>. Each extra bit doubles the number of levels and lowers that noise by about 6 decibels, so 16-bit audio has a dynamic range of about $16 \times 6.02 \approx 96$ dB, more than enough for speech. Studios record at 24 bits for headroom; telephone systems historically used 8 bits per sample with a non-uniform ("μ-law" or "A-law") scale that spends more levels on quiet sounds.</p>
+<p>Multiply it out and you get the <strong>data rate</strong> of uncompressed PCM:</p>
+$$R = f_s \times b \times c \quad \text{bits per second}$$
+<p class="math-note">$f_s$ is the sample rate, $b$ the bits per sample and $c$ the number of channels (1 for mono, 2 for stereo). Divide by 8 for bytes.</p>
+
+<h3>Worked example</h3>
+<p>Speech for a recognizer: 16 kHz, 16-bit, mono.</p>
+<ol class="steps">
+  <li>Samples per second: $16{,}000$.</li>
+  <li>Bits per second: $16{,}000 \times 16 \times 1 = 256{,}000$, that is <strong>256 kbit/s</strong>, or 32,000 bytes per second.</li>
+  <li>One minute: $32{,}000 \times 60 = 1{,}920{,}000$ bytes, about 1.9 MB, and $960{,}000$ samples.</li>
+  <li>Compare a CD: $44{,}100 \times 16 \times 2 = 1{,}411{,}200$ bit/s, about 1.4 Mbit/s.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Many neural speech codecs and TTS models work at 24 kHz, 16-bit, mono.</p>
+  <ol class="steps">
+    <li>Data rate in kbit/s: <span class="blank" data-answer="384" data-tol="0.5" data-hint="24,000 × 16 × 1 = 384,000 bit/s."></span></li>
+    <li>Samples in a 10-second clip: <span class="blank" data-answer="240000" data-tol="0.5" data-hint="24,000 samples per second × 10 s."></span></li>
+    <li>Studio audio is 48 kHz, 24-bit, stereo. Its data rate in kbit/s: <span class="blank" data-answer="2304" data-tol="0.5" data-hint="48,000 × 24 × 2 = 2,304,000 bit/s."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">You switch a recording from 16-bit to 8-bit samples, keeping the sample rate. What happens?</p>
+  <ol class="q-src">
+    <li>The highest frequency you can capture halves</li>
+    <li>The file halves in size and the quantization noise gets about 48 dB louder</li>
+    <li>Nothing audible changes, because the sample rate is the same</li>
+    <li>The recording becomes stereo</li>
+  </ol>
+  <div class="q-explain">Bits per sample affect size (linearly) and rounding noise (about 6 dB per bit, so 8 fewer bits is about 48 dB). The frequency limit is set by the sample rate alone.</div>
+</div></div>
+
+<h2>Why raw audio is too long for a Transformer</h2>
+<p>Here's the problem for language-model machinery. People speak roughly 150 words a minute, about 2.5 words a second. With a typical text tokenizer (about 1.3 tokens per English word) that is <strong>roughly 3 text tokens per second</strong>. The same second of 16 kHz audio is <strong>16,000 samples</strong>, about 5,000 times longer.</p>
+<p>A 30-second voice message is 480,000 samples. Self-attention compares every position with every other (<a href="m1-1.html">M1.1</a>), so that's $480{,}000^2 \approx 2.3 \times 10^{11}$ scores per head per layer. Even a fast model can't afford that. So nearly every audio model first turns the waveform into a much shorter sequence:</p>
+<ul>
+  <li><strong>Log-mel spectrogram</strong> (P5.5): slice the audio into overlapping windows (typically 25 ms, hopping 10 ms), take each window's spectrum, pool it into 80 or 128 bands on the perceptual <strong>mel</strong> scale, and take the log. That's <strong>100 frames per second</strong>, each a vector of 80–128 numbers. Used as the input of most speech recognizers, including Whisper (A1.2), and as the target of classic text-to-speech models (A1.4).</li>
+  <li><strong>Learned features from the raw waveform:</strong> a stack of strided convolutions reads samples directly and outputs a vector about every 20 ms (about 50 per second). wav2vec 2.0 and similar self-supervised models do this.</li>
+  <li><strong>Codec tokens</strong> (A1.3): a neural audio codec compresses audio into a few <em>discrete</em> tokens per frame, at 12.5 to 75 frames per second. Discrete tokens are what lets a language model <em>generate</em> audio: speech synthesis, music, voice assistants (A1.4–A1.6).</li>
+</ul>
+<p>Two rules of thumb fall out of this. <strong>Understanding</strong> audio (recognition, classification) mostly uses continuous features like log-mel frames; <strong>generating</strong> audio with a language model needs discrete tokens, or a diffusion model over a compressed latent (A1.5). And either way, the frame rate decides how much audio fits in a context window.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the frame rate of an audio representation sets the "token budget" of every speech-capable LLM. At 100 log-mel frames per second, an hour of audio is 360,000 frames; at a codec's 12.5 frames per second it's 45,000 frames, closer to a long document. Much of the progress in voice models since 2022 came from squeezing audio into fewer, more meaningful tokens per second, so the same Transformer tricks from the text world (long context, KV caches, sampling) still apply.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">A 30-second clip becomes log-mel frames with a 10 ms hop. Roughly how many frames is that?</p>
+  <ol class="q-src">
+    <li>30</li>
+    <li>300</li>
+    <li>3,000</li>
+    <li>480,000</li>
+  </ol>
+  <div class="q-explain">A 10 ms hop gives 100 frames per second, so 30 s is 3,000 frames: 160 times shorter than the 480,000 raw samples at 16 kHz. Whisper's encoder then halves it again to 1,500 positions.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a friend what sample rate and bit depth control, what aliasing is, and why models rarely feed raw samples to a Transformer.</p>
+  <div class="model-answer"><strong>Model answer:</strong> The sample rate is how many measurements per second you take; it limits the highest frequency you can capture to half the rate (the Nyquist frequency), and tones above that fold back as lower "alias" tones unless you filter them out first. Bit depth is how finely each measurement is rounded, which sets the noise floor (about 6 dB per bit). Raw audio has thousands of samples per second, thousands of times more positions than text, and attention cost grows with the square of length, so models first compress it into log-mel frames (about 100 per second) or codec tokens (12.5–75 frames per second).</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What is the data rate of 22.05 kHz, 16-bit, mono PCM?</p>
+    <ol class="q-src">
+      <li>22.05 kbit/s</li>
+      <li>352.8 kbit/s</li>
+      <li>705.6 kbit/s</li>
+      <li>44.1 kbit/s</li>
+    </ol>
+    <div class="q-explain">$22{,}050 \times 16 \times 1 = 352{,}800$ bit/s. 705.6 kbit/s would be the stereo version (or one CD channel at 44.1 kHz).</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why do speech recognizers typically resample to 16 kHz rather than keep 48 kHz?</p>
+    <ol class="q-src">
+      <li>Speech information sits mostly below 8 kHz, so 16 kHz keeps it while cutting the sequence length by 3×</li>
+      <li>Because 48 kHz audio can't be stored as PCM</li>
+      <li>Because aliasing only happens above 16 kHz</li>
+      <li>Because 16 kHz has a higher Nyquist frequency than 48 kHz</li>
+    </ol>
+    <div class="q-explain">A 16 kHz rate captures everything up to 8 kHz, which holds what distinguishes speech sounds; three times fewer samples means cheaper models. (Resampling must low-pass filter first, or the content above 8 kHz would alias.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A text model's attention cost grows with the square of sequence length (M1.1). Replacing 16 kHz samples with 100-per-second log-mel frames shortens the sequence 160×. Roughly how much does that cut the number of attention scores?</p>
+    <ol class="q-src">
+      <li>160×</li>
+      <li>320×</li>
+      <li>About 13×, the square root</li>
+      <li>About 25,600×</li>
+    </ol>
+    <div class="q-explain">Scores scale with $n^2$, so a 160× shorter sequence needs $160^2 = 25{,}600$ times fewer of them. Shortening the sequence is the single biggest lever in audio modelling.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which representation lets a language model <em>generate</em> audio by predicting the next item from a fixed vocabulary?</p>
+    <ol class="q-src">
+      <li>A log-mel spectrogram</li>
+      <li>Raw 16-bit samples, read as floats</li>
+      <li>Discrete tokens from a neural audio codec</li>
+      <li>The file's header</li>
+    </ol>
+    <div class="q-explain">Next-token prediction needs a finite vocabulary to put a softmax over. Codec tokens provide one, at tens of frames per second. Log-mel frames are continuous vectors, which suit recognition or need a regression/diffusion model to generate.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Digital audio is <strong>PCM</strong>: samples taken $f_s$ times per second, each rounded to one of $2^b$ levels.</li>
+    <li>A rate $f_s$ captures tones up to $f_s/2$ (Nyquist); higher tones <strong>alias</strong> to $|f - k f_s|$ unless filtered out first.</li>
+    <li>Data rate $= f_s \times b \times c$: 16 kHz, 16-bit mono is 256 kbit/s and 16,000 samples per second.</li>
+    <li>That's about 5,000× more positions than text tokens for the same speech, so models use <strong>log-mel frames</strong> (~100/s) or <strong>codec tokens</strong> (12.5–75 frames/s).</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 25 minutes with NumPy: synthesize tones, alias them on purpose, build an STFT and a mel filterbank by hand, and compute a log-mel spectrogram. No downloads; runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="a1-1-sound-as-data.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"a1-1-a","front":"What are sample rate and bit depth in PCM audio?","back":"Sample rate $f_s$: measurements per second (e.g. 16 kHz). Bit depth $b$: bits per measurement, giving $2^b$ levels (16-bit = 65,536). Together they define PCM: a list of integers."},
+  {"id":"a1-1-b","front":"State the Nyquist condition and the alias formula.","back":"Capture exactly if $f_s > 2 f_{\\max}$. A tone at $f$ above $f_s/2$ shows up at $|f - k f_s|$ with $k$ the nearest whole number to $f/f_s$ (7 kHz at 10 kHz sampling looks like 3 kHz)."},
+  {"id":"a1-1-c","front":"Data rate of uncompressed PCM? Example for speech?","back":"$R = f_s \\times b \\times$ channels. 16 kHz × 16 bit × mono = 256 kbit/s (32 kB/s, ~1.9 MB per minute). CD: 1,411.2 kbit/s."},
+  {"id":"a1-1-d","front":"How much longer is raw speech audio than its text, in sequence positions?","back":"16,000 samples/s vs roughly 3 text tokens/s: about 5,000×. Attention cost grows with length squared, so models shorten audio first."},
+  {"id":"a1-1-e","front":"Name three audio representations and where each is used.","back":"Raw waveform (read by conv front-ends, e.g. wav2vec 2.0, ~50 vectors/s); log-mel spectrogram (~100 frames/s; ASR input such as Whisper, classic TTS target); codec tokens (12.5–75 frames/s, discrete; for generating audio with language models)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/a1-1-pcm.js"></script>
+<script src="../assets/js/anims/a1-1-alias-playground.js"></script>
+</body>
+</html>

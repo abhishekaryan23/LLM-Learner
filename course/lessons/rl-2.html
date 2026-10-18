@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="rl-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Value functions &amp; the Bellman equation · LLMs, Animated</title>
+<meta name="description" content="State values, action values and the Bellman equations, then value iteration on a gridworld: watch value flow back from the goal and read off the best policy.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Value functions &amp; the Bellman equation</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Reinforcement learning</span></div>
+<p class="lede">A good chess player doesn't calculate every game to the end. They glance at a position and <em>know</em> it's good. A <strong>value function</strong> is that instinct written as a number, and the <strong>Bellman equation</strong> is the one-line rule that lets you compute it.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Define $V^\pi(s)$ and $Q^\pi(s,a)$ and say how they relate.</li>
+    <li>Write the Bellman expectation and optimality equations and apply one backup by hand.</li>
+    <li>Run value iteration on a gridworld, read off the greedy policy, and predict how $\gamma$ changes the values.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="rl-1.html">Agents, environments &amp; rewards</a> (RL.1): states, actions, policies, the gridworld and the discounted return $G_t = r_{t+1} + \gamma\,G_{t+1}$. This lesson turns that recursion into an equation you can solve.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In the gridworld ($\gamma = 0.9$, +1 at the goal), the cell right next to the goal is worth 1.0 if you play perfectly. What is the cell two moves away worth?</p>
+    <ol class="q-src">
+      <li>1.0, the same</li>
+      <li>0.9</li>
+      <li>0.5</li>
+      <li>2.0, because it's further to travel</li>
+    </ol>
+    <div class="q-explain">From two moves away you collect 0 now and then stand next to the goal: $0 + 0.9 \times 1.0 = 0.9$. That "reward now plus discounted value of where you land" is the Bellman equation.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">You know the value of every cell. How do you pick the best move from any cell?</p>
+    <ol class="q-src">
+      <li>Always move toward the start</li>
+      <li>Pick a random move</li>
+      <li>Simulate a million games from that cell</li>
+      <li>Take the move that leads to the neighbour with the highest reward plus discounted value</li>
+    </ol>
+    <div class="q-explain">With values in hand, acting well is a one-step look-ahead: this is called <strong>greedy policy extraction</strong>.</div>
+  </div>
+</section>
+
+<h2>From returns to values</h2>
+<p>In the 1950s Richard Bellman, a mathematician at the RAND Corporation, was working on multi-stage decision problems: how to schedule, stock or steer when every choice changes the next situation. His insight, published as <em>Dynamic Programming</em> (1957), was that you never need to plan a whole sequence at once. If you know how good every <em>situation</em> is, each decision becomes a one-step choice. RL inherited this idea almost unchanged.</p>
+<p>The return $G_t$ from the last lesson is random: it depends on which actions the policy happens to sample and how the environment responds. So we define values as <strong>expected</strong> returns:</p>
+$$V^\pi(s) = \mathbb{E}_\pi\big[\,G_t \mid s_t = s\,\big] \qquad Q^\pi(s,a) = \mathbb{E}_\pi\big[\,G_t \mid s_t = s,\ a_t = a\,\big]$$
+<ul>
+  <li>$V^\pi(s)$, the <strong>state value</strong>: how much return you expect starting in $s$ and then following policy $\pi$.</li>
+  <li>$Q^\pi(s,a)$, the <strong>action value</strong>: the same, but you first take action $a$ (whatever $\pi$ would have done), then follow $\pi$.</li>
+</ul>
+<p>The two are tied together: the value of a state is the policy-weighted average of its action values, $V^\pi(s) = \sum_a \pi(a \mid s)\, Q^\pi(s,a)$. For example, if $\pi$ goes right with probability 0.7 (worth $Q = 1.0$) and up with probability 0.3 (worth $Q = 0.5$), then $V = 0.7 + 0.15 = 0.85$.</p>
+<p>Why care about $Q$? Because it lets you compare actions <em>without a model</em> of the environment: just pick the action with the largest $Q(s,a)$. Q-learning (next lesson) is built entirely on it.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">A policy in state $s$ takes action $a_1$ with probability 0.5 ($Q = 2$) and $a_2$ with probability 0.5 ($Q = 0$). What is $V^\pi(s)$?</p>
+  <ol class="q-src">
+    <li>2</li>
+    <li>0</li>
+    <li>1</li>
+    <li>0.5</li>
+  </ol>
+  <div class="q-explain">$V^\pi(s) = \sum_a \pi(a \mid s)\,Q^\pi(s,a) = 0.5 \times 2 + 0.5 \times 0 = 1$.</div>
+</div></div>
+
+<h2>The Bellman expectation equation</h2>
+<p>Take the recursion $G_t = r_{t+1} + \gamma\,G_{t+1}$ and average both sides over what the policy and the environment might do. You get the <strong>Bellman expectation equation</strong>:</p>
+$$V^\pi(s) = \sum_a \pi(a \mid s) \sum_{s'} P(s' \mid s, a)\,\Big[\, r(s,a,s') + \gamma\, V^\pi(s') \,\Big]$$
+<ul>
+  <li>$\sum_a \pi(a \mid s)$: average over the actions the policy might take.</li>
+  <li>$\sum_{s'} P(s' \mid s,a)$: average over where the environment might send you. In our deterministic gridworld there is only one $s'$ per action.</li>
+  <li>$r(s,a,s') + \gamma V^\pi(s')$: the reward for this step, plus the discounted value of where you land.</li>
+</ul>
+<p>It says: <em>a state's value equals the expected reward of one step plus the discounted value of the next state.</em> It's a consistency condition. The true values are the numbers that satisfy it in every state at once.</p>
+<h3>Worked example</h3>
+<p>The cell just left of the goal, under a dithering policy: 50% <strong>right</strong> (into the goal, $+1$, episode over), 50% <strong>up</strong> (bumps the edge and stays put, reward 0). $\gamma = 0.9$.</p>
+<ol class="steps">
+  <li>Right: $1 + 0.9 \times 0 = 1$ (a terminal state has value 0).</li>
+  <li>Up: $0 + 0.9 \times V$, where $V$ is this same cell's value.</li>
+  <li>Bellman: $V = 0.5 \times 1 + 0.5 \times 0.9\,V = 0.5 + 0.45\,V$.</li>
+  <li>Solve: $0.55\,V = 0.5$, so $V = 0.909$. Lower than 1.0, because dithering wastes time and time is discounted.</li>
+</ol>
+<p>With many states this is a system of linear equations, one per state. You can solve it directly, or just apply the equation over and over as an update until the numbers stop changing (<strong>iterative policy evaluation</strong>).</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In the worked example, the policy changes to 90% right and 10% up. What happens to $V$?</p>
+  <ol class="q-src">
+    <li>It rises toward 1, because less time is wasted</li>
+    <li>It stays at 0.909</li>
+    <li>It falls, because up is safer</li>
+    <li>It becomes exactly 1</li>
+  </ol>
+  <div class="q-explain">$V = 0.9 + 0.1 \times 0.9\,V$ gives $V = 0.9 / 0.91 \approx 0.989$. Closer to 1, but not quite: the 10% of bumps still costs a little discounting.</div>
+</div></div>
+
+<h2>Optimal values and value iteration</h2>
+<p>We don't just want to evaluate a policy, we want the best one. Its values $V^*$ satisfy the <strong>Bellman optimality equation</strong>, which swaps the policy's average for a max:</p>
+$$V^*(s) = \max_a \sum_{s'} P(s' \mid s, a)\,\Big[\, r(s,a,s') + \gamma\, V^*(s') \,\Big] \qquad Q^*(s,a) = \sum_{s'} P(s' \mid s,a)\Big[\, r + \gamma \max_{a'} Q^*(s',a') \,\Big]$$
+<p>Best value now = best action's (reward + discounted best value next). The max makes the equations non-linear, but there's a simple way to solve them: <strong>value iteration</strong> (Bellman, 1957). Start from $V = 0$ and repeatedly sweep through every state, replacing its value with the right-hand side. Each sweep is a <strong>Bellman backup</strong>; for $\gamma &lt; 1$ the values are guaranteed to converge to $V^*$.</p>
+
+<figure class="anim wide" data-anim="rl-2-value-iteration"></figure>
+
+<p>Once you have $V^*$, the optimal policy is the <strong>greedy</strong> one: in each state take $\arg\max_a \big[r + \gamma V^*(s')\big]$. No search over whole paths is needed; the values already did the long-range thinking.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-rl-2.webp" alt="A treasure map drawn as a grid: squares glow brighter the closer they are to the treasure chest, and an explorer uses the glow to pick a direction." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine a treasure map made of squares. The square right next to the treasure chest <strong>glows brightest</strong>. Its neighbours glow a little less, their neighbours a little less again, and so on across the map.</p>
+      <p>Now an explorer standing anywhere doesn't need the whole route. They just look at the squares around them and <strong>step onto the brightest one</strong>. Step after step, the glow leads them to the treasure.</p>
+      <p>The glow is the <strong>value</strong>. Lighting up the map one ring at a time, outwards from the chest, is <strong>value iteration</strong>.</p>
+      <p class="math-note">Where it breaks: a real map doesn't change, but values depend on the policy and on $\gamma$, and in a random world a bright square can still sit next to a pit you might slip into.</p>
+    </div>
+  </div>
+</details>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>Do one Bellman optimality backup for the cell <strong>just below the pit</strong> (right column, third row), using the converged values from the animation: left neighbour $0.81$, the cell below $0.66$ (more precisely $0.6561$), and its own value $0.729$. $\gamma = 0.9$.</p>
+  <ol class="steps">
+    <li>Up, into the pit: $r = -1$, episode over. Value: <span class="blank" data-answer="-1" data-tol="0.001" data-hint="Reward −1, and a terminal state adds nothing."></span></li>
+    <li>Left: $0 + 0.9 \times 0.81$ = <span class="blank" data-answer="0.729" data-tol="0.002" data-hint="0.9 × 0.81."></span></li>
+    <li>Right bumps the edge and stays: $0 + 0.9 \times 0.729$ = <span class="blank" data-answer="0.656" data-tol="0.002" data-hint="0.9 × 0.729."></span></li>
+    <li>Down: $0.9 \times 0.6561 = 0.590$. So $V^*$ for this cell (the max of the four) = <span class="blank" data-answer="0.729" data-tol="0.002" data-hint="The largest of −1, 0.729, 0.656 and 0.590."></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">The backup reproduces the cell's own value: that's what "converged" means. The greedy action is <strong>left</strong>, away from the pit.</p>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What is the difference between the Bellman expectation and optimality equations?</p>
+  <ol class="q-src">
+    <li>The optimality equation has no discount factor</li>
+    <li>The expectation equation averages over the policy's actions; the optimality equation takes the max over actions</li>
+    <li>Only the optimality equation uses the next state's value</li>
+    <li>They are the same equation written two ways</li>
+  </ol>
+  <div class="q-explain">$\sum_a \pi(a \mid s)\,[\dots]$ evaluates a given policy; $\max_a [\dots]$ describes the best possible policy. Both use the reward plus the discounted next value.</div>
+</div></div>
+
+<h2>How γ shapes the values, and where tables stop</h2>
+<p>In our deterministic gridworld with $\gamma = 0.9$, every value is just $\gamma^{d-1}$, where $d$ is the number of moves to the goal. Change $\gamma$ and the whole picture changes. Try it:</p>
+
+<div class="playground" id="gamma-playground">
+  <h3>Playground: turn the discount knob</h3>
+  <p class="math-note" style="margin:0">Value iteration runs to convergence for the $\gamma$ you choose. Watch the values and the arrows; then try exactly 1.</p>
+  <div class="pg-stage" style="margin-top:10px"></div>
+  <div class="pg-controls">
+    <label><span>Discount γ = <output>0.90</output></span>
+      <input type="range" min="0.1" max="1" step="0.01" value="0.9">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Discount presets" style="margin-top:12px">
+    <button type="button" class="chip" data-gamma="0.5" aria-pressed="false" style="min-height:44px">0.5</button>
+    <button type="button" class="chip" data-gamma="0.9" aria-pressed="false" style="min-height:44px">0.9</button>
+    <button type="button" class="chip" data-gamma="0.99" aria-pressed="false" style="min-height:44px">0.99</button>
+    <button type="button" class="chip" data-gamma="1" aria-pressed="false" style="min-height:44px">1.0</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<p>Two lessons hide in that knob. A small $\gamma$ makes far-away rewards nearly invisible; a $\gamma$ of exactly 1 with no cost per step makes the agent indifferent to <em>when</em> it arrives, so it may wander. Practical tasks either keep $\gamma &lt; 1$ or add a small negative reward per step.</p>
+<p><strong>Where tables stop.</strong> Value iteration needs two things we rarely have. First, a <strong>model</strong>: the transition probabilities $P(s' \mid s,a)$ and rewards, so it can compute the backup. Second, a sweep over <strong>every state</strong>. Our gridworld has 13 non-terminal states; Go has roughly $2 \times 10^{170}$ legal positions. Bellman himself named this the <em>curse of dimensionality</em>. The rest of the module is about escaping it: learn from sampled experience instead of a model (Q-learning, RL.3), and replace the table with a neural network that generalizes across states (DQN, RL.3; actor-critic, RL.5).</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> for a language model the state is the prompt plus every token so far, so the number of states is astronomically larger than Go's. No table could hold them. Yet values still appear: PPO-based RLHF trains a <strong>value model</strong> (the critic) that predicts $V^\pi$ at every token of a response, a neural network standing in for the table (see <a href="m3-3.html">RLHF with PPO</a>). GRPO (<a href="m3-5.html">M3.5</a>) avoids learning $V$ altogether by using the average reward of a group of samples as the baseline. And verifiers that score partial reasoning, <em>process reward models</em> (<a href="rs-4.html">RS.4</a>), are in effect value estimates for half-finished answers.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why can't we simply run value iteration for chess?</p>
+  <ol class="q-src">
+    <li>Chess has no rewards</li>
+    <li>The Bellman equation only works for gridworlds</li>
+    <li>Chess is not a Markov decision process</li>
+    <li>There are far too many states to sweep through and store in a table</li>
+  </ol>
+  <div class="q-explain">The board position is Markov (with a few extras such as castling rights) and the reward is win/lose. The problem is scale: a table over every position is impossible, which is why game-playing systems learn value <em>networks</em> (RL.6).</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain how value iteration finds the best policy in the gridworld, starting from all-zero values.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Each sweep replaces every cell's value by the best one-step option, $\max_a [r + \gamma V(s')]$, using the previous values. Value spreads outward from the goal one move per sweep, shrinking by $\gamma$ each step, until nothing changes ($V^*$). Then the best policy just picks, in each cell, the action with the highest $r + \gamma V^*(s')$.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">With $\gamma = 0.5$ (instead of 0.9), what is the optimal value of the gridworld cell that is 3 moves from the goal?</p>
+    <ol class="q-src">
+      <li>0.125</li>
+      <li>0.81</li>
+      <li>0.25</li>
+      <li>0.5</li>
+    </ol>
+    <div class="q-explain">$V^* = \gamma^{d-1} = 0.5^2 = 0.25$. The reward arrives on the third move, two discounting steps after the first.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Connect to RL.1: which identity is the Bellman expectation equation built on?</p>
+    <ol class="q-src">
+      <li>$G_t = r_{t+1} + \gamma\,G_{t+1}$</li>
+      <li>$G_t = \sum_k r_{t+k+1}$ with no discount</li>
+      <li>$\pi(a \mid s) = 1$ for one action</li>
+      <li>$Q(a) \leftarrow Q(a) + \frac{1}{N}(r - Q(a))$</li>
+    </ol>
+    <div class="q-explain">Take expectations of the return recursion: the expected return now equals the expected next reward plus $\gamma$ times the expected return (value) from the next state.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">After value iteration converges, how do you get the optimal policy?</p>
+    <ol class="q-src">
+      <li>Run value iteration again with $\gamma = 1$</li>
+      <li>Pick actions uniformly at random</li>
+      <li>Choose the action leading to the state with the most visits</li>
+      <li>In each state, pick $\arg\max_a [r + \gamma V^*(s')]$</li>
+    </ol>
+    <div class="q-explain">Greedy extraction: a one-step look-ahead with the optimal values gives an optimal policy.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What does value iteration need that Q-learning (next lesson) does not?</p>
+    <ol class="q-src">
+      <li>A discount factor</li>
+      <li>A model of the environment: the transition probabilities and rewards for every state and action</li>
+      <li>A reward signal</li>
+      <li>A policy</li>
+    </ol>
+    <div class="q-explain">The backup sums over $P(s' \mid s,a)$. Q-learning gets the same effect from sampled transitions, without ever knowing $P$.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>$V^\pi(s)$ and $Q^\pi(s,a)$ are <strong>expected returns</strong> from a state, or from a state-action pair; $V^\pi(s) = \sum_a \pi(a \mid s)\,Q^\pi(s,a)$.</li>
+    <li><strong>Bellman expectation</strong>: value = expected (reward + $\gamma$ × next value) under the policy. <strong>Bellman optimality</strong>: the same with a max over actions.</li>
+    <li><strong>Value iteration</strong> repeats the optimality backup from $V = 0$; value flows back from the goal and converges to $V^*$.</li>
+    <li>The <strong>greedy policy</strong> on $V^*$ is optimal. $\gamma$ sets how far ahead the agent cares.</li>
+    <li>Tables and known models don't scale; learning from samples and neural networks do.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"rl-2-a","front":"Define $V^\\pi(s)$ and $Q^\\pi(s,a)$.","back":"$V^\\pi(s) = \\mathbb{E}_\\pi[G_t \\mid s_t = s]$: expected return from $s$ following $\\pi$. $Q^\\pi(s,a)$: expected return after taking $a$ in $s$, then following $\\pi$. $V^\\pi(s) = \\sum_a \\pi(a|s) Q^\\pi(s,a)$."},
+  {"id":"rl-2-b","front":"Write the Bellman expectation equation for $V^\\pi$.","back":"$V^\\pi(s) = \\sum_a \\pi(a|s) \\sum_{s'} P(s'|s,a)[r + \\gamma V^\\pi(s')]$: expected one-step reward plus discounted value of the next state."},
+  {"id":"rl-2-c","front":"Write the Bellman optimality equation for $V^*$.","back":"$V^*(s) = \\max_a \\sum_{s'} P(s'|s,a)[r + \\gamma V^*(s')]$. Same as the expectation equation, with a max over actions instead of the policy's average."},
+  {"id":"rl-2-d","front":"What is value iteration?","back":"Start with $V = 0$; repeatedly sweep all states applying $V(s) \\leftarrow \\max_a [r + \\gamma V(s')]$ (expected over $s'$) until values stop changing. It converges to $V^*$ for $\\gamma \\lt 1$ (Bellman, 1957)."},
+  {"id":"rl-2-e","front":"How do you extract a policy from $V^*$?","back":"Greedily: in each state take $\\arg\\max_a \\sum_{s'} P(s'|s,a)[r + \\gamma V^*(s')]$. With $Q^*$ it's simply $\\arg\\max_a Q^*(s,a)$."},
+  {"id":"rl-2-f","front":"Why doesn't tabular value iteration scale to Go or LLMs?","back":"It needs a model of the environment and a sweep over every state; Go has about $10^{170}$ positions and an LLM's states are all token prefixes. Hence sampling-based learning and neural value functions."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/rl-gridworld.js"></script>
+<script src="../assets/js/anims/rl-2-value-iteration.js"></script>
+<script src="../assets/js/anims/rl-2-gamma-playground.js"></script>
+</body>
+</html>

@@ -432,7 +432,9 @@ footer.site-foot { border-top: 1px solid var(--line); margin-top: 64px; padding:
 .byte-learn > h2:nth-child(2) { margin-top: .2em; }
 .byte-nav { display: none; }
 .byte-end { height: 1px; }
-.byte-check { border-left: 4px solid var(--accent); }
+.byte-check { border-left: 4px solid var(--accent); background: var(--surface); border-radius: 0 var(--radius) var(--radius) 0; padding: 12px 16px 14px; margin: 1.6em 0 .6em; }
+.byte-check::before { content: "Quick check"; display: block; margin-bottom: 6px; font: 650 .74rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+.byte-check .q-prompt { margin-top: 0; }
 
 /* Focus mode: one byte at a time */
 .focus-mode .byte:not(.current) { display: none; }
@@ -477,3 +479,7 @@ footer.site-foot { border-top: 1px solid var(--line); margin-top: 64px; padding:
 .note .lessons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .note .lessons a, .note .lessons span { font-size: .85rem; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; text-decoration: none; }
 .note .lessons span { color: var(--ink-2); border-style: dashed; }
+
+/* Links to lessons that aren't written yet (see markUnwrittenLinks in app.js) */
+.soon-link { color: var(--ink-2); border-bottom: 1px dashed var(--line); }
+.soon-link .soon-mark { font-size: .85em; }

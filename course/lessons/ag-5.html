@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ag-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AGENTS.md &amp; project memory files · LLMs, Animated</title>
+<meta name="description" content="A rules file is a README for coding agents: build and test commands, conventions, gotchas and boundaries, read at the start of every session. How AGENTS.md works, what to put in it, and how it differs from skills and memory.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<style>
+  .table-wrap { overflow-x: auto; margin: 16px 0 20px; }
+  .ag-table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  .ag-table th, .ag-table td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .ag-table th { font: 600 .8rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); }
+  .ag-table td:first-child { font-weight: 620; }
+  .file { margin: 16px 0 20px; }
+  .file figcaption { font: 600 .8rem/1.2 var(--font-mono); color: var(--ink-2); margin: 0 0 6px; }
+  .file pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .ab-grid { display: grid; gap: 14px; margin-top: 12px; }
+  .ab-grid.is-wide { grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); align-items: start; }
+  .ab-label { font: 650 .78rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); margin: 4px 0 8px; }
+  .ab-controls .chips { margin-bottom: 12px; }
+  .ab-controls .chip { min-height: 44px; }
+  .ab-file { font: 600 .8rem/1.2 var(--font-mono); color: var(--ink-2); margin-bottom: 6px; }
+  .ab-pre { margin: 0; white-space: pre-wrap; overflow-wrap: break-word; font-size: .8rem; max-height: 440px; overflow-y: auto; border: 1px solid var(--line); }
+  .ab-controls .pg-hint { font-size: .93rem; color: var(--ink-2); }
+  .ab-controls .pg-hint.ab-warn { color: var(--bad); font-weight: 560; }
+</style>
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>AGENTS.md &amp; project memory files</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of The agent toolkit</span></div>
+<p class="lede">Every agent session starts with a blank memory. A <strong>rules file</strong> is a short note you write once, which the agent reads at the start of every session: how to build, how to test, what never to touch. It is the cheapest, highest-value thing you can add to a repo that agents work in.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what a rules file (AGENTS.md, CLAUDE.md and friends) is, when it loads and which file wins when several apply.</li>
+    <li>Write a short, specific rules file: real commands, conventions, gotchas, boundaries, and no secrets.</li>
+    <li>Choose between a rules file, an Agent Skill and a memory file for a given piece of knowledge.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="ag-2.html">Context engineering</a> (AG.2): everything the agent knows this turn has to fit in one context window, so every line you add competes with everything else. Helpful but optional: <a href="ag-4.html">Agent Skills</a> (AG.4), which this lesson compares rules files against.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Your coding agent keeps running <code>npm test</code>, but your project uses <code>pnpm test:unit</code>. What is the cheapest fix that lasts?</p>
+    <ol class="q-src">
+      <li>Fine-tune the model on your repo</li>
+      <li>Switch to a bigger model</li>
+      <li>Write the right command once in a rules file at the root of the repo</li>
+      <li>Remind it in every chat message</li>
+    </ol>
+    <div class="q-explain">A rules file is read at the start of every session, so one line fixes it for everyone on the team and every future session. Fine-tuning is far too heavy for a fact that fits in one line.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which line belongs in a rules file that is committed to the repo?</p>
+    <ol class="q-src">
+      <li>The API key for the staging server</li>
+      <li>"Run <code>make check</code> before you finish; it must pass."</li>
+      <li>The full 40-page architecture document, pasted in</li>
+      <li>"Write clean, high-quality code."</li>
+    </ol>
+    <div class="q-explain">A good rule is short, specific and checkable. Secrets never go in (the file is shared and pasted into the model's context), long docs belong behind a link, and vague advice changes nothing.</div>
+  </div>
+</section>
+
+<h2>A README for agents</h2>
+<p>A coding agent is a model in a loop that reads files, runs commands and edits code (<a href="sy-5.html">SY.5</a>). Each new session starts from zero. It doesn't know that your project uses <code>pnpm</code>, that tests need Docker running, or that the <code>migrations/</code> folder is generated and must never be edited by hand. So it guesses, and you correct it, again and again.</p>
+<p>From 2024 on, each coding tool solved this with its own instructions file: <code>.cursorrules</code> for Cursor, <code>CLAUDE.md</code> for Claude Code, <code>.github/copilot-instructions.md</code> for GitHub Copilot, <code>GEMINI.md</code> for Gemini CLI. A repo used by several tools ended up with several copies of the same advice. In <strong>August 2025</strong> a group of tool makers (OpenAI Codex, Amp, Google's Jules, Cursor and Factory) settled on one shared name: <strong>AGENTS.md</strong>. In <strong>December 2025</strong> OpenAI donated it to the new <strong>Agentic AI Foundation</strong> under the Linux Foundation, alongside Anthropic's MCP and Block's goose. Its site says it is used by over 60,000 open-source projects.</p>
+<p>The idea is simple. The format's own description: <em>"Think of AGENTS.md as a README for agents: a dedicated, predictable place to provide context and instructions to help AI coding agents work on your project."</em> Your README is for humans: what the project is and how to get started. AGENTS.md holds the extra detail an agent needs:</p>
+<ul>
+  <li><strong>Setup:</strong> how to install and run the project.</li>
+  <li><strong>Test:</strong> the exact commands that must pass before the work is done.</li>
+  <li><strong>Code style:</strong> conventions a linter can't enforce.</li>
+  <li><strong>Gotchas:</strong> the traps a newcomer falls into.</li>
+  <li><strong>PR rules:</strong> how commits and pull requests should look.</li>
+  <li><strong>Don't touch:</strong> generated, vendored or protected files.</li>
+</ul>
+<p>It is plain Markdown with <strong>no required fields</strong>: use whatever headings help. The agent reads the whole file into its context window at the start of the session. That is its strength (it is always there) and its cost: every line is paid for in tokens, in every session, and competes with everything else for the model's attention (<a href="ag-2.html">AG.2</a>).</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ag-5.webp" alt="A new helper robot reads a single welcome poster of picture rules pinned at the entrance of a woodworking workshop while the owner waves hello." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A new helper robot arrives at a woodworking workshop. Before it touches anything, it reads <strong>one welcome poster</strong> pinned by the door: where the tools live, "always wear goggles", "sweep up before you leave", "never touch the big saw".</p>
+      <p>The owner doesn't have to repeat the rules every morning. Any new helper, from any robot company, reads the <strong>same poster</strong> and knows how this workshop works.</p>
+      <p>The poster is <strong>AGENTS.md</strong>. Keeping it to one short poster matters: a 40-page rulebook by the door would never get read properly.</p>
+      <p class="math-note">Where it breaks: a robot reads the whole poster every single time it walks in, and the poster takes up room in its small "working memory". A real helper would remember it after day one.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why does AGENTS.md exist as a separate file instead of putting everything in the README?</p>
+  <ol class="q-src">
+    <li>Agents can't read README files</li>
+    <li>AGENTS.md is a strict schema with required fields</li>
+    <li>It is encrypted so humans can't see it</li>
+    <li>It gives agents one predictable place for build, test and convention details, while the README stays short for humans</li>
+  </ol>
+  <div class="q-explain">Agents can read READMEs, and AGENTS.md has no required fields. The point is a predictable, agent-focused file, so every tool knows where to look and the README stays readable for people.</div>
+</div></div>
+
+<h2>Which file loads, and which one wins</h2>
+<p>Real repos have more than one rules file. A monorepo might have a root AGENTS.md with team-wide rules plus a nested one inside each package. The AGENTS.md convention is short: <strong>the closest AGENTS.md to the file being edited wins</strong>, and <strong>explicit instructions in the chat override everything</strong>. Watch it happen:</p>
+
+<figure class="anim wide" data-anim="ag-5-load"></figure>
+
+<p>In practice, tools usually <em>combine</em> the files rather than throw the root one away: the root rules still apply, and the nearer file only wins where the two disagree. The details differ by tool. Claude Code, for example, concatenates every <code>CLAUDE.md</code> from the root down to where you launched it (closer files are read last) and loads files in subfolders only when it works there. So keep each file self-consistent and avoid contradicting the root unless you mean to.</p>
+<p>Most tools also have their own file names. As of late 2026 most of them also read AGENTS.md, but check each tool's docs, because this changes quickly:</p>
+<div class="table-wrap"><table class="ag-table">
+  <thead><tr><th>Tool (examples)</th><th>Its own file</th><th>AGENTS.md?</th></tr></thead>
+  <tbody>
+    <tr><td>Codex, Amp, Jules, Factory</td><td><code>AGENTS.md</code> is the native file</td><td>Yes</td></tr>
+    <tr><td>Claude Code</td><td><code>CLAUDE.md</code>, plus <code>~/.claude/CLAUDE.md</code> for personal rules and <code>.claude/rules/</code> for path-scoped ones</td><td>Reads it when there is no CLAUDE.md; or import it with a line <code>@AGENTS.md</code></td></tr>
+    <tr><td>Gemini CLI</td><td><code>GEMINI.md</code> (global one in <code>~/.gemini/</code>)</td><td>Via a setting (<code>context.fileName</code>)</td></tr>
+    <tr><td>Cursor</td><td><code>.cursor/rules/*.mdc</code> (old: <code>.cursorrules</code>)</td><td>Yes</td></tr>
+    <tr><td>GitHub Copilot</td><td><code>.github/copilot-instructions.md</code> and <code>.github/instructions/*.instructions.md</code></td><td>Yes</td></tr>
+  </tbody>
+</table></div>
+<p><strong>One source of truth.</strong> If your team uses several tools, keep the real rules in <code>AGENTS.md</code> and make each tool-specific file point at it: a one-line <code>CLAUDE.md</code> containing <code>@AGENTS.md</code>, a symlink, or a setting. Two copies of the same rules always drift apart.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">The root AGENTS.md says "use 4-space indents"; <code>packages/web/AGENTS.md</code> says "use 2-space indents". The agent edits <code>packages/web/app.ts</code>. What should it use, if you said nothing in the chat?</p>
+  <ol class="q-src">
+    <li>2 spaces: the closest file wins where they conflict</li>
+    <li>4 spaces: the root file always wins</li>
+    <li>Whichever file it happened to read first</li>
+    <li>Neither: conflicting files are ignored</li>
+  </ol>
+  <div class="q-explain">The nearest AGENTS.md takes precedence for files in its folder. Only an explicit instruction in the chat would override it.</div>
+</div></div>
+
+<h2>What to put in, what to leave out</h2>
+<p>A rules file is <strong>context, not enforcement</strong>: the model reads it and usually follows it, but nothing forces it to. Short, concrete, checkable rules get followed; long, vague ones get diluted. Claude Code's docs, for example, suggest staying under about 200 lines per file, and add a good test for when to write a new rule: when the agent makes the same mistake a second time.</p>
+<div class="table-wrap"><table class="ag-table">
+  <thead><tr><th>Put in</th><th>Leave out</th></tr></thead>
+  <tbody>
+    <tr><td>Exact commands that actually run: <code>pytest -q</code>, not "run the tests"</td><td><strong>Secrets</strong>: keys, tokens, passwords. The file is committed, shared with every tool and pasted into the model's context.</td></tr>
+    <tr><td>Conventions a linter can't check ("use <code>httpx</code>, not <code>requests</code>")</td><td>What a formatter or linter already enforces: let the tool (or a hook, <a href="ag-7.html">AG.7</a>) do it</td></tr>
+    <tr><td>Where things live ("API handlers are in <code>src/api/</code>")</td><td>Long docs pasted in: link to them instead</td></tr>
+    <tr><td>Gotchas from real incidents, with the reason</td><td>Vague advice ("write clean code")</td></tr>
+    <tr><td>Boundaries: generated, vendored or protected files</td><td>Multi-step procedures used only sometimes: make those a skill (<a href="ag-4.html">AG.4</a>)</td></tr>
+  </tbody>
+</table></div>
+<h3>A live example: this course's own rules file</h3>
+<p>The repo behind this course has a <code>CLAUDE.md</code> that agents read before touching any lesson. Here is a lightly trimmed excerpt:</p>
+<figure class="file">
+  <figcaption>CLAUDE.md (excerpt)</figcaption>
+<pre><code>### Non-negotiable: no overlapping or clipped text, ever
+
+Every animation and playground must be legible at **every step**
+on **phone (360–430px), iPad (portrait + landscape) and desktop**.
+Overlapping labels have shipped before (forgetting-curve axis
+title colliding with "learned!"/"R1" on phones), so before any
+commit that touches `course/`:
+
+1. Run the layout guard and make it pass. …
+   cd tools/qa &amp;&amp; npm install &amp;&amp; node check-layout.js http://localhost:8123/
+2. Then **look at screenshots yourself** of every animation step
+   on a phone width: the guard can't see text colliding with lines.
+
+- Text inside SVG ≥ 12 viewBox units in compact layouts …
+- Currency in lesson text: KaTeX auto-render treats `$` as a math
+  delimiter, so write prices as `$\$2.00$` (or say "2 dollars").</code></pre>
+</figure>
+<p>Notice what makes it work:</p>
+<ol class="steps">
+  <li><strong>A rule born from a real incident, with the reason.</strong> Labels really did overlap on phones once. Saying so tells the agent <em>why</em> the rule matters, so it applies the spirit, not just the letter.</li>
+  <li><strong>A command that actually runs.</strong> The agent can check its own work instead of guessing.</li>
+  <li><strong>Numbers, not adjectives.</strong> "≥ 12 units" can be checked; "readable" can't.</li>
+  <li><strong>A gotcha nobody would guess.</strong> A dollar sign in lesson text silently turns into maths. One line saves an hour of debugging.</li>
+  <li><strong>Honest limits.</strong> It says what the automatic check <em>can't</em> see, so the agent knows to look at screenshots too.</li>
+</ol>
+
+<div class="playground" id="ag5-builder">
+  <h3>Playground: build an AGENTS.md</h3>
+  <p class="math-note" style="margin:0">Pick a project, then switch sections on and off. The preview is the file an agent would load at the start of every session. Token count is a rough estimate (about 4 characters per token).</p>
+  <div class="ab-grid">
+    <div class="ab-controls">
+      <div class="ab-label" id="ab-proj">Project</div>
+      <div class="chips" role="group" aria-labelledby="ab-proj">
+        <button type="button" class="chip" data-proj="py" aria-pressed="true">Python API</button>
+        <button type="button" class="chip" data-proj="web" aria-pressed="false">TypeScript web app</button>
+      </div>
+      <div class="ab-label" id="ab-sec">Sections</div>
+      <div class="chips" role="group" aria-labelledby="ab-sec">
+        <button type="button" class="chip" data-sec="setup" aria-pressed="true">Setup</button>
+        <button type="button" class="chip" data-sec="test" aria-pressed="true">Test</button>
+        <button type="button" class="chip" data-sec="style" aria-pressed="false">Code style</button>
+        <button type="button" class="chip" data-sec="gotchas" aria-pressed="true">Gotchas</button>
+        <button type="button" class="chip" data-sec="pr" aria-pressed="false">PR rules</button>
+        <button type="button" class="chip" data-sec="donttouch" aria-pressed="true">Don't touch</button>
+        <button type="button" class="chip" data-sec="secret" aria-pressed="false">API key ⚠</button>
+      </div>
+      <p class="pg-hint" aria-live="polite" style="margin:0"></p>
+    </div>
+    <div class="ab-preview">
+      <div class="ab-file">Preview · AGENTS.md</div>
+      <pre class="ab-pre"><code></code></pre>
+      <p class="pg-readout" aria-live="polite"></p>
+    </div>
+  </div>
+</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Your agent keeps forgetting to run the formatter. Which fix fits best?</p>
+  <ol class="q-src">
+    <li>Add three paragraphs about why formatting matters</li>
+    <li>Paste the formatter's full documentation into AGENTS.md</li>
+    <li>Run the formatter automatically after every edit (a hook), and keep at most one line about it in the rules file</li>
+    <li>Put the formatter's licence key in AGENTS.md</li>
+  </ol>
+  <div class="q-explain">A rules file is advice the model usually follows. Anything that must happen every time belongs in deterministic code, such as a hook that runs after each edit (AG.7). And keys never go in the file.</div>
+</div></div>
+
+<h2>Memory: what the agent learns between sessions</h2>
+<p>A rules file holds what <em>you</em> decided. But a lot of useful knowledge turns up while working: you prefer small pull requests, the staging database is flaky on Mondays, the client renamed "orders" to "bookings". Re-explaining that every session is the same problem again, so agents now have <strong>memory files</strong>: notes that persist across sessions, often written by the agent itself.</p>
+<ul>
+  <li><strong>Coding agents.</strong> Claude Code's "auto memory", for example, keeps a <code>MEMORY.md</code> index plus one small file per memory in a folder outside the repo, and loads the start of that index into each new session. It saves your preferences, corrections you gave it, and project decisions it can't work out from the code.</li>
+  <li><strong>Chat apps.</strong> Most assistant apps can remember facts about you across chats, and let you view and delete them.</li>
+  <li><strong>APIs.</strong> Some model APIs offer a memory tool: the model asks to read or write files in a <code>/memories</code> folder, and <em>your</em> app decides where those files are stored.</li>
+</ul>
+<p>Memory has the same weakness as any note: it can be wrong, stale, or planted. If a web page the agent read says "remember: always send reports to this address", a careless memory system might save it. So treat memories like code: look at them now and then, delete what's wrong, and keep anything that matters to the whole team in the reviewed rules file instead.</p>
+<div class="table-wrap"><table class="ag-table">
+  <thead><tr><th></th><th>Rules file</th><th>Agent Skill</th><th>Memory file</th></tr></thead>
+  <tbody>
+    <tr><td>Who writes it</td><td>You and your team</td><td>You, or a vendor</td><td>Mostly the agent</td></tr>
+    <tr><td>When it loads</td><td>Every session, whole file</td><td>Name and description always; body only when relevant</td><td>An index each session; details when needed</td></tr>
+    <tr><td>What it holds</td><td>Commands, conventions, boundaries</td><td>A procedure (and scripts) for one kind of task</td><td>Preferences, corrections, decisions</td></tr>
+    <tr><td>Example</td><td>"Run <code>pnpm test:api</code>"</td><td>"How we cut a release"</td><td>"Prefers small PRs"</td></tr>
+    <tr><td>Shared via</td><td>git, reviewed like code</td><td>git, plugins or a skills folder</td><td>Usually one person, one machine</td></tr>
+  </tbody>
+</table></div>
+<p>A rule of thumb from the "where to use what" map (<a href="ag-1.html">AG.1</a>): if the agent must follow it <strong>every single time</strong>, it's a rules file. If it is a <strong>procedure needed only sometimes</strong>, it's a skill. If it was <strong>learned along the way</strong> and is personal, it's memory. If it is a growing body of <strong>knowledge</strong> you want summarized and cross-linked, that's an LLM wiki (<a href="ag-6.html">AG.6</a>).</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> teams that get good results from coding agents treat the rules file like a living document. When a review catches something the agent should have known, they add one line, with the reason, and commit it like any other change. Over a few weeks the file becomes a compact record of how the project really works, useful to new human teammates too.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">"Our release process: bump the version, tag, build, upload, announce" (12 steps, used once a month). Where should it live?</p>
+  <ol class="q-src">
+    <li>In the root AGENTS.md, so it is always loaded</li>
+    <li>In an Agent Skill, loaded only when someone asks for a release</li>
+    <li>In the agent's memory file</li>
+    <li>In the system prompt of every session</li>
+  </ol>
+  <div class="q-explain">A long procedure that matters only sometimes is exactly what skills are for: only its short description sits in context until a release is requested. In the rules file it would cost tokens in every session.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">A teammate asks: "Why not just put everything the agent should know into AGENTS.md?" What do you say?</p>
+  <div class="model-answer"><strong>Model answer:</strong> AGENTS.md is loaded in full at the start of every session, so every line costs tokens and competes for the model's attention. Keep it to short, checkable rules that apply every time; move occasional procedures into skills, link to long docs, enforce must-always rules with hooks, and never put secrets in it.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">The root AGENTS.md says "run <code>npm test</code>". In the chat you write "don't run any tests this time". What should the agent do?</p>
+    <ol class="q-src">
+      <li>Run <code>npm test</code>, because the file is the source of truth</li>
+      <li>Skip the tests: explicit chat instructions override the files</li>
+      <li>Refuse until the file is edited</li>
+      <li>Run the tests twice to be safe</li>
+    </ol>
+    <div class="q-explain">By the AGENTS.md convention, explicit user instructions in the chat override every file, for that conversation.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which rule is best written?</p>
+    <ol class="q-src">
+      <li>"Be careful with the database."</li>
+      <li>"Follow best practices for testing."</li>
+      <li>"Remember everything in the docs folder."</li>
+      <li>"Never edit <code>migrations/</code> by hand; create new ones with <code>alembic revision</code>."</li>
+    </ol>
+    <div class="q-explain">It names an exact folder, says what not to do and gives the command to use instead. The others can't be checked.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Your AGENTS.md grew to 900 lines and the agent now ignores some rules. Using what you know about context windows (AG.2), what is the best first move?</p>
+    <ol class="q-src">
+      <li>Cut it to the rules that matter every time; move procedures to skills and long docs behind links</li>
+      <li>Repeat the important rules three times each</li>
+      <li>Switch to a model with a bigger context window and change nothing</li>
+      <li>Write the important rules in capital letters</li>
+    </ol>
+    <div class="q-explain">More text in context means each rule gets less attention, and the file is paid for in every session. Shorter, more specific files are followed more reliably.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What is the main difference between a rules file and a memory file?</p>
+    <ol class="q-src">
+      <li>Rules files are for chat apps; memory files are for coding agents</li>
+      <li>Memory files are always more accurate</li>
+      <li>You write the rules file on purpose and review it; memory is mostly written by the agent as it works</li>
+      <li>There is none; they are two names for the same thing</li>
+    </ol>
+    <div class="q-explain">Rules are deliberate, shared and reviewed in git. Memories are notes the agent takes about preferences and decisions, usually personal and local, and worth checking now and then.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A rules file is a <strong>README for agents</strong>: setup, test commands, conventions, gotchas, boundaries. It loads in full at the start of every session.</li>
+    <li><strong>AGENTS.md</strong> is the shared open format (2025, now under the Linux Foundation's Agentic AI Foundation). Nested files: <strong>the closest one wins</strong>; chat instructions override all.</li>
+    <li>Keep it <strong>short, specific and checkable</strong>; add a rule when a mistake repeats; <strong>never put secrets in it</strong>.</li>
+    <li>Always → rules file. Sometimes, a procedure → skill. Learned along the way → memory. Must happen no matter what → a hook.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ag-5-a","front":"What is AGENTS.md, in one line?","back":"A README for coding agents: a plain Markdown file in the repo with setup and test commands, conventions, gotchas and boundaries, read at the start of every session."},
+  {"id":"ag-5-b","front":"Nested AGENTS.md files: which one wins, and what beats all of them?","back":"The closest AGENTS.md to the file being edited wins where rules conflict. Explicit instructions in the chat override every file."},
+  {"id":"ag-5-c","front":"Name three things that must NOT go in a rules file.","back":"Secrets (keys, tokens, passwords); long docs pasted in (link instead); vague advice. Also rules a linter or formatter already enforces, and occasional multi-step procedures (use a skill)."},
+  {"id":"ag-5-d","front":"Rules file vs Agent Skill vs memory file: when is each the right home?","back":"Must follow every time → rules file. A procedure needed only sometimes → skill (only its description loads up front). Preferences and decisions learned along the way → memory."},
+  {"id":"ag-5-e","front":"Why is a rules file 'context, not enforcement', and what do you use when something must always happen?","back":"The model reads the file and usually follows it, but nothing forces it. For must-always actions (format after edit, block a command), use deterministic code such as a hook."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ag-5-load.js"></script>
+<script src="../assets/js/anims/ag-5-builder.js"></script>
+</body>
+</html>

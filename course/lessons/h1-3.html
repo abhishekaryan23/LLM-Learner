@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="h1-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Attention and the Transformer (2014–2017) · LLMs, Animated</title>
+<meta name="description" content="How machine translation led to attention, and attention led to the Transformer: seq2seq, the fixed-vector bottleneck, Bahdanau and Luong attention, and Attention Is All You Need.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Attention and the Transformer (2014–2017)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of The story of AI</span></div>
+<p class="lede">The architecture behind every modern LLM was invented to translate sentences. This lesson follows the three-year path from "squeeze the sentence into one vector" to "let every word look at every other word", and why that second idea took over all of AI.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain the seq2seq encoder–decoder and its fixed-vector bottleneck.</li>
+    <li>Describe attention as a weighted blend of the source words, and compute one by hand.</li>
+    <li>Say what the 2017 Transformer removed, why that made training parallel, and what it scored.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="h1-2.html">H1.2 <em>The deep-learning breakthrough</em></a>: recurrent networks, LSTMs and why GPUs matter.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">The Transformer, the architecture behind ChatGPT, was first built for which task?</p>
+    <ol class="q-src">
+      <li>Chatting with people</li>
+      <li>Translating between languages</li>
+      <li>Recognising images</li>
+      <li>Playing Go</li>
+    </ol>
+    <div class="q-explain">Machine translation. "Attention Is All You Need" (2017) reported English→German and English→French translation results. Using it for chat came years later.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What did the 2017 Transformer remove from the leading translation models of the time?</p>
+    <ol class="q-src">
+      <li>Attention</li>
+      <li>Word vectors (embeddings)</li>
+      <li>Recurrence: reading the sentence one word after another</li>
+      <li>Backpropagation</li>
+    </ol>
+    <div class="q-explain">It kept attention and dropped the recurrent network around it. Without recurrence, all positions can be computed at once, which suits GPUs.</div>
+  </div>
+</section>
+
+<h2>Translation through one summary vector (2014)</h2>
+<p>Machine translation is one of AI's oldest goals. The 1954 Georgetown–IBM demo translated about 60 Russian sentences with hand-written rules, and promised the problem would be solved within a few years. It wasn't. From the 1990s the best systems were <strong>statistical</strong>: they learned which phrases tend to translate to which from millions of human-translated sentence pairs, then stitched phrases together. Google Translate worked like that from its launch in 2006.</p>
+<p>In <strong>2014</strong>, Ilya Sutskever, Oriol Vinyals and Quoc Le at Google showed a pure neural network could compete. Their <strong>sequence-to-sequence</strong> (seq2seq) model has two LSTMs. The <strong>encoder</strong> reads the English sentence word by word and ends with one vector, a list of numbers summarising the whole sentence. The <strong>decoder</strong> starts from that vector and writes the French, one word at a time. Kyunghyun Cho and colleagues proposed a similar encoder–decoder the same year.</p>
+<p>On a standard English→French test it scored <strong>34.8 BLEU</strong>, beating a strong phrase-based system's 33.3. (<strong>BLEU</strong> measures how many word sequences a translation shares with human reference translations, on a 0–100 scale; higher is better.) An odd trick helped: feeding the source sentence in <em>reverse</em>, so the first English words ended up closest to the first French words.</p>
+<p>That trick hints at the flaw. Every sentence, 5 words or 50, has to fit into <strong>one fixed-size vector</strong> before a single French word is written. That's the <strong>bottleneck</strong>: long sentences lose detail.</p>
+
+<figure class="anim wide" data-anim="h1-3-timeline"></figure>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What is the "bottleneck" in the 2014 seq2seq model?</p>
+  <ol class="q-src">
+    <li>The whole source sentence must be compressed into one fixed-size vector before decoding starts</li>
+    <li>The decoder can only write sentences of up to 10 words</li>
+    <li>The model only fits on one GPU</li>
+    <li>BLEU scores can't go above 35</li>
+  </ol>
+  <div class="q-explain">A fixed-size summary has room for only so much. Short sentences fit; long ones lose information, so translation quality falls with length.</div>
+</div></div>
+
+<h2>Attention: look back at every word (2014–2016)</h2>
+<p>Later in <strong>2014</strong>, Dzmitry Bahdanau, Kyunghyun Cho and Yoshua Bengio removed the bottleneck. Keep the encoder's vector for <em>every</em> source word, not just the last one. Then, each time the decoder writes a word, it:</p>
+<ol>
+  <li>scores how relevant each source word is right now,</li>
+  <li>turns the scores into <strong>weights</strong> that are positive and add up to 1 (using softmax),</li>
+  <li>takes the <strong>weighted blend</strong> of the source words' vectors, and uses that blend to choose the next word.</li>
+</ol>
+$$c = \alpha_1 h_1 + \alpha_2 h_2 + \dots + \alpha_n h_n$$
+<p>Here $h_i$ is the encoder's vector for source word $i$, $\alpha_i$ (alpha) is its attention weight, and $c$ is the <strong>context</strong>: what the decoder "looks at" for this word. Big weight = look closely; tiny weight = mostly ignore. Nobody tells the model which words match; the weights are learned with backprop like everything else. In <strong>2015</strong>, Minh-Thang Luong and colleagues at Stanford showed that a plain <strong>dot product</strong> works well as the relevance score, which is the form transformers use.</p>
+
+<h3>Worked example</h3>
+<p>Pretend each source word's vector is a single number. The decoder's weights are $0.7, 0.2, 0.1$ over values $10, 4, 0$.</p>
+<ol class="steps">
+  <li>Check the weights sum to 1: $0.7 + 0.2 + 0.1 = 1$ ✓</li>
+  <li>Blend: $c = 0.7 \times 10 + 0.2 \times 4 + 0.1 \times 0 = 7 + 0.8 + 0 = 7.8$</li>
+  <li>The result sits close to 10, the value with the most attention.</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<p>Weights $0.5, 0.3, 0.2$ over values $2, 6, 10$.</p>
+<ol class="steps">
+  <li>$0.5 \times 2$: <span class="blank" data-answer="1" data-tol="0.001" data-hint="Half of 2."></span></li>
+  <li>$0.3 \times 6$: <span class="blank" data-answer="1.8" data-tol="0.001" data-hint="Three tenths of 6."></span></li>
+  <li>The blend $c$: <span class="blank" data-answer="4.8" data-tol="0.001" data-hint="1 + 1.8 + 0.2 × 10."></span></li>
+</ol>
+
+<div class="playground" id="h1-3-playground">
+  <h3>Playground: what does each French word look at?</h3>
+  <p class="math-note" style="margin:0">The sentence pair from Bahdanau et al.'s paper. Tap a French word to see its attention over the English words, then switch to the 2014 seq2seq model.</p>
+  <div class="chips" role="group" aria-label="Model" style="margin-top:10px">
+    <button type="button" class="chip" data-mode="att" aria-pressed="true" style="min-height:44px">With attention</button>
+    <button type="button" class="chip" data-mode="one" aria-pressed="false" style="min-height:44px">One vector (seq2seq)</button>
+  </div>
+  <div class="chips h1-3-words" role="group" aria-label="French word to inspect" style="margin-top:8px"></div>
+  <div class="pg-stage" style="margin-top:8px"></div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p>By <strong>2016</strong>, attention-based LSTM translation was ready for production: Google's Neural Machine Translation system (GNMT) replaced phrase-based translation in Google Translate, starting with Chinese→English that September. But it still had a speed limit. An LSTM must process word 6 after word 5, after word 4… so training can't spread one sentence across a GPU's thousands of cores.</p>
+<p class="math-note">You'll take attention apart properly, with queries, keys and values, in <a href="m1-1.html">M1.1 <em>Attention</em></a>. Softmax gets its own lesson in <a href="p3-2.html">P3.2</a>.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">In attention, what are the weights $\alpha_i$ used for?</p>
+  <ol class="q-src">
+    <li>To decide how many words the output sentence has</li>
+    <li>To replace backpropagation</li>
+    <li>To count how often each word appears</li>
+    <li>To blend the source words' vectors, so each output word focuses on the most relevant source words</li>
+  </ol>
+  <div class="q-explain">The weights are positive, sum to 1, and set how much each source word contributes to the context for the word being written.</div>
+</div></div>
+
+<h2>Attention is all you need (2017)</h2>
+<p>In June <strong>2017</strong>, eight researchers at Google (Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan Gomez, Łukasz Kaiser and Illia Polosukhin) posted "Attention Is All You Need". Its claim is in the title: drop the recurrent network and keep only attention.</p>
+<ul>
+  <li><strong>Self-attention.</strong> Attention isn't just decoder-looks-at-encoder anymore. Every word in a sentence attends to every other word in the <em>same</em> sentence, building a richer vector for each word from its context. Any two words are one step apart, however far apart they sit.</li>
+  <li><strong>Several heads.</strong> Each layer runs several attention operations side by side ("multi-head"), so it can track different relationships at once (<a href="m1-2.html">M1.2</a>).</li>
+  <li><strong>Word order added back in.</strong> Without recurrence the model can't tell "dog bites man" from "man bites dog", so a <strong>positional encoding</strong> is added to each word's vector (<a href="m1-3.html">M1.3</a>).</li>
+  <li><strong>A simple repeated block.</strong> Attention, then a small MLP, each wrapped in a ResNet-style skip connection and normalisation, stacked 6 times in the encoder and 6 in the decoder.</li>
+</ul>
+<p>The payoff was <strong>parallelism</strong>. With no step-by-step recurrence, all positions in a sentence are computed at once during training, which is exactly what GPUs are good at. The big Transformer reached <strong>28.4 BLEU</strong> on WMT14 English→German, more than 2 BLEU above the best earlier results (including ensembles of several models), and 41.8 on English→French, after <strong>3.5 days on 8 GPUs</strong>, a small fraction of the training cost of the previous best models.</p>
+<p>There's a price: every word attends to every word, so the work grows with the <em>square</em> of the length. Doubling the context means four times the attention cost. Much later engineering, such as FlashAttention and long-context tricks, fights exactly this (<a href="m5-4.html">M5.4</a>, <a href="ar-5.html">AR.5</a>).</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>A class is passing a message down a line of chairs: each child whispers to the next. It's slow, because everyone waits their turn, and by the end of a long line the message is garbled. That's a recurrent network.</p>
+    <p>Now everyone sits in a circle and <strong>can look at anyone</strong>. Each child glances at the classmates who matter for their part, all at the same time. Nothing gets garbled along a chain, and nobody waits. That's self-attention.</p>
+    <p class="math-note">Where it breaks: in a big circle, everyone checking everyone is a lot of glancing. Attention's cost grows with the square of the number of words.</p>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> every model in the rest of this course descends from this paper. GPT-style LLMs keep only the <strong>decoder</strong> half and predict the next word (<a href="m1-4.html">M1.4 <em>The decoder-only transformer</em></a>); BERT keeps only the encoder half (next lesson). Parallel training is what made it affordable to scale transformers to hundreds of billions of weights.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why could the Transformer train so much faster than an LSTM translator?</p>
+  <ol class="q-src">
+    <li>It had fewer layers</li>
+    <li>With no recurrence, all positions in a sentence can be computed at the same time on a GPU</li>
+    <li>It skipped backpropagation</li>
+    <li>It translated only short sentences</li>
+  </ol>
+  <div class="q-explain">An LSTM must finish word 5 before starting word 6. Self-attention has no such chain, so the whole sentence is processed in parallel during training.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Trace the path from seq2seq to the Transformer: what problem did each step solve?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Seq2seq (2014) squeezed the whole sentence into one vector, which loses detail on long sentences. Attention (2014–2015) let the decoder look back at every source word with learned weights, removing that bottleneck. The Transformer (2017) dropped the recurrent network entirely and used self-attention everywhere, so training could run in parallel and scale up.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Attention weights over three source words are $0.6, 0.3, 0.1$, and their (one-number) vectors are $5, 0, 10$. What is the context $c$?</p>
+    <ol class="q-src">
+      <li>5.0</li>
+      <li>15</li>
+      <li>4.0</li>
+      <li>3.0</li>
+    </ol>
+    <div class="q-explain">$0.6 \times 5 + 0.3 \times 0 + 0.1 \times 10 = 3 + 0 + 1 = 4$.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which order is right?</p>
+    <ol class="q-src">
+      <li>seq2seq (2014) → Bahdanau attention (2014) → Luong dot-product attention (2015) → GNMT in Google Translate (2016) → Transformer (2017)</li>
+      <li>Transformer → seq2seq → Bahdanau attention → GNMT</li>
+      <li>Bahdanau attention → Transformer → seq2seq → GNMT</li>
+      <li>GNMT → seq2seq → Transformer → Luong attention</li>
+    </ol>
+    <div class="q-explain">Attention was invented to fix seq2seq, went into production in 2016, and became "all you need" in 2017.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">The Transformer has no recurrence. How does it know word order?</p>
+    <ol class="q-src">
+      <li>It doesn't need to; order never matters in language</li>
+      <li>It reads the sentence backwards</li>
+      <li>Attention weights are sorted by position</li>
+      <li>A positional encoding is added to each word's vector</li>
+    </ol>
+    <div class="q-explain">Self-attention on its own treats the input as an unordered set. Position information has to be injected, which is the topic of M1.3.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">From H1.2: the LSTM (1997) was itself a fix. What did it fix, and why did the Transformer still replace it?</p>
+    <ol class="q-src">
+      <li>It fixed XOR; it was replaced because it couldn't do translation</li>
+      <li>It fixed vanishing gradients over long sequences, but it still processes words one after another, so it can't be parallelised across a sentence</li>
+      <li>It fixed overfitting; it was replaced because it overfitted again</li>
+      <li>It fixed slow GPUs; Transformers run on CPUs</li>
+    </ol>
+    <div class="q-explain">LSTMs carry information further than plain RNNs, but recurrence is inherently sequential. Self-attention gives one-hop access to any word and parallel training.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>seq2seq</strong> (Sutskever, Vinyals &amp; Le, 2014): an encoder LSTM squeezes the sentence into one vector; a decoder LSTM writes the translation. That one vector is a <strong>bottleneck</strong>.</li>
+    <li><strong>Attention</strong> (Bahdanau, Cho &amp; Bengio, 2014; Luong et al., 2015): for each output word, a learned weighted blend $c = \sum_i \alpha_i h_i$ of all source words. The weights learn alignments.</li>
+    <li>2016: attention-based LSTMs (GNMT) power Google Translate, but recurrence is sequential.</li>
+    <li><strong>Transformer</strong> (Vaswani et al., 2017): self-attention only, no recurrence, so training is <strong>parallel</strong>. 28.4 BLEU on WMT14 En–De after 3.5 days on 8 GPUs.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"h1-3-a","front":"How did seq2seq (2014) translate, and what was its weakness?","back":"An encoder LSTM reads the source into one fixed-size vector; a decoder LSTM writes the output word by word from it. Weakness: the fixed-vector bottleneck, so long sentences lose detail."},
+  {"id":"h1-3-b","front":"What does attention compute for each output word?","back":"A score for every source word, turned into positive weights summing to 1 (softmax), then the weighted blend $c = \\sum_i \\alpha_i h_i$ of the source vectors (Bahdanau et al. 2014; dot-product scores: Luong et al. 2015)."},
+  {"id":"h1-3-c","front":"What did 'Attention Is All You Need' (Vaswani et al., 2017) remove, and why did it matter?","back":"Recurrence. With self-attention only, every position is computed in parallel during training and any two words are one hop apart, so models train much faster and scale better."},
+  {"id":"h1-3-d","front":"What result did the 2017 Transformer report?","back":"28.4 BLEU on WMT14 English→German (over 2 BLEU above previous best, including ensembles) and 41.8 on English→French, after 3.5 days on 8 GPUs."},
+  {"id":"h1-3-e","front":"What is the cost of self-attention as sentences get longer?","back":"It grows with the square of the length: every word attends to every word, so doubling the length means about 4× the attention work."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/h1-timeline-kit.js"></script>
+<script src="../assets/js/anims/h1-3-timeline.js"></script>
+<script src="../assets/js/anims/h1-3-alignment-playground.js"></script>
+</body>
+</html>

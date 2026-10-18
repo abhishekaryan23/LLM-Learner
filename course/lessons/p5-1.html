@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p5-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gaussians &amp; noise · LLMs, Animated</title>
+<meta name="description" content="Mean, variance and the normal density symbol by symbol, the 68–95–99.7 rule, sampling with x = μ + σε, why variances add, and how diffusion models turn data into noise step by step.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Gaussians &amp; noise</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Math for generative models</span></div>
+<p class="lede">A diffusion model starts from pure noise and sculpts it into an image. A VAE squeezes every picture into a small cloud of noise and decodes it back. Both speak the same language: the <strong>Gaussian</strong>, or normal, distribution. This lesson gives you its formula, its rules of thumb, how to sample from it, and the one equation that turns a picture into noise.</p>
+
+<div class="cover"><img src="../assets/img/cover-p5.webp" alt="Illustration: a bell-shaped hill of tiny dots, stepping stones joined by hopping arrows, a sliding window over a patterned grid, and a waveform turning into a striped heat-strip." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Read the normal density formula symbol by symbol and use the 68–95–99.7 rule.</li>
+    <li>Sample any Gaussian with $x = \mu + \sigma\varepsilon$, and add independent Gaussians (their variances add).</li>
+    <li>Explain the diffusion forward process $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$ and what its signal-to-noise ratio measures.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> distributions, expectation and sampling from <a href="p1-5.html">Probability &amp; expectation (P1.5)</a>. Helpful but optional: <a href="p1-1.html">Vectors &amp; dot products (P1.1)</a> for the many-dimensions byte. This lesson feeds <a href="g1-1.html">VAEs (G1.1)</a>, <a href="g1-3.html">Diffusion from scratch (G1.3)</a> and <a href="g1-5.html">Flow matching (G1.5)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Adult heights in a country are roughly bell-shaped, with mean 170 cm and standard deviation 10 cm. About what fraction of adults are between 160 and 180 cm?</p>
+    <ol class="q-src">
+      <li>About 50%</li>
+      <li>About 68%</li>
+      <li>About 95%</li>
+      <li>Nearly 100%</li>
+    </ol>
+    <div class="q-explain">160 to 180 is the mean plus or minus one standard deviation. For any normal distribution that range holds about 68% of the values. It's the first number of the <strong>68–95–99.7 rule</strong> you'll meet below.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You add two independent sources of random noise to a signal. Each has standard deviation 1. What is the standard deviation of their sum?</p>
+    <ol class="q-src">
+      <li>2</li>
+      <li>1</li>
+      <li>About 1.41</li>
+      <li>0, because they cancel out on average</li>
+    </ol>
+    <div class="q-explain">For independent noise, <strong>variances</strong> add, not standard deviations: $1^2 + 1^2 = 2$, so the standard deviation is $\sqrt 2 \approx 1.41$. The two noises partly cancel, but never fully.</div>
+  </div>
+</section>
+
+<h2>Mean, variance and the curve that is everywhere</h2>
+<p>In 1733, Abraham de Moivre wanted the odds of getting, say, between 1,800 and 1,850 heads in thousands of coin flips. Adding up thousands of binomial terms by hand was hopeless, so he found a smooth bell-shaped curve that approximates them. In 1809 Carl Friedrich Gauss used the same curve to model errors in astronomical measurements, which is why it carries his name. A year later Pierre-Simon Laplace proved an early form of the <strong>central limit theorem</strong>: add up many small, independent random effects, and the total is approximately bell-shaped, whatever the individual effects look like.</p>
+<p>That theorem is why the curve is everywhere: measurement errors, heights, sensor noise. It is also why generative models chose it. Gaussian noise is the simplest "pure randomness" to write down, to sample and to calculate with.</p>
+<p>Two numbers describe a Gaussian completely:</p>
+<ul>
+  <li>The <strong>mean</strong> $\mu = \mathbb{E}[X]$, the probability-weighted average from <a href="p1-5.html">P1.5</a>. It sets the centre.</li>
+  <li>The <strong>variance</strong> $\sigma^2 = \mathbb{E}\big[(X - \mu)^2\big]$, the average squared distance from the mean. It sets the spread. Its square root, the <strong>standard deviation</strong> $\sigma$, measures spread in the same units as $X$.</li>
+</ul>
+<p>A tiny example. Five measurements: 4, 6, 5, 7, 3. The mean is $25/5 = 5$. The deviations from it are $-1, 1, 0, 2, -2$; their squares are $1, 1, 0, 4, 4$, which average to a variance of $10/5 = 2$. So $\sigma = \sqrt 2 \approx 1.41$. Squaring stops positive and negative deviations from cancelling, and punishes big deviations more than small ones.</p>
+<p>Where you'll meet this later: the noise a diffusion model adds to images (<a href="g1-3.html">G1.3</a>), the cloud of codes a VAE maps images into (<a href="g1-1.html">G1.1</a>), the random starting point of every generated image or video (<a href="vd-2.html">VD.2</a>), and the random numbers used to initialise neural-network weights.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Four values: 2, 4, 6, 8. What is their standard deviation (dividing by the number of values)?</p>
+  <ol class="q-src">
+    <li>5</li>
+    <li>About 2.24</li>
+    <li>20</li>
+    <li>1</li>
+  </ol>
+  <div class="q-explain">The mean is 5. Deviations $-3, -1, 1, 3$ square to $9, 1, 1, 9$, averaging to a variance of 5. The standard deviation is $\sqrt 5 \approx 2.24$. (5 is the variance, not the standard deviation.)</div>
+</div></div>
+
+<h2>The normal density, symbol by symbol</h2>
+<p>We write $X \sim \mathcal{N}(\mu, \sigma^2)$, "X is normally distributed with mean $\mu$ and variance $\sigma^2$". Its <strong>probability density</strong> is</p>
+$$p(x) = \frac{1}{\sqrt{2\pi\sigma^2}}\,\exp\!\left(-\frac{(x - \mu)^2}{2\sigma^2}\right)$$
+<ul>
+  <li>$x$ is the value whose density we want; $\mu$ is the centre. The curve peaks at $x = \mu$ and is symmetric around it.</li>
+  <li>$(x - \mu)^2 / \sigma^2$ is the squared distance from the centre <em>measured in standard deviations</em>. One $\sigma$ away gives 1; two $\sigma$ away gives 4.</li>
+  <li>$\exp(-\,\cdot\,/2)$ turns that distance into a weight: 1 at the centre, $e^{-1/2} \approx 0.61$ of the peak at one $\sigma$, $e^{-2} \approx 0.14$ at two, $e^{-4.5} \approx 0.011$ at three. It falls off very fast.</li>
+  <li>$\frac{1}{\sqrt{2\pi\sigma^2}}$ is the <strong>normalising constant</strong> that makes the total area exactly 1. A wider curve ($\sigma$ bigger) must be lower, so doubling $\sigma$ halves the peak.</li>
+</ul>
+<p>A density is not a probability. Probabilities are <strong>areas</strong> under the curve, and the height can exceed 1: $\mathcal N(0, 0.1^2)$ peaks at about 3.99. The standard normal, $\mathcal N(0, 1)$, is the one we sample from and rescale:</p>
+
+<figure class="anim wide" data-anim="p5-1-bell"></figure>
+
+<p class="math-note">The 68–95–99.7 rule holds for <em>every</em> normal distribution, because each one is a shifted, stretched copy of $\mathcal N(0, 1)$. Watch the second argument: $\mathcal N(\mu, \sigma^2)$ takes the variance, while code such as <code>torch.normal(mean, std)</code> and NumPy's <code>normal(loc, scale)</code> take the standard deviation.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-p5-1.webp" alt="Children tossing beanbags at a target on the ground: most pile up near the bullseye and fewer land far away, forming a bell-shaped heap." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Lots of children throw beanbags at a target on the ground. Everyone aims for the middle, but every throw wobbles a little: a gust of wind, a shaky arm, a slip.</p>
+      <p>Most beanbags land <strong>near the bullseye</strong>, fewer land a bit further out, and only a very few land far away. Pile them up and the heap has a <strong>bell shape</strong>. Where the heap is highest is the <strong>mean</strong>; how wide it spreads is the <strong>standard deviation</strong>.</p>
+      <p class="math-note">Where it breaks: real throws can be lopsided (always missing to the left), and a real Gaussian has no edge at all. A throw a mile away is wildly unlikely but never impossible.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">The noise on each pixel is $\mathcal N(0, 0.1^2)$. What is the peak height of its density, $\frac{1}{\sqrt{2\pi}\,\sigma}$?</p>
+  <ol class="q-src">
+    <li>About 0.04: densities are always below 1</li>
+    <li>0.1, the same as $\sigma$</li>
+    <li>About 3.99</li>
+    <li>Exactly 1</li>
+  </ol>
+  <div class="q-explain">$1 / (2.507 \times 0.1) \approx 3.99$. A narrow curve must be tall to keep its total area at 1, so a density can exceed 1. Only areas are probabilities.</div>
+</div></div>
+
+<h2>Sampling, reparameterization and adding noise</h2>
+<p>A computer's random-number generator produces <strong>uniform</strong> numbers between 0 and 1. The Box–Muller transform (1958) turns two of them into two independent standard normals; in practice you call <code>torch.randn</code> or NumPy's <code>standard_normal</code>. Every other Gaussian is one line away:</p>
+$$x = \mu + \sigma\,\varepsilon, \qquad \varepsilon \sim \mathcal N(0, 1) \quad\Longrightarrow\quad x \sim \mathcal N(\mu, \sigma^2)$$
+<p>Multiplying by $\sigma$ stretches the spread (the variance becomes $\sigma^2$); adding $\mu$ slides the centre. That's the last step of the animation above.</p>
+<p>This rewrite has a name, the <strong>reparameterization trick</strong>, because it solved a real problem. In a VAE (Kingma &amp; Welling, 2013), an encoder network outputs a $\mu$ and a $\sigma$, and the model samples a code from $\mathcal N(\mu, \sigma^2)$. "Draw a random number" has no gradient, so backpropagation (<a href="p2-3.html">P2.3</a>) couldn't reach the encoder. Written as $\mu + \sigma\varepsilon$, all the randomness sits in $\varepsilon$, which needs no gradient, and $x$ becomes an ordinary function of $\mu$ and $\sigma$: $\partial x / \partial \mu = 1$, $\partial x / \partial \sigma = \varepsilon$. Diffusion models write their noisy images in exactly this form.</p>
+<p>Two more rules do most of the work in generative-model maths. If $X \sim \mathcal N(\mu_1, \sigma_1^2)$ and $Y \sim \mathcal N(\mu_2, \sigma_2^2)$ are <strong>independent</strong>, then</p>
+$$X + Y \sim \mathcal N\big(\mu_1 + \mu_2,\; \sigma_1^2 + \sigma_2^2\big), \qquad aX \sim \mathcal N\big(a\mu_1,\; a^2\sigma_1^2\big)$$
+<p>The sum of independent Gaussians is again Gaussian; means add and <strong>variances add</strong>. Standard deviations combine like the sides of a right triangle.</p>
+
+<h3>Worked example</h3>
+<ol class="steps">
+  <li>A sensor has two independent noise sources, with $\sigma = 3$ and $\sigma = 4$.</li>
+  <li>Variances add: $3^2 + 4^2 = 9 + 16 = 25$.</li>
+  <li>Total standard deviation: $\sqrt{25} = 5$, not $3 + 4 = 7$.</li>
+  <li>Sampling a height from $\mathcal N(170, 10^2)$ with the draw $\varepsilon = 1.5$: $x = 170 + 10 \times 1.5 = 185$ cm.</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<ol class="steps">
+  <li>$x = \mu + \sigma\varepsilon$ with $\mu = 3$, $\sigma = 2$, $\varepsilon = -0.5$. Then $x =$ <span class="blank" data-answer="2" data-tol="0.001" data-hint="3 + 2 × (−0.5)."></span></li>
+  <li>$X \sim \mathcal N(1, 4)$ and $Y \sim \mathcal N(2, 9)$ are independent. The variance of $X + Y$ is <span class="blank" data-answer="13" data-tol="0.001" data-hint="The second number in N(μ, σ²) is already a variance. Add them."></span></li>
+  <li>Its standard deviation, to two decimals: <span class="blank" data-answer="3.61" data-tol="0.01" data-hint="The square root of the variance."></span></li>
+</ol>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">You can only draw $\varepsilon \sim \mathcal N(0, 1)$. How do you get a sample from $\mathcal N(5, 9)$?</p>
+  <ol class="q-src">
+    <li>$5 + 3\varepsilon$</li>
+    <li>$5 + 9\varepsilon$</li>
+    <li>$9 + 5\varepsilon$</li>
+    <li>$5\varepsilon + 3$</li>
+  </ol>
+  <div class="q-explain">The 9 is the variance, so $\sigma = 3$. Scale by $\sigma$, then shift by $\mu$: $5 + 3\varepsilon$. Scaling by 9 would give variance 81.</div>
+</div></div>
+
+<h2>Many dimensions, and noising data step by step</h2>
+<p>An image is a long vector: a 64×64 RGB picture has $64 \times 64 \times 3 = 12{,}288$ numbers. A "noise image" is 12,288 independent standard normals, one per number. That is the <strong>isotropic</strong> Gaussian $\mathcal N(\mathbf 0, \mathbf I)$: the same spread in every direction, so its density depends only on the distance from the centre,</p>
+$$p(\mathbf x) = (2\pi\sigma^2)^{-d/2}\exp\!\left(-\frac{\lVert \mathbf x - \boldsymbol\mu \rVert^2}{2\sigma^2}\right)$$
+<p>where $d$ is the number of dimensions and $\lVert\cdot\rVert$ is the vector length from <a href="p1-1.html">P1.1</a>. One surprise of high dimensions: the squared length of a noise vector is a sum of $d$ independent $\varepsilon_i^2$, each with mean 1, so the length is almost always close to $\sqrt d$. For 12,288 dimensions, nearly every sample has length within a percent or two of 111. Noise vectors live on a thin shell, not near the centre.</p>
+<p><strong>Noising data.</strong> Diffusion models (Sohl-Dickstein et al., 2015; Ho et al., 2020) train on images that have been mixed with noise to a chosen degree. With clean data $x_0$ and a fresh $\varepsilon \sim \mathcal N(\mathbf 0, \mathbf I)$, the noisy version at step $t$ is</p>
+$$x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1 - \bar\alpha_t}\,\varepsilon$$
+<p>$\bar\alpha_t$ ("alpha bar") is a schedule that falls from 1 at $t = 0$ (clean) towards 0 at the last step $T$ (pure noise). It's the reparameterization trick again: mean $\sqrt{\bar\alpha_t}\,x_0$, standard deviation $\sqrt{1 - \bar\alpha_t}$. If each coordinate of $x_0$ has variance 1, the variances add to $\bar\alpha_t + (1 - \bar\alpha_t) = 1$ at every step, so this is called <strong>variance-preserving</strong>. How much image is left is the <strong>signal-to-noise ratio</strong>, $\text{SNR}(t) = \bar\alpha_t / (1 - \bar\alpha_t)$: signal variance over noise variance. A diffusion model learns to run this backwards (<a href="g1-3.html">G1.3</a>).</p>
+
+<div class="playground" id="p5-1-noise-playground">
+  <h3>Playground: noise a shape into a blob</h3>
+  <p class="math-note" style="margin:0">400 points, each with its own fixed $\varepsilon$, follow $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$. Dashed circles mark radius 1 and 2 of $\mathcal N(\mathbf 0, \mathbf I)$, which hold about 39% and 86% of its samples in 2D.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Noise step t = <output>0</output> of 1000</span>
+      <input type="range" min="0" max="1000" step="10" value="0">
+    </label>
+    <div class="pg-buttons">
+      <button type="button" class="btn btn-primary" data-act="play">Play to t = 1000</button>
+      <button type="button" class="btn" data-act="resample">New noise ε</button>
+      <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+    </div>
+  </div>
+  <div class="chips" role="group" aria-label="Shape" style="margin-top:12px">
+    <button type="button" class="chip" data-shape="spiral" aria-pressed="true">Spiral</button>
+    <button type="button" class="chip" data-shape="smiley" aria-pressed="false">Smiley</button>
+  </div>
+  <div class="chips" role="group" aria-label="Noise schedule" style="margin-top:8px">
+    <button type="button" class="chip" data-sched="cosine" aria-pressed="true">Cosine schedule</button>
+    <button type="button" class="chip" data-sched="linear" aria-pressed="false">Linear (DDPM)</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<p>Try both schedules. With DDPM's original linear schedule (1,000 steps), the spiral is unrecognisable by about step 400 and the remaining steps add little; at $t = 1000$, $\bar\alpha \approx 4 \times 10^{-5}$. The cosine schedule (Nichol &amp; Dhariwal, 2021) destroys information more evenly, one reason it became popular. Through all of it, the variance readout stays near 1.</p>
+
+<h3>Worked example</h3>
+<p>One pixel with $x_0 = 2$, at a step where $\bar\alpha_t = 0.64$, with the noise draw $\varepsilon = -1$:</p>
+<ol class="steps">
+  <li>Signal weight $\sqrt{0.64} = 0.8$; noise weight $\sqrt{1 - 0.64} = 0.6$.</li>
+  <li>$x_t = 0.8 \times 2 + 0.6 \times (-1) = 1.6 - 0.6 = 1.0$.</li>
+  <li>$\text{SNR} = 0.64 / 0.36 \approx 1.78$: still more signal than noise.</li>
+</ol>
+
+<div class="why"><strong>Why this matters for LLMs and beyond:</strong> GPT-2-style LLMs initialise their weights from a Gaussian with standard deviation 0.02, and trained weights stay roughly bell-shaped, which is exactly what QLoRA's 4-bit NF4 format is designed around (<a href="m3-7.html">M3.7</a>). On the generative side, Gaussians are the whole story: every image from a diffusion or flow model (<a href="g1-5.html">G1.5</a>) starts as $\varepsilon \sim \mathcal N(\mathbf 0, \mathbf I)$, and training means learning to undo $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">At some step, $\bar\alpha_t = 0.5$. What is the signal-to-noise ratio?</p>
+  <ol class="q-src">
+    <li>0.5</li>
+    <li>About 0.71</li>
+    <li>0, because the image is half destroyed</li>
+    <li>1</li>
+  </ol>
+  <div class="q-explain">$\text{SNR} = \bar\alpha_t / (1 - \bar\alpha_t) = 0.5 / 0.5 = 1$: signal and noise have equal variance. (0.71 is $\sqrt{0.5}$, the weight on each.)</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why does $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$ keep the variance at 1, and why write noisy samples in this "$\mu + \sigma\varepsilon$" form at all?</p>
+  <div class="model-answer"><strong>Model answer:</strong> For independent terms, variances add and scaling by $a$ multiplies variance by $a^2$. So with unit-variance data and noise, the total is $\bar\alpha_t + (1 - \bar\alpha_t) = 1$. Writing a sample as mean plus standard deviation times $\varepsilon$ moves all the randomness into $\varepsilon$, so the sample is a differentiable function of the parameters, and any Gaussian can be drawn from one standard normal.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You double the standard deviation of a normal distribution. What happens to the height of its peak?</p>
+    <ol class="q-src">
+      <li>It doubles</li>
+      <li>It halves</li>
+      <li>It stays the same; only the width changes</li>
+      <li>It drops to a quarter</li>
+    </ol>
+    <div class="q-explain">The peak is $\frac{1}{\sqrt{2\pi}\,\sigma}$. Twice as wide means half as tall, so the total area stays 1.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Independent noises $\mathcal N(0, 0.3^2)$ and $\mathcal N(0, 0.4^2)$ are added to a signal. What is the standard deviation of the total noise?</p>
+    <ol class="q-src">
+      <li>0.7</li>
+      <li>0.25</li>
+      <li>0.5</li>
+      <li>0.12</li>
+    </ol>
+    <div class="q-explain">Variances add: $0.09 + 0.16 = 0.25$, and $\sqrt{0.25} = 0.5$. (0.7 adds standard deviations; 0.25 is the variance; 0.12 multiplies them.)</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In the variance-preserving forward process, what happens as $t$ approaches the last step $T$?</p>
+    <ol class="q-src">
+      <li>$\bar\alpha_t \to 0$, so $x_t$ becomes almost pure $\mathcal N(\mathbf 0, \mathbf I)$ noise and the SNR approaches 0</li>
+      <li>$\bar\alpha_t \to 1$, so the image gets sharper</li>
+      <li>The variance of $x_t$ grows without limit</li>
+      <li>$x_t$ becomes exactly 0</li>
+    </ol>
+    <div class="q-explain">The signal weight $\sqrt{\bar\alpha_t}$ shrinks to nearly 0 while the noise weight approaches 1. The variance stays at 1 throughout; what changes is how much of it is signal.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">(From P1.5) For $\varepsilon \sim \mathcal N(0, 1)$, what is the expectation $\mathbb E[\varepsilon^2]$?</p>
+    <ol class="q-src">
+      <li>0, because positive and negative draws cancel</li>
+      <li>1</li>
+      <li>2</li>
+      <li>It depends on the sample</li>
+    </ol>
+    <div class="q-explain">The variance is $\mathbb E[(\varepsilon - \mu)^2]$ with $\mu = 0$, so $\mathbb E[\varepsilon^2] = 1$. Squares are never negative, so nothing cancels. Summed over $d$ dimensions this gives $\mathbb E\lVert\varepsilon\rVert^2 = d$, the thin shell at radius $\sqrt d$.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A Gaussian is set by its mean $\mu$ and variance $\sigma^2$; its density is $\frac{1}{\sqrt{2\pi\sigma^2}}e^{-(x-\mu)^2/2\sigma^2}$, and areas, not heights, are probabilities.</li>
+    <li><strong>68–95–99.7</strong>: the share of values within 1, 2 and 3 standard deviations of the mean.</li>
+    <li><strong>Reparameterization</strong>: $x = \mu + \sigma\varepsilon$ with $\varepsilon \sim \mathcal N(0, 1)$ samples any Gaussian and keeps gradients flowing.</li>
+    <li>For independent Gaussians, means add and <strong>variances add</strong>.</li>
+    <li>Diffusion's forward process $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$ is variance-preserving; $\text{SNR} = \bar\alpha_t/(1-\bar\alpha_t)$ falls from huge to near 0.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 20 minutes: check the 68–95–99.7 rule by sampling, sample with the reparameterization trick, confirm that variances add, then forward-noise a 2D dataset and verify that the variance stays at 1. Runs free in your browser; nothing to install.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p5-1-gaussians-noise.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p5-1-a","front":"Write the normal density $\\mathcal N(\\mu, \\sigma^2)$ and say what the normalising constant does.","back":"$p(x) = \\frac{1}{\\sqrt{2\\pi\\sigma^2}}\\exp\\!\\big(-\\frac{(x-\\mu)^2}{2\\sigma^2}\\big)$. The constant $1/\\sqrt{2\\pi\\sigma^2}$ makes the total area 1, so a wider curve is lower."},
+  {"id":"p5-1-b","front":"State the 68–95–99.7 rule.","back":"For any normal distribution, about 68% of values lie within $\\mu \\pm \\sigma$, 95% within $\\mu \\pm 2\\sigma$ and 99.7% within $\\mu \\pm 3\\sigma$."},
+  {"id":"p5-1-c","front":"What is the reparameterization trick, and why do VAEs need it?","back":"Sample $x = \\mu + \\sigma\\varepsilon$ with $\\varepsilon \\sim \\mathcal N(0,1)$. The randomness moves into $\\varepsilon$, so $x$ is a differentiable function of $\\mu$ and $\\sigma$ and gradients can reach the encoder that outputs them."},
+  {"id":"p5-1-d","front":"$X \\sim \\mathcal N(\\mu_1, \\sigma_1^2)$ and $Y \\sim \\mathcal N(\\mu_2, \\sigma_2^2)$ are independent. What is the distribution of $X + Y$?","back":"$\\mathcal N(\\mu_1 + \\mu_2,\\ \\sigma_1^2 + \\sigma_2^2)$: means add and variances add (standard deviations do not)."},
+  {"id":"p5-1-e","front":"Write the diffusion forward process and its signal-to-noise ratio.","back":"$x_t = \\sqrt{\\bar\\alpha_t}\\,x_0 + \\sqrt{1-\\bar\\alpha_t}\\,\\varepsilon$, with $\\bar\\alpha_t$ falling from 1 to about 0. Variance-preserving for unit-variance data. $\\text{SNR}(t) = \\bar\\alpha_t / (1 - \\bar\\alpha_t)$."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p5-1-bell.js"></script>
+<script src="../assets/js/anims/p5-1-noise-playground.js"></script>
+</body>
+</html>

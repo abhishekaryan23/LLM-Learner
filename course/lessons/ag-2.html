@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ag-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Context engineering: what the model sees · LLMs, Animated</title>
+<meta name="description" content="The context window as the model's working memory: what competes for it, why long cluttered context hurts quality (lost in the middle, context rot), and the techniques that keep it lean, from just-in-time retrieval to compaction, notes, subagents and prompt caching.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<style>
+  .kit-table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: .97rem; }
+  .kit-table th, .kit-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .kit-table th { font: 600 .82rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+  .kit-table td:first-child { font-weight: 650; }
+  @media (max-width: 600px) {
+    .kit-table thead { display: none; }
+    .kit-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .kit-table td { display: block; border: 0; padding: 2px 0; }
+    .kit-table td[data-l]::before { content: attr(data-l) " · "; font-weight: 600; color: var(--ink-2); }
+  }
+  .ctx-sliders { display: grid; gap: 2px 20px; margin-top: 10px; }
+  @media (min-width: 640px) { .ctx-sliders { grid-template-columns: 1fr 1fr; } }
+  .ctx-sliders label { display: grid; gap: 0; font-size: .93rem; }
+  .ctx-sliders input[type="range"] { width: 100%; height: 44px; accent-color: var(--accent); }
+  #ag2-budget .btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  @media (max-width: 639px) { #ag2-budget .pg-sticky { position: sticky; top: calc(var(--topbar-h, 56px) + 2px); z-index: 2; background: var(--a-paper); padding-bottom: 6px; border-bottom: 1px solid var(--line); } }
+  #ag2-budget .pg-group { font-size: .85rem; font-weight: 600; color: var(--ink-2); margin: 12px 0 6px; }
+</style>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Context engineering: what the model sees</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of The agent toolkit</span></div>
+<p class="lede">A model can only use what is in front of it, and the space in front of it is limited. Context engineering is the craft of deciding what goes into that space, when, and what gets thrown out. It matters more for an agent's quality than almost any other choice you make.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>List what competes for an agent's context window and estimate a token budget.</li>
+    <li>Explain why long, cluttered context makes answers worse (“lost in the middle”, context rot).</li>
+    <li>Pick techniques that keep context lean: short instructions, just-in-time retrieval, progressive disclosure, compaction, notes, subagents and prompt caching.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="ag-1.html">AG.1 Where to use what</a> (the building blocks and the map) and <a href="sy-1.html">SY.1 Prompting that works</a> (writing clear instructions). Helpful but optional: <a href="p3-3.html">P3.3 Tokenization</a>, for what a “token” is.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You give a model 20 documents and the answer is in one of them. Where should that document sit for the best chance of a correct answer?</p>
+    <ol class="q-src">
+      <li>Exactly in the middle</li>
+      <li>It makes no difference</li>
+      <li>At the very start or the very end</li>
+      <li>Split across several places</li>
+    </ol>
+    <div class="q-explain">Liu et al. (2023) found a U-shape: models used information at the start and end of a long input best, and were worst when it sat in the middle. Position matters even when everything “fits”.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Your agent has a 200,000-token window and uses only 60,000 tokens. Can its answers still suffer from too much context?</p>
+    <ol class="q-src">
+      <li>Yes: irrelevant text dilutes the model's attention, even well below the limit</li>
+      <li>No: below the limit, more context is always better</li>
+      <li>Only if the text is in another language</li>
+      <li>Only if the model is small</li>
+    </ol>
+    <div class="q-explain">The limit is when things <em>break</em>; quality starts slipping well before it. Every extra token competes for the model's attention, so clutter has a cost even when it fits.</div>
+  </div>
+</section>
+
+<h2>The context window is working memory, with a budget</h2>
+<p>Early models had tiny windows. GPT-3 (2020) could see 2,048 tokens, a few pages. Builders spent their effort squeezing prompts to fit. Then windows exploded: 128k tokens for GPT-4 Turbo and 200k for Claude 2.1 (both November 2023), and a million for Gemini 1.5 (February 2024). The problem seemed solved: just put everything in.</p>
+<p>It wasn't. Agents that run for an hour fill even huge windows, and answers got worse long before the limit. By mid-2025 people had a name for the craft of managing this: <strong>context engineering</strong>. Anthropic's engineering post <em>Effective context engineering for AI agents</em> (September 2025) defines it as curating and maintaining the best set of tokens for the model at each step. Prompting (<a href="sy-1.html">SY.1</a>) is about writing one good instruction; context engineering is about <em>everything</em> in the window, on every turn of the loop.</p>
+<p>Think of the window as the model's <strong>working memory</strong>: a desk of fixed size. It is measured in <strong>tokens</strong>; in English one token is roughly ¾ of a word. Here is what competes for the desk in a typical agent:</p>
+<table class="kit-table">
+  <thead><tr><th>Part</th><th>What it is</th><th>Typical size</th></tr></thead>
+  <tbody>
+    <tr><td>System prompt</td><td data-l="What">The app's standing instructions</td><td data-l="Size">1k–5k tokens</td></tr>
+    <tr><td>Rules files</td><td data-l="What">AGENTS.md, CLAUDE.md and similar (<a href="ag-5.html">AG.5</a>)</td><td data-l="Size">1k–10k</td></tr>
+    <tr><td>Tool definitions</td><td data-l="What">Name, description and input schema of every tool the model may call (<a href="ag-3.html">AG.3</a>)</td><td data-l="Size">a few hundred per tool; can reach tens of thousands</td></tr>
+    <tr><td>Retrieved documents</td><td data-l="What">Passages fetched by search or RAG (<a href="sy-3.html">SY.3</a>)</td><td data-l="Size">varies widely</td></tr>
+    <tr><td>Tool results</td><td data-l="What">File contents, logs, search results, API replies</td><td data-l="Size">grows with every step</td></tr>
+    <tr><td>Conversation history</td><td data-l="What">Every earlier message, including the model's own</td><td data-l="Size">grows with every turn</td></tr>
+    <tr><td>Memory</td><td data-l="What">Notes from earlier sessions read back in (<a href="ag-5.html">AG.5</a>)</td><td data-l="Size">small, if kept tidy</td></tr>
+  </tbody>
+</table>
+<h3>Worked example</h3>
+<p>A coding agent has a 200k-token window. Its system prompt is 3k tokens and its rules file 2k. It also has five MCP servers connected. In a real example Anthropic published in November 2025, five servers (GitHub, Slack, Sentry, Grafana, Splunk) offered 58 tools whose definitions took about <strong>55k tokens</strong>.</p>
+<ol class="steps">
+  <li>Loaded before the user types anything: 3k + 2k + 55k = <strong>60k tokens</strong>.</li>
+  <li>Share of the window: 60k ÷ 200k = <strong>30%</strong>, gone before the task starts.</li>
+  <li>Left for documents, tool results and conversation: 140k tokens.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>A support agent has a 128k window, a 2k system prompt, a 4k rules file and three MCP servers whose tool definitions take about 10k tokens each. Answer in thousands of tokens.</p>
+  <ol class="steps">
+    <li>Loaded before the first message (k tokens): <span class="blank" data-answer="36" data-tol="0.01" data-hint="2 + 4 + 3 × 10."></span></li>
+    <li>Share of the window, in %: <span class="blank" data-answer="28.1" data-tol="0.3" data-hint="36 ÷ 128 × 100."></span></li>
+    <li>Left for the actual work (k tokens): <span class="blank" data-answer="92" data-tol="0.01" data-hint="128 − 36."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Which part of an agent's context usually grows the most during a long task?</p>
+  <ol class="q-src">
+    <li>The system prompt</li>
+    <li>Tool results and conversation history</li>
+    <li>The rules file</li>
+    <li>Skill descriptions</li>
+  </ol>
+  <div class="q-explain">The fixed parts are loaded once. Every step of the agent loop adds its tool call, the tool's result and the model's reply, so results and history pile up turn after turn.</div>
+</div></div>
+
+<h2>More is not better: lost in the middle and context rot</h2>
+<p>If it fits, why not keep it all? Because a model's attention is spread over everything in the window. In a transformer, every token is compared with every earlier token (<a href="m1-1.html">M1.1</a>), so $n$ tokens make about $n^2/2$ pairs. Anthropic's post calls this an <strong>attention budget</strong>: every extra token draws on it, whether it matters or not.</p>
+<p>Two lines of evidence show the cost:</p>
+<ul>
+  <li><strong>Lost in the middle</strong> (Liu et al., 2023). Models answered questions from 20 retrieved documents, with the one useful document moved from first to last. Accuracy traced a U: best when it sat at the <strong>start</strong> or <strong>end</strong>, worst in the <strong>middle</strong>. For GPT-3.5-Turbo, a document in the middle was used so poorly that it scored below answering with no documents at all.</li>
+  <li><strong>Context rot.</strong> A 2025 report by the vector-database company Chroma tested 18 models and found that performance became less reliable as inputs grew longer, even on simple tasks, and that similar-but-wrong “distractor” passages hurt most. The name stuck for this general effect.</li>
+</ul>
+<p>Newer models handle long inputs better than 2023's did, but the advice from labs as of 2026 is the same: treat context as a <strong>finite resource with diminishing returns</strong>. Tools suffer from clutter too. Fifty overlapping tools make it harder to pick the right one than eight clear ones.</p>
+
+<figure class="anim wide" data-anim="ag-2-window"></figure>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">An agent's key instruction sits in the middle of a 150k-token history. What is the most likely effect?</p>
+  <ol class="q-src">
+    <li>None, as long as the total is under the limit</li>
+    <li>The model will refuse to answer</li>
+    <li>The request fails with an error</li>
+    <li>The model is more likely to overlook it than if it were near the start or end</li>
+  </ol>
+  <div class="q-explain">Nothing errors: the model simply weighs the middle less well. That is why important instructions belong in the system prompt or rules file (near the start) or are restated near the end, and why trimming history helps.</div>
+</div></div>
+
+<h2>Six techniques that keep context lean</h2>
+<p>The goal, in Anthropic's words, is the <em>smallest</em> set of high-signal tokens that gets the job done. Six habits do most of the work:</p>
+<ol class="steps">
+  <li><strong>Short, specific instructions.</strong> Write at the “right altitude”: clear principles and a few good examples, not pages of brittle if-this-then-that rules, and not vague slogans. Start minimal and add a line only when you see a real failure.</li>
+  <li><strong>Retrieve just in time.</strong> Don't preload every document “just in case”. Keep light references (file paths, search queries, links) and let the agent fetch the content with a tool when it needs it. Coding agents do this naturally: they search the repo and open three files rather than reading all of it.</li>
+  <li><strong>Progressive disclosure.</strong> Show a one-line summary first and the details only on demand. <a href="ag-4.html">Agent Skills</a> work this way, and so does on-demand tool search: in Anthropic's example, loading tool definitions only when needed cut them from about 55k to under 9k tokens.</li>
+  <li><strong>Compaction.</strong> When the window nears its limit, summarise the conversation so far (decisions, open bugs, next steps) and continue from the summary. Clearing old tool results is the lightest form: a file read twenty steps ago rarely needs to stay word for word.</li>
+  <li><strong>Structured notes outside the window.</strong> Let the agent keep a <code>NOTES.md</code> or a to-do file and read back only what matters. Memory files (<a href="ag-5.html">AG.5</a>) and the LLM wiki (<a href="ag-6.html">AG.6</a>) are this idea made permanent.</li>
+  <li><strong>Subagents for isolation.</strong> Hand a messy sub-task (search a huge codebase, read 40 web pages) to a <a href="ag-7.html">subagent</a> with its own clean window. It returns a condensed summary, often 1,000 to 2,000 tokens, instead of all the mess.</li>
+</ol>
+<p>Try them below. The sliders set how big each part is; the buttons apply three of the techniques.</p>
+
+<div class="playground" id="ag2-budget">
+  <h3>Playground: the context budget</h3>
+  <p class="math-note" style="margin:0">Sizes are in thousands of tokens. “Needed right now” is a simple, stated assumption: all instructions, about 2k of tool definitions (the few tools in use), the best 5k of documents, and the latest 8k each of tool results and history (plus a 2k summary once you compact).</p>
+  <div class="pg-sticky">
+  <div class="pg-stage" style="margin-top:10px"></div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" aria-live="polite" style="margin:4px 0 0"></p>
+  </div>
+  <div class="pg-group">Techniques</div>
+  <div class="pg-buttons" role="group" aria-label="Context techniques">
+    <button type="button" class="btn" data-opt="tools" aria-pressed="false">Load tools on demand</button>
+    <button type="button" class="btn" data-opt="results" aria-pressed="false">Clear old tool results</button>
+    <button type="button" class="btn" data-opt="hist" aria-pressed="false">Compact history</button>
+    <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+  </div>
+  <div class="pg-group">Window size</div>
+  <div class="pg-buttons" role="group" aria-label="Window size">
+    <button type="button" class="btn" data-limit="128" aria-pressed="false">128k</button>
+    <button type="button" class="btn" data-limit="200" aria-pressed="true">200k</button>
+    <button type="button" class="btn" data-limit="1000" aria-pressed="false">1M</button>
+  </div>
+  <div class="pg-group">What's loaded</div>
+  <div class="ctx-sliders">
+    <label><span>System prompt: <output data-k="sys">3k</output></span><input type="range" data-k="sys" min="0" max="20" step="1" value="3"></label>
+    <label><span>Rules &amp; memory files: <output data-k="rules">3k</output></span><input type="range" data-k="rules" min="0" max="20" step="1" value="3"></label>
+    <label><span>Tool definitions: <output data-k="tools">55k</output></span><input type="range" data-k="tools" min="0" max="80" step="1" value="55"></label>
+    <label><span>Retrieved documents: <output data-k="docs">20k</output></span><input type="range" data-k="docs" min="0" max="100" step="1" value="20"></label>
+    <label><span>Tool results: <output data-k="results">40k</output></span><input type="range" data-k="results" min="0" max="150" step="1" value="40"></label>
+    <label><span>Conversation history: <output data-k="hist">60k</output></span><input type="range" data-k="hist" min="0" max="200" step="1" value="60"></label>
+  </div>
+</div>
+
+<p>With the defaults, the window is 90% full and only about a sixth of it is needed for the next step. Switch on all three techniques and usage drops to under a quarter of the window, while the needed part stays about the same: now about two thirds of what the model reads matters.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ag-2.webp" alt="A child packs a small backpack for a hike, choosing a map, a water bottle and a snack from a huge messy pile and leaving the rest behind." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You're going on a hike, and your backpack is <strong>small</strong>. In front of you is a huge, messy pile: toys, books, three jumpers, a football, snacks, a map, a water bottle.</p>
+      <p>If you stuff in everything that fits, you can't find the map when you need it. So you pick the <strong>map, the water and one snack</strong>, and leave the rest at home. Smart packing isn't about carrying the most; it's about carrying the <strong>right things</strong>.</p>
+      <p class="math-note">Where it breaks: a hiker feels a heavy bag, but a model doesn't “feel” clutter. It quietly does worse. And an agent can repack on the way: drop what it's done with, fetch what it needs next.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">An agent must read 40 web pages to answer one research question. Which technique keeps the main agent's context cleanest?</p>
+  <ol class="q-src">
+    <li>Give the reading to a subagent that returns a short summary of what it found</li>
+    <li>Paste all 40 pages into the main conversation</li>
+    <li>Add a rule to AGENTS.md saying “read carefully”</li>
+    <li>Switch to a model with a bigger window</li>
+  </ol>
+  <div class="q-explain">The subagent's window absorbs the 40 pages; the main agent sees only the condensed result. A bigger window delays the overflow but keeps all the clutter.</div>
+</div></div>
+
+<h2>Prompt caching: pay once for the part that doesn't change</h2>
+<p>Every turn of an agent loop sends the whole context to the model again: system prompt, tool definitions, rules, history. Most of it is identical to last time. <strong>Prompt caching</strong> lets the provider keep its work on that identical <strong>prefix</strong> (the start of the input), so the next request can skip recomputing it.</p>
+<p>The payoff is lower cost and a faster first token. Pricing differs by provider and changes often. As one example from 2026, Anthropic's documentation bills tokens read from its cache at a tenth of the normal input price or less, charges a little extra (1.25×) to write them, and keeps a cache entry for 5 minutes by default, refreshed each time it is used. Other providers cache automatically with their own discounts.</p>
+<p>Caching only works on an <em>exact</em> prefix: change one token near the start and everything after it must be recomputed. That gives a simple layout rule:</p>
+<ol class="steps">
+  <li><strong>Stable things first:</strong> system prompt, tool definitions, rules files.</li>
+  <li><strong>Slowly changing things next:</strong> retrieved documents for this task, the conversation so far.</li>
+  <li><strong>The newest message last.</strong></li>
+</ol>
+<p>Small details matter. Putting today's date or a random ID at the top of the system prompt breaks the cache on every request. Tool lists should come back in the same order each time; the MCP specification (2026-07-28 revision) now asks servers to list tools in a deterministic order for exactly this reason.</p>
+
+<div class="why"><strong>In real practice:</strong> coding agents such as Claude Code, OpenAI Codex, Cursor, Gemini CLI or GitHub Copilot do most of this for you: they load rules files at the start, search files instead of reading the whole repo, compact long sessions automatically, and keep the prefix stable for caching. Your job is mostly not to undo it: keep rules files short, connect only the MCP servers you use, and start a fresh session for a new task instead of dragging an old history along.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Your app puts the current time (to the second) at the very top of its system prompt. What happens to prompt caching?</p>
+  <ol class="q-src">
+    <li>Nothing; caching ignores timestamps</li>
+    <li>It works better, because the prompt is more precise</li>
+    <li>It breaks: the prefix changes on every request, so nothing after the timestamp can be reused</li>
+    <li>Only the timestamp is cached</li>
+  </ol>
+  <div class="q-explain">Caches match an exact prefix. A value that changes every request at the very top makes every prefix new. Move it to the end of the context, or drop the seconds.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why isn't “just use a model with a bigger context window” a full answer to context problems? Name two techniques that help.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A bigger window only moves the hard limit; quality drops well before it, because attention is spread over everything and facts in the middle of long, cluttered inputs get missed (lost in the middle, context rot), and every token costs money and time. Techniques that help include retrieving just in time instead of preloading, compacting history into summaries, keeping notes outside the window, loading tools or skills on demand, and handing messy sub-tasks to subagents.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Connect to M1.1: an agent's context grows from 50k to 100k tokens. Roughly how many more token pairs must attention consider?</p>
+    <ol class="q-src">
+      <li>The same number</li>
+      <li>About 4 times as many</li>
+      <li>About 2 times as many</li>
+      <li>About 100 times as many</li>
+    </ol>
+    <div class="q-explain">Attention compares each token with every earlier one, about $n^2/2$ pairs. Doubling $n$ multiplies that by $2^2 = 4$. Implementations such as FlashAttention make this fast, but the attention budget is still shared across all of it.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which is an example of just-in-time retrieval?</p>
+    <ol class="q-src">
+      <li>Pasting the whole codebase into the first message</li>
+      <li>Fine-tuning the model on the documentation</li>
+      <li>Listing every document's full text in the system prompt</li>
+      <li>Keeping file paths in context and opening a file with a tool only when the task needs it</li>
+    </ol>
+    <div class="q-explain">The agent holds light references and loads the content when it is actually needed, so the window carries only what this step uses.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">An agent has worked for two hours and its window is 95% full. What does compaction do?</p>
+    <ol class="q-src">
+      <li>Replaces the long history with a summary of decisions, state and next steps, then continues</li>
+      <li>Deletes the system prompt to make room</li>
+      <li>Compresses tokens into fewer bytes without changing what the model reads</li>
+      <li>Moves the conversation to a model with a bigger window</li>
+    </ol>
+    <div class="q-explain">Compaction trades the full transcript for a short, high-signal summary, freeing space while keeping what matters. Old tool results can often be dropped entirely.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">For prompt caching, which order of the context is best?</p>
+    <ol class="q-src">
+      <li>Newest message, then history, then system prompt</li>
+      <li>Random order, so the model doesn't over-focus</li>
+      <li>System prompt and tool definitions, then rules and documents, then history, then the newest message</li>
+      <li>Order doesn't matter for caching</li>
+    </ol>
+    <div class="q-explain">Caches reuse an exact prefix, so the stable parts go first and the fastest-changing part (the newest message) goes last.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>The context window is the model's <strong>working memory</strong>: system prompt, rules, tool definitions, documents, tool results, history and memory all compete for it.</li>
+    <li>Quality falls <strong>before</strong> the limit: facts in the middle get missed (Liu et al., 2023) and long, cluttered inputs make models less reliable (context rot).</li>
+    <li>Keep it lean: <strong>short instructions</strong>, <strong>just-in-time retrieval</strong>, <strong>progressive disclosure</strong>, <strong>compaction</strong>, <strong>notes</strong> outside the window and <strong>subagents</strong> for messy work.</li>
+    <li><strong>Prompt caching</strong> makes a stable prefix cheaper and faster: stable parts first, newest message last.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ag-2-a","front":"What is context engineering, and how is it different from prompt writing?","back":"Curating everything in the model's context window at each step (instructions, tools, documents, results, history, memory). Prompting is writing one good instruction; context engineering manages the whole window over a whole agent run."},
+  {"id":"ag-2-b","front":"What did 'Lost in the middle' (Liu et al., 2023) find?","back":"With the useful document moved through a long input, accuracy was U-shaped: best at the start or end, worst in the middle."},
+  {"id":"ag-2-c","front":"What is context rot?","back":"The general finding that models become less reliable as their input grows longer and more cluttered, even well below the window limit and even on simple tasks."},
+  {"id":"ag-2-d","front":"Name four techniques that keep an agent's context lean.","back":"Any four of: short specific instructions, just-in-time retrieval, progressive disclosure (skills, on-demand tools), compaction / clearing old tool results, notes outside the window, subagents for isolation."},
+  {"id":"ag-2-e","front":"How should you order context for prompt caching, and why?","back":"Stable parts first (system prompt, tool definitions, rules), then slower-changing parts, then the newest message. Caches reuse an exact prefix; any change near the start forces recomputing everything after it."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ag-2-window.js"></script>
+<script src="../assets/js/anims/ag-2-budget.js"></script>
+</body>
+</html>

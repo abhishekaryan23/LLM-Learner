@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p6-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Autoencoders &amp; representation learning · LLMs, Animated</title>
+<meta name="description" content="Encoder, bottleneck, decoder: how autoencoders learn compact codes, why PCA is a linear autoencoder, denoising and masked modelling, VAEs with the reparameterization trick and KL term, and where autoencoders live today: latent diffusion, audio codecs and sparse autoencoders.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Autoencoders &amp; representation learning</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Classic deep-learning architectures</span></div>
+<p class="lede">Train a network to copy its input through a narrow middle, and it has to discover what matters about the data. That's an <strong>autoencoder</strong>. The idea runs from 1980s toy networks to the VAE that compresses every image in Stable Diffusion, the codecs that turn speech into tokens, and the sparse autoencoders used to read an LLM's mind.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe encoder, bottleneck, decoder and reconstruction loss, and explain why PCA is a linear autoencoder.</li>
+    <li>Explain denoising autoencoders and how they lead to masked modelling and self-supervised learning.</li>
+    <li>Write a VAE's loss, explain the reparameterization trick, and name three places autoencoders run inside today's models.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p3-1.html">MLPs</a>: encoder and decoder are ordinary networks, trained with a loss by gradient descent. Helpful but optional: <a href="p1-6.html">Entropy, cross-entropy &amp; KL</a> for the VAE's KL term, and <a href="p6-1.html">CNNs</a> for the convolutional encoders used on images.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">An autoencoder is trained to output exactly its input. Why doesn't it just learn to copy?</p>
+    <ol class="q-src">
+      <li>Copying is forbidden by the loss function</li>
+      <li>It's trained on labels, not on the input</li>
+      <li>The input must pass through a much smaller "bottleneck", so it can only keep the most useful information</li>
+      <li>It does learn to copy, and that's the point</li>
+    </ol>
+    <div class="q-explain">With, say, 784 pixels squeezed into 30 numbers, a perfect copy is impossible. The network has to find a compact description of the data, and that description is the useful part.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Stable Diffusion doesn't run its diffusion model on a 512×512 image directly. What does it work on?</p>
+    <ol class="q-src">
+      <li>A 64×64×4 latent made by an autoencoder</li>
+      <li>The text prompt only</li>
+      <li>A 512×512 grayscale copy</li>
+      <li>A list of object labels</li>
+    </ol>
+    <div class="q-explain">A VAE first compresses the image 8× in height and width. The expensive diffusion model works in that small latent space, and the VAE's decoder turns the result back into pixels.</div>
+  </div>
+</section>
+
+<h2>Squeeze and rebuild: the autoencoder</h2>
+<p>In 1986, Rumelhart, Hinton &amp; Williams showed backpropagation learning an "encoder problem": pass 8 one-hot patterns through just 3 hidden units and reproduce them at the output. The network invented a 3-bit binary code on its own. Twenty years later, Hinton &amp; Salakhutdinov (2006, "Reducing the Dimensionality of Data with Neural Networks") trained a deep version, 784 → 1000 → 500 → 250 → <strong>30</strong> → back up to 784 pixels, and got far better reconstructions of handwritten digits than PCA with the same 30 numbers.</p>
+<p>Every autoencoder has three parts:</p>
+<ul>
+  <li>An <strong>encoder</strong> $e$ maps the input $x$ to a <strong>code</strong> (or latent) $z = e(x)$.</li>
+  <li>A <strong>bottleneck</strong>: $z$ is much smaller than $x$ (or otherwise constrained), so it can't hold everything.</li>
+  <li>A <strong>decoder</strong> $d$ maps the code back, $\hat{x} = d(z)$.</li>
+</ul>
+<p>Training minimises a <strong>reconstruction loss</strong>, most simply the mean squared error over the $n$ numbers in $x$:</p>
+$$\mathcal{L}_{\text{rec}} = \frac{1}{n}\sum_{j=1}^{n} \big(x_j - \hat{x}_j\big)^2$$
+<p>No labels are needed: the data is its own target. That makes autoencoders an early example of <strong>self-supervised</strong> learning, and the code $z$ is a learned <strong>representation</strong>: inputs that are similar in ways the decoder needs end up with nearby codes.</p>
+
+<figure class="anim wide" data-anim="p6-4-autoencoder"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-p6-4.webp" alt="A child squeezes a big pile of clothes into a small vacuum bag; another child opens it and the clothes puff back out almost as before." width="1200" height="900" loading="lazy">
+    <div>
+      <p>One child has a <strong>huge pile of clothes</strong> and a small vacuum bag. They squeeze the air out until everything fits in the little bag. That's the <strong>encoder</strong> making a small code.</p>
+      <p>Another child opens the bag, and the clothes <strong>puff back out</strong>, almost as before. That's the <strong>decoder</strong>. The smaller the bag, the more carefully you have to pack, keeping what matters and leaving out what doesn't.</p>
+      <p class="math-note">Where it breaks: a vacuum bag keeps every sock. An autoencoder really throws information away, so the rebuilt version is a good guess, not the original, and it learns <em>how</em> to pack only from practice on many similar piles.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>A 4-pixel input $x = [1, 0, 1, 1]$ comes back as $\hat{x} = [0.9, 0.2, 0.8, 1.0]$.</p>
+<ol class="steps">
+  <li>Errors: $0.1,\ -0.2,\ 0.2,\ 0$</li>
+  <li>Squared: $0.01,\ 0.04,\ 0.04,\ 0$, which sum to $0.09$</li>
+  <li>Mean: $0.09 / 4 = 0.0225$ ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>$x = [0, 1, 1, 0]$, $\hat{x} = [0.1, 0.7, 0.9, 0.3]$. Sum of squared errors: <span class="blank" data-answer="0.2" data-tol="0.001" data-hint="0.01 + 0.09 + 0.01 + 0.09."></span></li>
+    <li>Mean squared error: <span class="blank" data-answer="0.05" data-tol="0.001" data-hint="Divide by the 4 pixels."></span></li>
+    <li>A 28×28 image squeezed into a 32-number code: how many times fewer numbers? (one decimal) <span class="blank" data-answer="24.5" data-tol="0.05" data-hint="28 × 28 = 784, then 784 / 32."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What is the training target of a plain autoencoder?</p>
+  <ol class="q-src">
+    <li>A class label for each input</li>
+    <li>The input itself</li>
+    <li>The code $z$</li>
+    <li>Random noise</li>
+  </ol>
+  <div class="q-explain">It reconstructs its own input, so it needs no labels. The code is never given; it's whatever the encoder learns to put in the bottleneck.</div>
+</div></div>
+
+<h2>From PCA to denoising autoencoders</h2>
+<p>Take the simplest autoencoder: a linear encoder $z = W_e x$ with $k$ outputs, a linear decoder $\hat{x} = W_d z$, no activations, and the squared-error loss. Its best possible solution is already known from statistics: the decoder's columns span the same $k$-dimensional subspace as the top $k$ <strong>principal components</strong> of the data (Bourlard &amp; Kamp, 1988; Baldi &amp; Hornik, 1989). The weights need not be the exact principal directions (any rotation within that subspace works equally well), but the reconstructions are identical to PCA's.</p>
+<p>That gives a clean way to see what the nonlinearities buy. PCA can only keep a flat slice of the data: project 2-D points onto the best line, 3-D points onto the best plane. Real data, such as images of digits or faces, lies near curved surfaces. A deep autoencoder with ReLUs (P3.1) can learn a curved "sheet" through the data, which is why Hinton &amp; Salakhutdinov's 30-number codes reconstructed digits so much better than 30 principal components. Without the nonlinearities, adding layers wouldn't help at all: stacked linear layers collapse into one.</p>
+
+<h3>Denoising: the road to self-supervised learning</h3>
+<p>A big enough autoencoder can still cheat by learning something close to the identity. Vincent, Larochelle, Bengio &amp; Manzagol (2008, "Extracting and Composing Robust Features with Denoising Autoencoders") changed the task: <strong>corrupt</strong> the input, for example by setting a random fraction of pixels to zero, and train the network to output the <strong>clean</strong> original. Copying is now useless. To fill in the gaps, the network has to learn how the data hangs together: strokes continue, edges line up, a face has two eyes.</p>
+<p>That recipe, "hide part of the data and predict it", turned out to be one of the most powerful ideas in modern AI:</p>
+<ul>
+  <li><strong>BERT</strong> (Devlin et al., 2018) masks 15% of the tokens in a sentence and predicts them. It's a denoising autoencoder for text.</li>
+  <li><strong>Masked autoencoders</strong> (MAE; He et al., 2021) hide 75% of an image's patches and reconstruct the missing pixels (<a href="v1-3.html">V1.3</a>).</li>
+  <li><strong>Diffusion models</strong> learn to remove noise step by step: denoising, repeated (<a href="g1-3.html">G1.3</a>).</li>
+  <li>Even GPT-style <strong>next-token prediction</strong> is self-supervised in the same spirit: the "hidden part" is the next token.</li>
+</ul>
+<p>A second family skips reconstruction entirely. <strong>Contrastive learning</strong> trains an encoder so that two views of the same thing (two crops of one photo, or a photo and its caption) get similar codes while different things get different codes: SimCLR (Chen et al., 2020), CLIP (Radford et al., 2021; <a href="v1-2.html">V1.2</a>). Either way, the goal is the same as the autoencoder's: a <strong>representation</strong> learned without labels that later tasks can build on, just as word embeddings (<a href="p3-4.html">P3.4</a>) are.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why does a denoising autoencoder learn better features than a plain one?</p>
+  <ol class="q-src">
+    <li>It can't succeed by copying; it must learn the data's structure to restore what the corruption removed</li>
+    <li>It has a smaller bottleneck</li>
+    <li>It uses labels for the corrupted parts</li>
+    <li>Noise makes training faster</li>
+  </ol>
+  <div class="q-explain">The input is damaged but the target is clean, so the identity map scores badly. Predicting missing parts requires knowing how the parts relate, which is the same reason masked language modelling works.</div>
+</div></div>
+
+<h2>Variational autoencoders: a latent space you can sample</h2>
+<p>A plain autoencoder's codes can be scattered anywhere, with gaps between them. Pick a random point in a gap, decode it, and you usually get garbage. So you can't use it to <em>generate</em> new data. The <strong>variational autoencoder</strong> (VAE; Kingma &amp; Welling, 2013, "Auto-Encoding Variational Bayes"; Rezende, Mohamed &amp; Wierstra, 2014) fixes this with two changes:</p>
+<ol class="steps">
+  <li>The encoder outputs a <strong>distribution</strong>, not a point: a mean $\mu$ and a standard deviation $\sigma$ for each latent dimension (in practice it outputs $\log \sigma^2$).</li>
+  <li>The loss adds a term that pulls each of those distributions toward a standard normal prior $\mathcal{N}(0, 1)$.</li>
+</ol>
+<p>To train through the random sampling step, the VAE uses the <strong>reparameterization trick</strong>:</p>
+$$z = \mu + \sigma \odot \epsilon, \qquad \epsilon \sim \mathcal{N}(0, I)$$
+<p>All the randomness lives in $\epsilon$, which doesn't depend on any weights, so gradients flow normally through $\mu$ and $\sigma$ back into the encoder. The loss per example is</p>
+$$\mathcal{L} = \mathcal{L}_{\text{rec}}\big(x, d(z)\big) + \mathrm{KL}\big(\mathcal{N}(\mu, \sigma^2)\,\|\,\mathcal{N}(0, 1)\big), \qquad \mathrm{KL} = \tfrac12 \sum_{j}\big(\mu_j^2 + \sigma_j^2 - \ln \sigma_j^2 - 1\big)$$
+<p>The KL divergence (P1.6) is zero only when $\mu = 0$ and $\sigma = 1$. It's the price of a code that is too far from the prior or too precise. The two terms pull against each other: reconstruction wants every input to have its own sharp, distinct code; KL wants all codes to overlap near the origin. The compromise is a <strong>smooth, gap-free latent space</strong>: nearby points decode to similar outputs, and sampling $z \sim \mathcal{N}(0, I)$ and decoding gives new, plausible data. (The full derivation, as a bound on the data's log-likelihood, is in <a href="g1-1.html">G1.1</a>, building on the latent-variable ideas of <a href="p5-2.html">P5.2</a>.)</p>
+
+<section class="playground" id="p6-4-latent" aria-labelledby="pgl">
+  <h3 id="pgl">Try it: walk around a latent space</h3>
+  <p class="math-note" style="margin:0">Drag the dot (or use the sliders) to pick a code $z = (z_1, z_2)$ and see what it decodes to. Small shapes in the background show the decoding at a grid of points; blue dots are training codes. This "decoder" is a hand-written formula that blends four shapes, not a trained network, but it behaves the way real latent spaces do.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+    <label><span>$z_1$ = <output data-out="z1">0.00</output></span>
+      <input type="range" data-in="z1" min="-2.4" max="2.4" step="0.05" value="0">
+    </label>
+    <label><span>$z_2$ = <output data-out="z2">0.00</output></span>
+      <input type="range" data-in="z2" min="-2.4" max="2.4" step="0.05" value="0">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Which model" style="margin-top:12px">
+    <button type="button" class="chip" data-mode="vae" aria-pressed="true">VAE (smooth)</button>
+    <button type="button" class="chip" data-mode="ae" aria-pressed="false">Plain autoencoder (gaps)</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</section>
+
+<h3>Worked example</h3>
+<p>KL term for one latent dimension:</p>
+<ol class="steps">
+  <li>$\mu = 1$, $\sigma = 1$: $\tfrac12(1 + 1 - \ln 1 - 1) = \tfrac12(1) = 0.5$. Shifting the mean costs.</li>
+  <li>$\mu = 0$, $\sigma = 0.5$: $\tfrac12(0 + 0.25 - \ln 0.25 - 1) = \tfrac12(0.25 + 1.386 - 1) = 0.318$. Being too sure costs too.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <ol class="steps">
+    <li>KL for $\mu = 2$, $\sigma = 1$: <span class="blank" data-answer="2" data-tol="0.01" data-hint="½(4 + 1 − ln 1 − 1); ln 1 = 0."></span></li>
+    <li>KL for $\mu = 0$, $\sigma = 1$: <span class="blank" data-answer="0" data-tol="0.001" data-hint="That's exactly the prior."></span></li>
+    <li>With $\mu = 0.5$, $\sigma = 2$ and a sampled $\epsilon = -1$, the code is $z =$ <span class="blank" data-answer="-1.5" data-tol="0.01" data-hint="z = μ + σ·ε."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What does the reparameterization trick $z = \mu + \sigma \odot \epsilon$ achieve?</p>
+  <ol class="q-src">
+    <li>It removes randomness from the VAE entirely</li>
+    <li>It makes the KL term zero</li>
+    <li>It moves the randomness into $\epsilon$, so gradients can flow through $\mu$ and $\sigma$ to the encoder</li>
+    <li>It makes the latent space discrete</li>
+  </ol>
+  <div class="q-explain">You can't backpropagate through "draw a random sample". Rewriting the sample as a deterministic function of $\mu$, $\sigma$ and independent noise makes it differentiable in $\mu$ and $\sigma$.</div>
+</div></div>
+
+<h2>Where autoencoders live today</h2>
+<p>Autoencoders are rarely the headline model any more, but they are working parts inside many headline models:</p>
+<ul>
+  <li><strong>Latent diffusion.</strong> Rombach et al. (2022, "High-Resolution Image Synthesis with Latent Diffusion Models") first train an autoencoder (KL-regularised like a VAE, plus perceptual and adversarial losses for sharpness), then run diffusion on its latents. Stable Diffusion's VAE downsamples 8× in each direction: a $512 \times 512 \times 3$ image (786,432 numbers) becomes a $64 \times 64 \times 4$ latent (16,384 numbers), 48× fewer. Many newer image models keep the 8× downsampling but use 16 latent channels, and video models compress time as well (<a href="g1-4.html">G1.4</a>).</li>
+  <li><strong>Neural audio codecs.</strong> SoundStream (Zeghidour et al., 2021) and EnCodec (Défossez et al., 2022) are convolutional autoencoders whose bottleneck is <em>quantized</em> into discrete codes, in the spirit of the VQ-VAE (van den Oord et al., 2017). EnCodec's 24 kHz model turns audio into 75 frames per second at 1.5 to 24 kilobits per second. Those codes are the "audio tokens" that speech and music language models predict (<a href="a1-3.html">A1.3</a>).</li>
+  <li><strong>Sparse autoencoders for interpretability.</strong> Here the bottleneck is flipped: the code is much <em>wider</em> than the input (e.g. 16× or more), but only a few code entries may be non-zero at once. Trained on an LLM's internal activations, the code entries often line up with human-readable concepts (Bricken et al., 2023; Cunningham et al., 2023; Templeton et al., 2024, up to about 34 million features on a production model). See <a href="in-1.html">IN.1</a> and <a href="in-3.html">IN.3</a>.</li>
+</ul>
+
+<div class="why"><strong>Why this matters for LLMs and beyond:</strong> the pattern "compress with an encoder, do the expensive work on the small code, decode at the end" is everywhere in multimodal AI. Image and video generators diffuse in a VAE's latent space; speech models predict codec tokens; vision encoders hand compact patch codes to an LLM (<a href="mm-1.html">MM.1</a>). And the self-supervised principle behind denoising autoencoders, learning by predicting hidden parts of your own data, is exactly how every LLM is pretrained.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">How does a sparse autoencoder used in interpretability differ from a classic autoencoder?</p>
+  <ol class="q-src">
+    <li>It has no decoder</li>
+    <li>Its code is wider than the input, and the constraint is sparsity (few active entries) instead of a narrow bottleneck</li>
+    <li>It's trained on labelled images</li>
+    <li>Its code is always 2-dimensional</li>
+  </ol>
+  <div class="q-explain">The goal there isn't compression but disentangling: spreading the activation over many possible features, few at a time, so each feature is easier to interpret.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What does an autoencoder learn, and what does a VAE add that lets you generate new data?</p>
+  <div class="model-answer"><strong>Model answer:</strong> An autoencoder squeezes its input through a small code and is trained to reconstruct the input, so the code becomes a compact learned representation of what matters in the data. A VAE makes the encoder output a mean and standard deviation, samples the code with $z = \mu + \sigma\epsilon$, and adds a KL term that pulls every code distribution toward $\mathcal{N}(0, 1)$. That fills in the gaps in the latent space, so sampling a code from the prior and decoding it gives plausible new data.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A VAE's KL term is set to zero weight during training. What do you expect?</p>
+    <ol class="q-src">
+      <li>Blurrier reconstructions</li>
+      <li>A smoother latent space</li>
+      <li>The encoder outputs $\mu = 0$, $\sigma = 1$ for everything</li>
+      <li>It behaves like a plain autoencoder: good reconstructions, but a latent space with gaps that's poor for sampling</li>
+    </ol>
+    <div class="q-explain">Without KL, nothing stops the encoder from shrinking $\sigma$ toward 0 and spreading codes apart. Reconstruction improves, and generation from the prior gets worse.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Interleaving with P6.1: Stable Diffusion's VAE encoder shrinks height and width by 8×. If it used only stride-2 downsampling stages, how many would it need?</p>
+    <ol class="q-src">
+      <li>3</li>
+      <li>4</li>
+      <li>8</li>
+      <li>2</li>
+    </ol>
+    <div class="q-explain">Each stride-2 stage halves height and width: $2^3 = 8$, so $512 \to 256 \to 128 \to 64$. (Its encoder indeed has three downsampling stages.)</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which of these is <em>not</em> a self-supervised objective?</p>
+    <ol class="q-src">
+      <li>Predict 15% masked tokens in a sentence (BERT)</li>
+      <li>Reconstruct a clean image from a corrupted one</li>
+      <li>Predict the human-written category label of a photo</li>
+      <li>Predict the next token of a web document</li>
+    </ol>
+    <div class="q-explain">Self-supervised targets come from the data itself. A human-written category label is ordinary supervised learning.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Interleaving with P3.1: why does a deep autoencoder <em>with</em> ReLUs beat PCA at the same code size on images?</p>
+    <ol class="q-src">
+      <li>It has a larger bottleneck</li>
+      <li>The nonlinearities let it fit curved surfaces through the data, while PCA (a linear autoencoder) can only keep a flat subspace</li>
+      <li>It doesn't need training data</li>
+      <li>PCA can't be computed on images</li>
+    </ol>
+    <div class="q-explain">Without activations, stacked layers collapse into one linear map, and the best linear autoencoder is PCA. The bends are what let depth help.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Autoencoder: <strong>encoder → bottleneck code $z$ → decoder</strong>, trained to reconstruct its own input. No labels needed.</li>
+    <li>A linear autoencoder with squared error learns <strong>PCA</strong>'s subspace; nonlinear ones can follow curved data.</li>
+    <li><strong>Denoising</strong> (corrupt the input, predict the clean version) leads straight to masked modelling (BERT, MAE) and self-supervised learning.</li>
+    <li><strong>VAE</strong>: encoder outputs $\mu, \sigma$; $z = \mu + \sigma\epsilon$; loss = reconstruction + KL to $\mathcal{N}(0,1)$, giving a smooth latent space you can sample.</li>
+    <li>Today: the VAE in latent diffusion (8× downsampling), quantized autoencoders as audio codecs, and sparse autoencoders for interpretability.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p6-4-a","front":"Name the three parts of an autoencoder and its basic loss.","back":"Encoder $z = e(x)$, a bottleneck code $z$ smaller than $x$, decoder $\\hat{x} = d(z)$. Loss: reconstruction error, e.g. mean $(x - \\hat{x})^2$. The input is its own target."},
+  {"id":"p6-4-b","front":"What does a linear autoencoder with squared-error loss learn?","back":"The same subspace as the top-$k$ principal components (PCA), possibly rotated (Baldi & Hornik, 1989). Nonlinear autoencoders can fit curved structure that PCA can't."},
+  {"id":"p6-4-c","front":"What is a denoising autoencoder, and what modern methods follow its recipe?","back":"Corrupt the input (e.g. zero random pixels), train to output the clean version (Vincent et al., 2008). Masked language modelling (BERT, 15% of tokens) and masked autoencoders (MAE, 75% of patches) follow the same idea."},
+  {"id":"p6-4-d","front":"Write the VAE's reparameterization and loss.","back":"$z = \\mu + \\sigma \\odot \\epsilon$, $\\epsilon \\sim \\mathcal{N}(0, I)$. Loss = reconstruction + $\\mathrm{KL}(\\mathcal{N}(\\mu,\\sigma^2) \\| \\mathcal{N}(0,1)) = \\tfrac12\\sum(\\mu^2 + \\sigma^2 - \\ln\\sigma^2 - 1)$."},
+  {"id":"p6-4-e","front":"Why can you sample from a VAE but not easily from a plain autoencoder?","back":"The KL term pulls all code distributions toward $\\mathcal{N}(0,1)$ and keeps them overlapping, so the latent space is smooth with no gaps; decoding a sample from the prior gives plausible data. A plain AE's codes leave gaps that decode to garbage."},
+  {"id":"p6-4-f","front":"Three places autoencoders live in 2026-era models.","back":"(1) Latent diffusion's VAE (e.g. 512×512×3 → 64×64×4, 8× downsampling). (2) Neural audio codecs (SoundStream, EnCodec) with quantized bottlenecks producing audio tokens. (3) Sparse autoencoders that decompose LLM activations into interpretable features."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p6-4-autoencoder.js"></script>
+<script src="../assets/js/anims/p6-4-latent-playground.js"></script>
+</body>
+</html>

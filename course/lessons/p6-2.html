@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p6-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ResNets &amp; normalization · LLMs, Animated</title>
+<meta name="description" content="Why deeper plain networks trained worse, how the residual block y = x + F(x) fixed it, and how BatchNorm, LayerNorm and RMSNorm differ, including why every Transformer uses residuals and LayerNorm or RMSNorm.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>ResNets &amp; normalization</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Classic deep-learning architectures</span></div>
+<p class="lede">Two small tricks from 2015 and 2016 made truly deep networks trainable: a <strong>skip connection</strong> that adds a block's input to its output, and <strong>normalization</strong> layers that keep activations at a sensible scale. Both survive almost unchanged inside every Transformer, so this lesson is also a look under the hood of every LLM.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain the degradation problem and how the residual block $y = x + F(x)$ solves it.</li>
+    <li>Show why the identity path keeps gradients alive through hundreds of layers.</li>
+    <li>Say which axis BatchNorm, LayerNorm and RMSNorm normalize over, and why Transformers use pre-norm LayerNorm or RMSNorm.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p6-1.html">CNNs: filters, pooling &amp; receptive fields</a> (the conv layers that ResNets stack). Helpful but optional: <a href="p2-3.html">Backpropagation</a>, for the chain rule that the identity path short-circuits.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In 2015, a 56-layer plain CNN had a <em>higher training error</em> than a 20-layer one on the same data. What's the most likely reason?</p>
+    <ol class="q-src">
+      <li>The deeper net overfit the training data</li>
+      <li>The deeper net had too few parameters</li>
+      <li>The optimizer couldn't find good weights for the deeper net</li>
+      <li>Deeper networks are mathematically less expressive</li>
+    </ol>
+    <div class="q-explain">Overfitting would make <em>training</em> error lower, not higher. And the deeper net could, in principle, copy the shallow one and make its extra layers do nothing. Gradient descent just couldn't find that solution. This is the <strong>degradation problem</strong>.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">LayerNorm computes a mean and variance over…</p>
+    <ol class="q-src">
+      <li>the features of a single example (or token)</li>
+      <li>one feature, across all examples in the batch</li>
+      <li>the whole training set, once before training</li>
+      <li>the weights of the layer</li>
+    </ol>
+    <div class="q-explain">LayerNorm normalizes each example on its own, across its features. BatchNorm is the one that goes across the batch. This difference is why Transformers use LayerNorm.</div>
+  </div>
+</section>
+
+<h2>Deeper got worse, and the residual fix</h2>
+<p>After AlexNet (8 layers, 2012) and VGG (up to 19 layers, 2014), the lesson seemed to be "deeper is better". So Kaiming He, Xiangyu Zhang, Shaoqing Ren and Jian Sun at Microsoft Research tried going much deeper, and found something odd (He et al., 2015, "Deep Residual Learning for Image Recognition"). On CIFAR-10, a plain 56-layer CNN ended with <strong>higher training error</strong> than a plain 20-layer one. On ImageNet, a plain 34-layer net was worse than a plain 18-layer net (top-1 validation error 28.5% vs 27.9%).</p>
+<p>This isn't overfitting: overfitting means low training error and high test error, and here the training error itself was worse. It also shouldn't be possible in principle. Take the trained 20-layer net, add 36 layers that each compute the <strong>identity</strong> (output = input), and you have a 56-layer net that's exactly as good. So a better-or-equal deep solution exists; gradient descent just doesn't find it. He et al. called this the <strong>degradation problem</strong>.</p>
+<p>They also ruled out the obvious suspect. Their plain nets used batch normalization (later in this lesson) and they checked that gradients had healthy sizes, so the signal wasn't simply dying. Deep plain stacks are just hard to optimize: it's surprisingly hard for a stack of conv + ReLU layers to learn to do <em>nothing</em>.</p>
+
+<h3>The residual block: y = x + F(x)</h3>
+<p>He et al.'s fix is one line. Instead of asking a few layers to learn a whole mapping $H(x)$, let them learn only the <strong>residual</strong> $F(x) = H(x) - x$, and add the input back:</p>
+$$y = x + F(x)$$
+<p>Here $x$ is the block's input, $F$ is a small stack of layers (in the original ResNet: conv, BatchNorm, ReLU, conv, BatchNorm), and $y$ is the output, usually followed by a ReLU. The line that carries $x$ around $F$ is the <strong>skip</strong> (or shortcut) connection. It has no weights. Now "do nothing" is easy: just drive $F$'s weights toward zero. A block only has to learn a <em>correction</em> to its input.</p>
+<p>Two details make it work in a real CNN. When a block changes the number of channels or downsamples with stride 2, $x$ and $F(x)$ no longer have the same shape, so the shortcut uses a $1 \times 1$ conv (with matching stride) to project $x$. And the deep versions (ResNet-50, -101, -152) use a <strong>bottleneck</strong> block, $1 \times 1$ conv to shrink channels, $3 \times 3$ conv, $1 \times 1$ conv to restore them, which keeps compute low.</p>
+<p>The result: a 152-layer ResNet, eight times deeper than VGG, with fewer floating-point operations (11.3 billion per image against VGG-16's 15.3 billion). An ensemble of ResNets reached 3.57% top-5 error and won the ImageNet classification challenge (ILSVRC 2015), along with the detection and localization tracks and the COCO detection and segmentation contests. A year later the same group trained a 1,001-layer ResNet on CIFAR-10 (He et al., 2016). Highway networks (Srivastava, Greff &amp; Schmidhuber, 2015) had trained 100-layer nets a few months earlier with a similar but <em>gated</em> shortcut, borrowed from the LSTM (<a href="p6-3.html">P6.3</a>).</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Imagine passing a drawing down a line of 100 children, and each one has to <strong>redraw the whole picture from scratch</strong> before handing it on. By the end, it's a mess.</p>
+    <p>Now change the rule: each child passes along the <strong>original drawing</strong> and may only add a few small touches with a pencil. If a child has nothing useful to add, they just pass it on unchanged. Now 100 children can't ruin it, and each one can still help a little.</p>
+    <p class="math-note">Where it breaks: in a real network nothing is "the original drawing" forever. Every block's touches are added to the running picture, so later blocks see the earlier corrections too.</p>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">In a residual block, what must $F$ output for the block to act as the identity?</p>
+  <ol class="q-src">
+    <li>$x$ itself</li>
+    <li>A vector of ones</li>
+    <li>$-x$</li>
+    <li>Zero</li>
+  </ol>
+  <div class="q-explain">$y = x + F(x) = x$ exactly when $F(x) = 0$, which is easy to reach by shrinking $F$'s weights. A plain block would have to learn $H(x) = x$ through its convs and ReLUs, which is much harder.</div>
+</div></div>
+
+<h2>Why gradients flow: the identity path</h2>
+<p>Backpropagation (P2.3) multiplies local derivatives along every path from the loss back to a weight. In a plain stack there's only one path, through every layer, so the gradient is a long <strong>product</strong>. If each layer scales it by about 0.5, then after 20 layers only $0.5^{20} \approx 10^{-6}$ is left.</p>
+<p>A residual block's derivative is different. Since $y = x + F(x)$:</p>
+$$\frac{\partial y}{\partial x} = 1 + \frac{\partial F}{\partial x}$$
+<p>(for vectors, the $1$ is the identity matrix). The "$1$" is the skip connection: a path that passes the gradient back <strong>unchanged</strong>, whatever $F$ is doing. Multiply that over many blocks and expand the product: you get one term for every subset of blocks, i.e. $2^L$ paths for $L$ blocks. One of them skips every block and carries the gradient from the loss straight to the first layer. He et al. (2016, "Identity Mappings in Deep Residual Networks") wrote this as: the gradient at any block is the gradient at the top <em>plus</em> terms through the residual branches, so it can't vanish just because the net is deep. Veit et al. (2016) showed ResNets behave like an ensemble of many relatively shallow paths.</p>
+
+<figure class="anim wide" data-anim="p6-2-residual"></figure>
+
+<h3>Worked example</h3>
+<p>Two blocks with scalar local derivatives $\partial F_1/\partial x = 0.1$ and $\partial F_2/\partial x = -0.2$.</p>
+<ol class="steps">
+  <li><strong>Plain</strong> (each layer computes only $F$): gradient factor $0.1 \times (-0.2) = -0.02$.</li>
+  <li><strong>Residual:</strong> $(1 + 0.1)(1 - 0.2) = 1.1 \times 0.8 = 0.88$.</li>
+  <li>Expand it: $1 + 0.1 - 0.2 - 0.02 = 0.88$. Four paths: skip both (1), through block 1 only (0.1), through block 2 only (−0.2), through both (−0.02). The plain net only has the last one.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Three blocks with local derivatives $0.2$, $-0.1$ and $0.1$.</p>
+  <ol class="steps">
+    <li>Plain-stack gradient factor: <span class="blank" data-answer="-0.002" data-tol="0.0001" data-hint="Multiply the three derivatives: 0.2 × (−0.1) × 0.1."></span></li>
+    <li>Residual gradient factor: <span class="blank" data-answer="1.188" data-tol="0.002" data-hint="(1 + 0.2)(1 − 0.1)(1 + 0.1)."></span></li>
+    <li>Number of paths from the top back to the input: <span class="blank" data-answer="8" data-tol="0.5" data-hint="Each block is either taken or skipped: 2³."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why does a 100-block ResNet still get useful gradients in its first block?</p>
+  <ol class="q-src">
+    <li>The skip connections add a path whose derivative is exactly 1 at every block, so the gradient isn't only a product of 100 small factors</li>
+    <li>ResNets use a much larger learning rate</li>
+    <li>The residual branches have no weights</li>
+    <li>Gradients are computed only for the last few blocks</li>
+  </ol>
+  <div class="q-explain">$\partial y/\partial x = 1 + \partial F/\partial x$. The "1" terms chain together into a direct path from the loss to every block.</div>
+</div></div>
+
+<h2>BatchNorm, LayerNorm and RMSNorm</h2>
+<p>The second ingredient arrived in the same year. As a network trains, the scale of each layer's inputs keeps drifting, and deep nets became touchy: small learning rates, careful initialisation. <strong>Batch normalization</strong> (Ioffe &amp; Szegedy, 2015) normalizes every feature using statistics of the current mini-batch:</p>
+$$\hat{x} = \frac{x - \mu_B}{\sqrt{\sigma_B^2 + \epsilon}}, \qquad y = \gamma\,\hat{x} + \beta$$
+<p>For one feature (one channel, in a CNN), $\mu_B$ and $\sigma_B^2$ are its mean and variance over the $B$ examples in the batch (and, for conv layers, over all spatial positions too). $\epsilon$ is a tiny constant that avoids dividing by zero. $\gamma$ (scale) and $\beta$ (shift) are learned, one pair per feature, so the network can undo the normalization if that helps.</p>
+<p>It worked dramatically: Ioffe and Szegedy matched their baseline's ImageNet accuracy with 14 times fewer training steps, and could use much higher learning rates. Their explanation, reducing "internal covariate shift", has since been questioned. Santurkar et al. (2018) argue the real benefit is a smoother loss landscape. Either way, BatchNorm after every conv became standard in ResNets.</p>
+<p>But BatchNorm ties every example to the rest of its batch, and that causes trouble:</p>
+<ul>
+  <li><strong>Small batches</strong> give noisy statistics; with a batch of 1 in a dense layer, $x - \mu_B$ is always 0.</li>
+  <li><strong>Training and inference differ:</strong> at test time there may be no batch, so BatchNorm uses running averages collected during training instead.</li>
+  <li><strong>Sequences</strong> of different lengths, padding tokens, and text generated one token at a time make "statistics across the batch" awkward or meaningless.</li>
+</ul>
+<p>Vision models with small batches often use <strong>GroupNorm</strong> (Wu &amp; He, 2018), which normalizes groups of channels within each example; the U-Nets inside many diffusion models do (<a href="g1-3.html">G1.3</a>).</p>
+
+<h3>LayerNorm and RMSNorm: normalize each token instead</h3>
+<p><strong>Layer normalization</strong> (Ba, Kiros &amp; Hinton, 2016) uses the same formula but computes the mean and variance across the <strong>features of a single example</strong>. In a Transformer that means across the $d$ numbers of one token's vector:</p>
+$$\mu = \frac{1}{d}\sum_{j=1}^{d} x_j, \qquad \sigma^2 = \frac{1}{d}\sum_{j=1}^{d} (x_j - \mu)^2, \qquad y = \gamma \odot \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta$$
+<p>Each token is normalized on its own, so nothing depends on the batch size, the other sequences in the batch, or the sequence length, and training and inference compute exactly the same thing. It was designed for recurrent networks, which have the same problem with batch statistics.</p>
+<p><strong>RMSNorm</strong> (Zhang &amp; Sennrich, 2019) drops the mean subtraction and the shift $\beta$, and only rescales by the root mean square:</p>
+$$y = \gamma \odot \frac{x}{\sqrt{\tfrac{1}{d}\sum_{j=1}^{d} x_j^2 + \epsilon}}$$
+<p>It's simpler and cheaper (the authors report 7% to 64% faster running time across models) and works as well in practice. Llama-family and most other open LLMs use RMSNorm as of 2026; GPT-2 and BERT used LayerNorm.</p>
+
+<figure class="anim wide" data-anim="p6-2-norms"></figure>
+
+<h3>Worked example</h3>
+<p>One token's vector $x = [2, 4, 6]$, with $\gamma = 1$, $\beta = 0$ and $\epsilon$ ignored.</p>
+<ol class="steps">
+  <li>LayerNorm: mean $4$; variance $\frac{(-2)^2 + 0^2 + 2^2}{3} = 2.67$; standard deviation $1.63$. Output $[-1.22,\ 0,\ 1.22]$.</li>
+  <li>RMSNorm: $\sqrt{(4 + 16 + 36)/3} = \sqrt{18.67} = 4.32$. Output $[0.46,\ 0.93,\ 1.39]$: same direction, not centred.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>A token's vector is $x = [1, 2, 3, 6]$ ($\gamma = 1$, $\beta = 0$, ignore $\epsilon$).</p>
+  <ol class="steps">
+    <li>Mean: <span class="blank" data-answer="3" data-tol="0.01" data-hint="(1 + 2 + 3 + 6) / 4."></span></li>
+    <li>Standard deviation: <span class="blank" data-answer="1.87" data-tol="0.015" data-hint="Variance = (4 + 1 + 0 + 9) / 4 = 3.5; take the square root."></span></li>
+    <li>LayerNorm output for the last entry: <span class="blank" data-answer="1.60" data-tol="0.015" data-hint="(6 − 3) / 1.87."></span></li>
+    <li>RMSNorm output for the last entry: <span class="blank" data-answer="1.70" data-tol="0.015" data-hint="RMS = √((1 + 4 + 9 + 36) / 4) = √12.5 ≈ 3.54; then 6 / 3.54."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why do Transformers use LayerNorm or RMSNorm rather than BatchNorm?</p>
+  <ol class="q-src">
+    <li>BatchNorm has no learned parameters</li>
+    <li>They normalize each token by itself, so results don't depend on the batch, padding or sequence length, and training matches token-by-token generation</li>
+    <li>LayerNorm is the only norm that subtracts the mean</li>
+    <li>BatchNorm can't be used with residual connections</li>
+  </ol>
+  <div class="q-explain">Per-token statistics are what make the norm batch-independent. (BatchNorm also subtracts a mean and has learned $\gamma$, $\beta$; and ResNets combine it with skips all the time.)</div>
+</div></div>
+
+<h2>Pre-norm vs post-norm: keep the highway clean</h2>
+<p>Where does the norm go relative to the skip connection? The original Transformer (Vaswani et al., 2017) used <strong>post-norm</strong>, normalizing <em>after</em> the add:</p>
+$$x \leftarrow \mathrm{LN}\big(x + F(x)\big)$$
+<p>That puts a normalization on the skip path itself, so the gradient can't travel back along a pure identity path. Post-norm Transformers need a careful learning-rate <strong>warm-up</strong> and become hard to train as they get deeper. <strong>Pre-norm</strong>, used from GPT-2 on, normalizes only the input to each sub-block, with one final norm at the top of the stack:</p>
+$$x \leftarrow x + F\big(\mathrm{LN}(x)\big)$$
+<p>Now the skip path is the bare identity, exactly ResNet's highway, and Xiong et al. (2020, "On Layer Normalization in the Transformer Architecture") showed that pre-norm gradients are well behaved at initialisation, so training is stable even without warm-up. He et al. had made the same move for CNNs in 2016 ("pre-activation" ResNets, with BatchNorm and ReLU before each conv), which is what let them reach 1,001 layers.</p>
+<p>So every LLM layer you'll meet is "ResNet + per-token norm": $h \leftarrow h + \mathrm{Attn}(\mathrm{Norm}(h))$, then $h \leftarrow h + \mathrm{MLP}(\mathrm{Norm}(h))$. You'll assemble the full stack in <a href="m1-4.html">The decoder-only transformer</a>, where the running sum is called the <strong>residual stream</strong>. As of 2026, many models add a few extra norms for stability, for example normalizing queries and keys inside attention ("QK-norm"), but the pre-norm residual skeleton is the default.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> residual connections are why a Transformer can be 100+ layers deep and still train, and why interpretability work can treat the residual stream as a shared bus that every layer reads from and writes to (<a href="in-1.html">IN.1</a>). The norms matter in practice too: loss spikes in large training runs are sometimes tamed by adding or moving norms, and when an LLM is quantized (<a href="m5-1.html">M5.1</a>) the tiny norm layers are usually kept in higher precision while the big matrices are compressed.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Which update is pre-norm?</p>
+  <ol class="q-src">
+    <li>$x \leftarrow \mathrm{LN}(x + F(x))$</li>
+    <li>$x \leftarrow \mathrm{LN}(x) + \mathrm{LN}(F(x))$</li>
+    <li>$x \leftarrow x + F(\mathrm{LN}(x))$</li>
+    <li>$x \leftarrow F(x + \mathrm{LN}(x))$</li>
+  </ol>
+  <div class="q-explain">Pre-norm normalizes only what goes <em>into</em> the sub-block; the skip path $x \to x$ stays untouched. Option 1 is the original post-norm.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain why a residual connection makes very deep networks trainable, and why Transformers normalize per token instead of per batch.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A residual block computes $y = x + F(x)$, so doing nothing only requires $F = 0$, and its derivative is $1 + \partial F/\partial x$: the skip adds a path that passes gradients back unchanged, so they don't shrink as a long product through every layer. LayerNorm and RMSNorm compute their statistics over each token's own features, so they don't depend on batch size, padding or sequence length, and they behave the same in training and in one-token-at-a-time generation; pre-norm placement keeps the skip path a clean identity.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A residual block goes from 64 channels at 56×56 to 128 channels at 28×28. What does the shortcut need?</p>
+    <ol class="q-src">
+      <li>Nothing: shortcuts never have weights</li>
+      <li>A $1 \times 1$ conv with stride 2 (or similar) to project $x$ to the new shape</li>
+      <li>A max pool only</li>
+      <li>The block can't be residual; it must be plain</li>
+    </ol>
+    <div class="q-explain">$x + F(x)$ requires matching shapes. ResNet uses a projection shortcut (a $1 \times 1$ conv with stride 2 here) when channels or resolution change, and a bare identity everywhere else.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A batch of 32 sequences of 512 tokens, each token a vector of 4,096 numbers. Over how many numbers does LayerNorm compute each mean?</p>
+    <ol class="q-src">
+      <li>4,096</li>
+      <li>32</li>
+      <li>512</li>
+      <li>$32 \times 512$</li>
+    </ol>
+    <div class="q-explain">One mean and variance per token, over that token's 4,096 features. (BatchNorm on the same tensor would average each feature over all $32 \times 512$ token positions.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What does RMSNorm leave out compared with LayerNorm?</p>
+    <ol class="q-src">
+      <li>The division by a measure of size</li>
+      <li>The learned scale $\gamma$</li>
+      <li>The $\epsilon$ in the denominator</li>
+      <li>The mean subtraction and the learned shift $\beta$</li>
+    </ol>
+    <div class="q-explain">RMSNorm only rescales: $x / \mathrm{RMS}(x)$, times a learned $\gamma$. Zhang &amp; Sennrich (2019) found the re-centring wasn't needed.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Interleaving with P6.1: a ResNet stacks many 3×3 conv layers, each at stride 1 within a stage. Does the skip connection change the receptive field of the block's output?</p>
+    <ol class="q-src">
+      <li>Yes, it doubles it</li>
+      <li>Yes, it shrinks it to 1×1</li>
+      <li>No: the output still depends on the same patch, through $F$; the skip just adds a 1×1 path alongside</li>
+      <li>Receptive fields don't apply to ResNets</li>
+    </ol>
+    <div class="q-explain">The maximum receptive field comes from the path through $F$ and is unchanged. The skip adds a path with a smaller view, which is one reason ResNets act like an ensemble of shallower paths with a mix of receptive-field sizes.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Degradation:</strong> deeper plain nets trained <em>worse</em> (He et al., 2015). An optimization failure, not overfitting.</li>
+    <li><strong>Residual block</strong> $y = x + F(x)$: doing nothing is easy, and $\partial y/\partial x = 1 + \partial F/\partial x$ gives gradients a direct path. ResNet-152 won ILSVRC 2015.</li>
+    <li><strong>BatchNorm</strong> normalizes each feature across the batch; <strong>LayerNorm</strong> each example (token) across its features; <strong>RMSNorm</strong> like LayerNorm but only rescales.</li>
+    <li>Transformers use LayerNorm/RMSNorm because per-token statistics don't depend on the batch, padding or sequence length.</li>
+    <li><strong>Pre-norm</strong>, $x + F(\mathrm{Norm}(x))$, keeps the skip path a clean identity and trains more stably than post-norm.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p6-2-a","front":"What is the degradation problem (He et al., 2015)?","back":"Deeper plain networks reached <em>higher training error</em> than shallower ones (e.g. 56 vs 20 layers on CIFAR-10), although a deeper net could copy the shallow one plus identity layers. An optimization failure, not overfitting."},
+  {"id":"p6-2-b","front":"Write the residual block and its derivative.","back":"$y = x + F(x)$, so $\\partial y/\\partial x = 1 + \\partial F/\\partial x$ (identity matrix for vectors). The 1 is a gradient path through the skip that never shrinks."},
+  {"id":"p6-2-c","front":"BatchNorm vs LayerNorm: which axis does each normalize over?","back":"BatchNorm: each feature/channel across the examples in the batch (and spatial positions). LayerNorm: each example or token across its own features."},
+  {"id":"p6-2-d","front":"How does RMSNorm differ from LayerNorm?","back":"It skips mean subtraction and the shift $\\beta$: $y = \\gamma \\odot x / \\sqrt{\\mathrm{mean}(x^2) + \\epsilon}$. Cheaper; used by Llama-style LLMs."},
+  {"id":"p6-2-e","front":"Why do Transformers avoid BatchNorm?","back":"Batch statistics depend on batch size, padding and sequence length, and differ between training and one-token-at-a-time generation. Per-token norms (LayerNorm, RMSNorm) avoid all of that."},
+  {"id":"p6-2-f","front":"Pre-norm vs post-norm: write both and say which LLMs use.","back":"Post-norm (original Transformer): $x \\leftarrow \\mathrm{LN}(x + F(x))$. Pre-norm (GPT-2 onwards): $x \\leftarrow x + F(\\mathrm{LN}(x))$, plus a final norm. Pre-norm keeps the skip a clean identity and trains more stably."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p6-2-residual.js"></script>
+<script src="../assets/js/anims/p6-2-norms.js"></script>
+</body>
+</html>

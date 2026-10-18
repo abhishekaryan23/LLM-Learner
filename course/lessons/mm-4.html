@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="mm-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Multimodal evaluation &amp; hallucination · LLMs, Animated</title>
+<meta name="description" content="What multimodal benchmarks such as MMMU and MMBench measure and how they mislead, object hallucination measured with CHAIR and POPE, why vision-language models see things that aren't there, the fixes, and LLM judges for open-ended answers.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Multimodal evaluation &amp; hallucination</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Multimodal models</span></div>
+<p class="lede">A vision-language model can ace a benchmark without really looking at the pictures, and it can describe a fork that isn't on the table. This lesson shows how multimodal benchmarks are built, how they mislead, how to measure <strong>hallucination</strong> with simple yes/no probes, and what actually reduces it.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Say what benchmarks such as MMMU and MMBench measure, and spot two pitfalls: questions answerable without the image, and contamination.</li>
+    <li>Compute POPE accuracy, precision, recall and yes-ratio, and explain why a yes-biased model can still look decent.</li>
+    <li>Match the causes of object hallucination to their fixes, and judge open-ended answers without being fooled by LLM-judge biases.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="mm-1.html">MM.1 Connecting vision to LLMs</a> (how these models are built and trained) and <a href="m4-4.html">M4.4 LLM-as-judge</a> (judge biases and Cohen's kappa). Helpful but optional: <a href="m4-2.html">M4.2 Benchmarks</a> and <a href="m4-3.html">M4.3 Contamination</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A vision-language model still answers a multiple-choice science question correctly after you delete the image. What does that tell you?</p>
+    <ol class="q-src">
+      <li>The model has excellent vision</li>
+      <li>That question doesn't test vision for this model: the text was enough, or the answer was memorised</li>
+      <li>The image must have been cached</li>
+      <li>Nothing; this can't happen</li>
+    </ol>
+    <div class="q-explain">If the image isn't needed, the question measures knowledge or guessing, not seeing. Running such a “blind” baseline is one of the cheapest checks on any multimodal benchmark.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A model answers “yes” to every “Is there a … in the image?” question. Half the questions are about objects that are present. What is its accuracy?</p>
+    <ol class="q-src">
+      <li>100%</li>
+      <li>75%</li>
+      <li>50%</li>
+      <li>0%</li>
+    </ol>
+    <div class="q-explain">It gets every “present” question right and every “absent” one wrong: 50%, exactly chance. Yet its recall is a perfect 100%. You'll see below why benchmarks also report the yes-ratio.</div>
+  </div>
+</section>
+
+<h2>What multimodal benchmarks measure, and how they mislead</h2>
+<p>The first big visual question answering dataset, VQA (Antol et al., 2015), taught the field a lesson: models could score well while barely looking. Answering “what sport is this?” with “tennis” or “how many?” with “2” went a long way. VQA v2 (Goyal et al., 2017, “Making the V in VQA Matter”) fixed much of this by pairing each question with a similar image that has a <em>different</em> answer, so the language prior alone could no longer win.</p>
+<p>Today's benchmarks test broader skills, mostly with multiple choice so scoring is automatic:</p>
+<ul>
+  <li><strong>MMMU</strong> (Yue et al., 2023): about 11.5K college-level questions from exams and textbooks across 30 subjects, with charts, diagrams, maps, tables and chemical structures. It tests expert reasoning <em>with</em> images.</li>
+  <li><strong>MMBench</strong> (Liu et al., 2023): about 3,000 questions over 20 ability dimensions (perception, reasoning, and so on). Its <strong>CircularEval</strong> asks each question several times with the options rotated and counts it only if every answer is right. On 4 options a random guesser drops from 25% to $(1/4)^4 \approx 0.4\%$, and a model that just likes option A is exposed.</li>
+</ul>
+<p>Two pitfalls recur. <strong>Blind answerability:</strong> Chen et al. (2024, “Are We on the Right Way for Evaluating Large Vision-Language Models?”) found many benchmark questions can be answered from the text alone; GeminiPro scored 42.9% on MMMU with no image at all. <strong>Leakage:</strong> they also found a multimodal model answering 43.6% of MMMU questions without images while its own LLM backbone managed 17.9%, a sign that benchmark material had been memorised during multimodal training (contamination, <a href="m4-3.html">M4.3</a>). Their answer was MMStar, 1,500 questions checked by humans to need the image. MMMU-Pro (Yue et al., 2024) similarly removed text-answerable questions, raised the number of options to up to 10, and added a setting where the question itself is embedded in the image.</p>
+<p>The practical habit: <strong>always run a blind baseline</strong>, the same model with the image removed, and report the gap. If a model scores 62% with images and 48% without on a 4-option test, only the 14-point <em>multimodal gain</em> is evidence of seeing; the rest is knowledge and guessing (chance is 25%).</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why does MMBench's CircularEval rotate the answer options?</p>
+  <ol class="q-src">
+    <li>A question only counts if the model is right under every ordering, which defeats lucky guesses and preferences for a particular letter</li>
+    <li>To make the benchmark longer</li>
+    <li>To test whether the model can read rotated text</li>
+  </ol>
+  <div class="q-explain">With 4 rotations a random guesser passes only $(1/4)^4 \approx 0.4\%$ of questions, and a model that likes “A” fails whenever the right answer moves.</div>
+</div></div>
+
+<h2>Object hallucination: CHAIR and POPE</h2>
+<p><strong>Object hallucination</strong> means describing or affirming objects that aren't in the image. It is the multimodal cousin of a made-up citation, and it matters most where people can't easily check: alt text for blind users, medical images, insurance photos.</p>
+<p><strong>CHAIR</strong> (Rohrbach et al., 2018, “Object Hallucination in Image Captioning”) measures it in captions of COCO images, whose objects are annotated:</p>
+$$\text{CHAIR}_i = \frac{|\text{hallucinated objects}|}{|\text{all objects mentioned}|}, \qquad \text{CHAIR}_s = \frac{|\text{captions with a hallucinated object}|}{|\text{all captions}|}$$
+<p>An object counts as hallucinated if the caption mentions it (after matching synonyms) but the image's annotations don't contain it. CHAIR depends on caption style: longer captions mention more objects and get more chances to be wrong, and only the 80 COCO object categories are checked.</p>
+<p><strong>POPE</strong> (Li et al., 2023, “Evaluating Object Hallucination in Large Vision-Language Models”) turns the problem into polling. For 500 COCO images it asks “Is there a &lt;object&gt; in the image?” about 3 objects that are present and 3 that aren't, so each setting has 3,000 balanced yes/no questions. The absent objects are sampled three ways: <strong>random</strong>, <strong>popular</strong> (the most frequent objects in the dataset) and <strong>adversarial</strong> (objects that most often co-occur with what's actually there: a fork next to a pizza). It reports accuracy, precision, recall, F1 and the <strong>yes-ratio</strong>, because several early models answered “yes” to nearly everything. (A 2025 re-audit, RePOPE, found label errors in POPE's annotations, a reminder that benchmarks have bugs too.)</p>
+
+<h3>Worked example</h3>
+<p>100 POPE-style questions, 50 about present objects and 50 about absent ones. A yes-biased model says yes to 48 of the present objects and to 30 of the absent ones.</p>
+<ol class="steps">
+  <li>Counts: TP = 48, FN = 2, FP = 30, TN = 20.</li>
+  <li>Accuracy $= (48 + 20)/100 = 0.68$.</li>
+  <li>Precision $= 48/(48 + 30) \approx 0.62$; recall $= 48/50 = 0.96$.</li>
+  <li>F1 $= 2PR/(P + R) \approx 0.75$; yes-ratio $= 78/100 = 78\%$ on a set that is 50% yes. Recall and F1 look fine; precision, accuracy and the yes-ratio give the bias away.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>Same 100 questions, a model that always says “yes”.</p>
+  <ol class="steps">
+    <li>Accuracy: <span class="blank" data-answer="0.5" data-tol="0.001" data-hint="TP = 50, TN = 0, out of 100."></span></li>
+    <li>Precision: <span class="blank" data-answer="0.5" data-tol="0.001" data-hint="TP / (TP + FP) = 50 / 100."></span></li>
+    <li>Recall: <span class="blank" data-answer="1" data-tol="0.001" data-hint="It never misses a present object."></span></li>
+    <li>F1, to two decimals: <span class="blank" data-answer="0.67" data-tol="0.005" data-hint="2 × 0.5 × 1 / (0.5 + 1)"></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="mm4-pope">
+  <h3>Playground: a tiny POPE probe</h3>
+  <p class="math-note" style="margin:0">Twelve questions about one kitchen photo: six objects present, six absent (two random, two popular, two adversarial negatives). A simulated model has a confidence for each; it says “yes” when the confidence is at least the threshold $t$. Lower $t$ to make it yes-biased and watch which scores notice.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Say “yes” when confidence ≥ t = <output>0.50</output></span>
+      <input type="range" min="0" max="1" step="0.05" value="0.5">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Threshold presets" style="margin-top:10px">
+    <button type="button" class="chip" data-t="0.7" aria-pressed="false">Cautious · 0.7</button>
+    <button type="button" class="chip" data-t="0.5" aria-pressed="true">Balanced · 0.5</button>
+    <button type="button" class="chip" data-t="0.25" aria-pressed="false">Yes-biased · 0.25</button>
+    <button type="button" class="chip" data-t="0" aria-pressed="false">Always yes · 0</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<p>Try the presets. The yes-biased model has a <em>higher</em> F1 (0.80) than the cautious one (0.67), because F1 here only scores the “yes” class. Accuracy and the yes-ratio tell the real story, and the adversarial negatives (fork, knife) are the last to be answered correctly.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Which POPE sampling setting is usually hardest, and why?</p>
+  <ol class="q-src">
+    <li>Random: random objects are rare</li>
+    <li>Popular: frequent objects are hard to see</li>
+    <li>Adversarial: the absent objects often co-occur with what is present, so the language prior pushes toward “yes”</li>
+  </ol>
+  <div class="q-explain">Asking about a fork next to a pizza tests whether the model checks the pixels or relies on what usually appears together.</div>
+</div></div>
+
+<h2>Why models hallucinate, and the fixes</h2>
+<p>Hallucinations come from a few sources, and each has its own remedies.</p>
+<ul>
+  <li><strong>Strong language priors.</strong> The LLM has read millions of captions where pizza comes with forks. Rohrbach et al. (2018) already linked caption hallucinations to co-occurrence statistics, and POPE's adversarial split exists because of it.</li>
+  <li><strong>Weak visual evidence.</strong> At low resolution, thin or small objects blur into a patch (<a href="mm-1.html">MM.1</a>). Encoders also have blind spots: Tong et al. (2024, “Eyes Wide Shut?”) found image pairs that look clearly different to people yet get nearly identical CLIP embeddings, and VLMs built on CLIP often failed questions about them.</li>
+  <li><strong>Instruction-data bias.</strong> Much visual instruction data was written by text-only LLMs from captions (as in LLaVA), so answers can mention details nobody checked against the pixels. And almost every training question is about something that <em>is</em> there (“describe the dog”), so “yes” is the safe habit. LRV-Instruction (Liu et al., 2023) added deliberately negative instructions about absent objects to counter this.</li>
+  <li><strong>Long answers.</strong> Several studies report that hallucinations become more frequent later in long descriptions, as the model leans more on its own text than on the image.</li>
+</ul>
+
+<figure class="anim wide" data-anim="mm-4-hallucination"></figure>
+
+<p>The fixes line up with the causes:</p>
+<ul>
+  <li><strong>Better data:</strong> negative and grounded examples (questions about absent objects, region-level annotations), and human-checked, detailed captions.</li>
+  <li><strong>Better perception:</strong> higher resolution and stronger or combined vision encoders.</li>
+  <li><strong>Preference tuning on hallucination pairs</strong> (<a href="m3-4.html">M3.4</a>): LLaVA-RLHF (Sun et al., 2023) used “factually augmented” RLHF with image annotations given to the reward model; RLHF-V (Yu et al., 2023) collected human corrections of the exact hallucinated segments; many later works build DPO pairs of faithful vs hallucinated answers.</li>
+  <li><strong>Decoding-time tricks:</strong> Visual Contrastive Decoding (Leng et al., 2023) compares the model's next-token scores on the real image and on a distorted copy, and down-weights tokens that the prior alone would produce.</li>
+  <li><strong>Permission to abstain:</strong> train and prompt for “I can't see that” or “not visible in the image” when the evidence is missing.</li>
+</ul>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Ask a kid who's been looking at a pizza party photo: “Is there a fork?” They say <strong>“Yes!”</strong> without checking, because pizza parties usually have forks.</p>
+    <p>To catch this, you ask lots of quick yes/no questions, including <strong>tricky ones</strong> about things that usually go together but aren't there. To fix it, you show the kid bigger, clearer photos, practise questions where the right answer is “no”, and praise them for saying <strong>“I can't see one.”</strong></p>
+    <p class="math-note">Where it breaks: the kid knows they're guessing; a model has no built-in sense of when it is relying on the photo and when on habit, which is why we have to measure it from outside.</p>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A model hallucinates small objects in high-resolution photos it sees downscaled to 336×336, even after preference tuning. Which fix targets this cause most directly?</p>
+  <ol class="q-src">
+    <li>A longer system prompt</li>
+    <li>Higher input resolution (tiles or dynamic resolution) so small objects keep enough pixels</li>
+    <li>Asking for longer descriptions</li>
+  </ol>
+  <div class="q-explain">If the evidence isn't in the visual tokens, no amount of tuning can find it; give the model the pixels. Longer descriptions tend to add hallucinations, not remove them.</div>
+</div></div>
+
+<h2>Judging open-ended answers</h2>
+<p>Yes/no probes are clean, but users ask open questions: “describe this photo”, “what's wrong with this chart?”. There is no single right answer, so evaluation turns to <strong>LLM-as-judge</strong> (<a href="m4-4.html">M4.4</a>). LLaVA-Bench (Liu et al., 2023) had a text-only GPT-4 compare answers against references written from the images' captions and boxes; MMHal-Bench (Sun et al., 2023) asks a GPT-4 judge to rate hallucination given image annotations.</p>
+<p>All the M4.4 biases apply (position, verbosity, self-preference), plus some that are specific to images:</p>
+<ul>
+  <li><strong>A text-only judge can't see the image.</strong> It checks the answer against whatever annotations it is given; details missing from the annotations look like hallucinations, and hallucinations that happen to sound plausible can slip through.</li>
+  <li><strong>Verbosity rewards hallucination.</strong> A long, vivid description listing twelve objects often beats an accurate one listing five, even when three of the twelve aren't there.</li>
+  <li><strong>A vision-language judge shares blind spots.</strong> If it uses a similar encoder to the model being judged, it can miss the same things, and it may prefer outputs from its own model family.</li>
+</ul>
+<p>Practical checks: break long answers into <strong>atomic claims</strong> and verify each against annotations or with targeted yes/no probes (CHAIR and POPE in miniature); give the judge reference answers and the relevant annotations; swap orders for pairwise comparisons; and validate the judge against a sample of human labels with Cohen's kappa before trusting it. Report hallucination rate next to helpfulness, since tuning for one often moves the other.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> public leaderboards tell you little about <em>your</em> images. When you ship a multimodal feature, build a small eval from your own data (<a href="m4-7.html">M4.7</a>): include a blind baseline, negative probes about plausible-but-absent objects, the resolution you will actually send, and a human-labelled sample to calibrate any judge. A model that says “I can't tell from this image” at the right moments is often worth more than one with a slightly higher benchmark score.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A text-only judge scores image descriptions against human-written captions. Which failure is most likely?</p>
+  <ol class="q-src">
+    <li>Correct details that the captions happen to omit get treated as hallucinations, while plausible-sounding inventions can slip through</li>
+    <li>The judge refuses to score anything without the image</li>
+    <li>It becomes biased toward shorter answers</li>
+  </ol>
+  <div class="q-explain">The judge only knows what the annotations say. Claim-level checks and calibration against human labels catch both kinds of error.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">A vendor says their vision-language model “barely hallucinates” and cites a high POPE F1 and a strong MMMU score. What would you check before believing it?</p>
+  <div class="model-answer"><strong>Model answer:</strong> On POPE I'd look at accuracy, precision and the yes-ratio on the adversarial split, since a yes-biased model can have a decent F1. On MMMU I'd ask for a blind baseline (score without images) and check for contamination, because many questions can be answered from text or memory. Then I'd run my own probes on my own images, including plausible-but-absent objects, and verify open-ended descriptions claim by claim rather than trusting a judge's overall score.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">On a 4-option benchmark, a model scores 58% with images and 55% with the images removed. What is the best reading?</p>
+    <ol class="q-src">
+      <li>It sees very well: 58% is far above chance</li>
+      <li>The benchmark is broken and should be discarded</li>
+      <li>Removing images must have failed</li>
+      <li>Almost all of its score comes from text knowledge or memorisation; vision adds only about 3 points</li>
+    </ol>
+    <div class="q-explain">The multimodal gain is $58 - 55 = 3$ points. The rest would be there without eyes, so the benchmark says little about this model's vision.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Across 100 captions, a model mentions 200 objects; 30 of them are not in the images, and 24 captions contain at least one hallucinated object. What are $\text{CHAIR}_i$ and $\text{CHAIR}_s$?</p>
+    <ol class="q-src">
+      <li>30% and 24%</li>
+      <li>15% and 24%</li>
+      <li>15% and 30%</li>
+      <li>24% and 15%</li>
+    </ol>
+    <div class="q-explain">$\text{CHAIR}_i = 30/200 = 15\%$ of mentioned objects; $\text{CHAIR}_s = 24/100 = 24\%$ of captions.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Recall M4.4. A GPT-4 judge prefers a vivid 12-object description over an accurate 5-object one, though 3 of the 12 objects aren't in the image. Which bias is this, and what helps most?</p>
+    <ol class="q-src">
+      <li>Position bias; swap the order</li>
+      <li>Self-preference; use a different judge family</li>
+      <li>Verbosity bias; verify claims one by one against annotations and penalise unsupported ones</li>
+      <li>No bias; more detail is always better</li>
+    </ol>
+    <div class="q-explain">Longer answers win on style. In multimodal evaluation that rewards hallucination, so check atomic claims against the image annotations rather than scoring the whole answer by impression.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Visual Contrastive Decoding compares the model's predictions on the real image and on a distorted copy. What does that target?</p>
+    <ol class="q-src">
+      <li>Tokens driven by the language prior rather than the image, since they stay likely even when the image is corrupted</li>
+      <li>Low resolution, by upscaling the image</li>
+      <li>Contamination of the benchmark</li>
+      <li>Position bias in judges</li>
+    </ol>
+    <div class="q-explain">If a token's score barely changes when the visual evidence is destroyed, it probably came from the prior. Down-weighting such tokens reduces prior-driven hallucinations at decoding time, without retraining.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Benchmarks like <strong>MMMU</strong> and <strong>MMBench</strong> are mostly multiple choice; CircularEval defeats lucky guesses. Always run a <strong>blind baseline</strong> and watch for contamination.</li>
+    <li><strong>Object hallucination</strong>: CHAIR counts invented objects in captions; <strong>POPE</strong> asks balanced yes/no questions with random, popular and adversarial negatives.</li>
+    <li>Report accuracy, precision and the <strong>yes-ratio</strong>, not just F1: an always-yes model gets 50% accuracy, 100% recall and F1 0.67.</li>
+    <li>Causes: language priors, weak or low-resolution features, instruction-data bias, long answers. Fixes: grounded and negative data, more resolution, preference tuning on hallucination pairs, contrastive decoding, permission to abstain.</li>
+    <li>LLM judges for open answers inherit M4.4's biases and can't see what annotations omit: check claims one by one and calibrate against humans.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"mm-4-a","front":"Two pitfalls of multimodal benchmarks, and a cheap check for the first.","back":"Questions answerable without the image (text knowledge or guessing) and contamination/leakage of benchmark items into training data. Run a blind baseline: the same model with images removed; only the gap reflects seeing."},
+  {"id":"mm-4-b","front":"Define $\\text{CHAIR}_i$ and $\\text{CHAIR}_s$.","back":"$\\text{CHAIR}_i$ = hallucinated objects / all objects mentioned; $\\text{CHAIR}_s$ = captions with at least one hallucinated object / all captions (Rohrbach et al., 2018, on COCO object annotations)."},
+  {"id":"mm-4-c","front":"How does POPE build its questions?","back":"“Is there a &lt;object&gt; in the image?” for 3 present and 3 absent objects per image (500 COCO images → 3,000 balanced questions per setting); absent objects sampled randomly, from the most popular objects, or adversarially from frequent co-occurring objects."},
+  {"id":"mm-4-d","front":"An always-yes model on a balanced yes/no probe: accuracy, precision, recall, F1?","back":"Accuracy 0.5, precision 0.5, recall 1.0, F1 ≈ 0.67. That's why POPE also reports the yes-ratio (here 100%)."},
+  {"id":"mm-4-e","front":"Four causes of object hallucination, each with a fix.","back":"Language priors → negative/adversarial training data, contrastive decoding. Weak or low-res features → higher resolution, better encoders. Instruction-data bias (unverified, mostly-positive data) → grounded data, preference tuning on hallucination pairs. Long answers → shorter answers, claim checks, permission to abstain."},
+  {"id":"mm-4-f","front":"Why is a text-only LLM judge risky for image descriptions?","back":"It can only check against the annotations it is given: true details missing from them look like hallucinations, and plausible inventions slip through. Verbosity bias also rewards long, hallucination-prone descriptions. Check atomic claims and calibrate against human labels (kappa)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/mm-4-hallucination.js"></script>
+<script src="../assets/js/anims/mm-4-pope-playground.js"></script>
+</body>
+</html>

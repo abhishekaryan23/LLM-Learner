@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ag-8">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Starter kit: a server, a skill and a rules file · LLMs, Animated</title>
+<meta name="description" content="Hands-on: write a minimal MCP server in Python, a SKILL.md for a repeatable task and an AGENTS.md for a small repo, test them with prompts that should and shouldn't trigger, run a safety checklist, and keep a one-screen 'where to use what' card.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<style>
+  .table-wrap { overflow-x: auto; margin: 16px 0 20px; }
+  .ag-table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+  .ag-table th, .ag-table td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .ag-table th { font: 600 .8rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .05em; color: var(--ink-2); }
+  .ag-table td:first-child { font-weight: 560; }
+  .file { margin: 16px 0 20px; }
+  .file figcaption { font: 600 .8rem/1.2 var(--font-mono); color: var(--ink-2); margin: 0 0 6px; }
+  .file pre { margin: 0; }
+  .file.wrap pre { white-space: pre-wrap; overflow-wrap: break-word; }
+  .decision { border-left: 4px solid var(--warm); }
+  .decision .ag-table td:last-child { white-space: nowrap; }
+  .decision .ag-table td:nth-child(2) { font-weight: 620; }
+  .checklist { list-style: none; padding: 0; margin: 0 0 1em; }
+  .checklist li { position: relative; padding: 8px 0 8px 32px; border-bottom: 1px dashed var(--line); margin: 0; }
+  .checklist li:last-child { border-bottom: 0; }
+  .checklist li::before { content: "☐"; position: absolute; left: 4px; top: 7px; font-size: 1.1rem; color: var(--accent); }
+</style>
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Starter kit: a server, a skill and a rules file</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 8 of The agent toolkit</span></div>
+<p class="lede">Time to build. In five short steps you'll write the three files that cover most real agent setups: an <strong>MCP server</strong> with one tool, a <strong>skill</strong> for a chore you repeat, and an <strong>AGENTS.md</strong> for the repo. Then you'll test them, lock them down, and leave with a one-screen card for choosing the right piece next time.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write and register a minimal MCP server in Python, a valid SKILL.md and a useful AGENTS.md.</li>
+    <li>Test them with prompts that should and shouldn't trigger them, and fix what misfires.</li>
+    <li>Apply a safety checklist and use the "where to use what" card to pick the right tool for a new need.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="ag-3.html">MCP</a> (AG.3), <a href="ag-4.html">Agent Skills</a> (AG.4) and <a href="ag-5.html">AGENTS.md &amp; project memory files</a> (AG.5). This lesson only recaps them in a line each and focuses on doing. You'll need Python 3.10+ if you want to run the server yourself; everything else is plain text files.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In a Python MCP server, how does the model learn what a tool does and which arguments it takes?</p>
+    <ol class="q-src">
+      <li>It reads the server's source code</li>
+      <li>You paste the code into every prompt</li>
+      <li>The SDK turns the function's name, docstring and type hints into a tool description and input schema</li>
+      <li>It guesses from the function name only</li>
+    </ol>
+    <div class="q-explain">The client asks the server for its tool list, and the SDK builds each entry from your function's signature and docstring. So the docstring is, in effect, a prompt.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">You install a skill. Before any task needs it, what of it sits in the model's context?</p>
+    <ol class="q-src">
+      <li>Just its name and short description</li>
+      <li>The whole SKILL.md and every file in its folder</li>
+      <li>Nothing at all, ever</li>
+      <li>Only its scripts</li>
+    </ol>
+    <div class="q-explain">That's progressive disclosure: names and descriptions are always visible, so the agent knows the skill exists; the body loads only when a task matches.</div>
+  </div>
+</section>
+
+<h2>Step 1: an MCP server with one tool</h2>
+<p>The pieces of this kit arrived in about a year. Anthropic open-sourced the <strong>Model Context Protocol</strong> in November 2024; <strong>AGENTS.md</strong> appeared in August 2025; Anthropic launched <strong>Agent Skills</strong> in October 2025 and published them as an open standard that December. Before them, every team glued tools and instructions into its own app in its own way. Now each piece is a small file that many agents understand. Here is how the three plug into one agent:</p>
+
+<figure class="anim wide" data-anim="ag-8-kit"></figure>
+
+<p>Recap of <a href="ag-3.html">AG.3</a>: an MCP <strong>server</strong> offers tools; an MCP <strong>client</strong> inside the agent app asks for the list (<code>tools/list</code>) and calls them (<code>tools/call</code>). Our server gives the agent one <strong>read-only</strong> tool: look up a team note by title.</p>
+<figure class="file">
+  <figcaption>notes_server.py</figcaption>
+<pre><code># pip install "mcp[cli]"   (official Python SDK, v2)
+from mcp.server import MCPServer
+
+mcp = MCPServer("team-notes")
+
+NOTES = {
+    "standup": "Ship the login fix. Review PR 42.",
+    "oncall": "Ana this week, then Ben.",
+}
+
+@mcp.tool()
+def get_note(title: str) -> str:
+    """Return a saved team note by its title,
+    for example 'standup' or 'oncall'."""
+    return NOTES.get(title, f"No note called {title!r}.")
+
+if __name__ == "__main__":
+    mcp.run()  # speaks MCP over stdin/stdout</code></pre>
+</figure>
+<p>What each part does:</p>
+<ul>
+  <li><code>@mcp.tool()</code> registers the function as a tool. The SDK turns the <strong>type hints</strong> (<code>title: str</code>) into a JSON input schema and the <strong>docstring</strong> into the description the model reads. Write the docstring for the model: what it does, when to use it, an example value.</li>
+  <li><code>mcp.run()</code> uses the <strong>stdio</strong> transport by default: the agent app starts your script and talks to it through standard input and output. For a shared, remote server you would use the HTTP transport instead.</li>
+</ul>
+<p class="math-note">Version note: the official SDK's v2 (July 2026) renamed the server class. Many tutorials show the v1 form, <code>from mcp.server.fastmcp import FastMCP</code> and <code>mcp = FastMCP("team-notes")</code>; the decorator is the same. If your installed version complains, check which one you have.</p>
+<p><strong>Try it by hand first.</strong> <code>mcp dev notes_server.py</code> opens the server in the MCP Inspector, a small web page where you can list the tools and call <code>get_note</code> yourself. If it works there, any client can use it.</p>
+<p><strong>Register it with an agent.</strong> Most clients take the same few facts: a name, the command to run and its arguments. Many desktop apps and IDEs read a JSON block like this from their own config file (the file's location and exact keys vary, so check your client's docs):</p>
+<figure class="file">
+  <figcaption>MCP client config (common shape)</figcaption>
+<pre><code>{
+  "mcpServers": {
+    "team-notes": {
+      "command": "python",
+      "args": ["/full/path/to/notes_server.py"]
+    }
+  }
+}</code></pre>
+</figure>
+<p>Command-line agents often have a command for it instead. In Claude Code, for example: <code>claude mcp add team-notes -- python /full/path/to/notes_server.py</code>, or a <code>.mcp.json</code> file in the project to share it with your team.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Imagine a new helper coming to your house. You give it three things.</p>
+    <p>A <strong>note on the fridge</strong> with the house rules: "shoes off", "the cat eats at six", "never open the red cupboard". The helper reads it every time it comes in. That's <strong>AGENTS.md</strong>.</p>
+    <p>A <strong>box of recipe cards</strong>. The helper only reads the titles on the tabs until you ask for pancakes; then it pulls out the pancake card and follows it. That's a <strong>skill</strong>.</p>
+    <p>A <strong>phone with the bakery's number</strong>. When it needs to know what bread is in stock, it calls and asks. That's an <strong>MCP server</strong>.</p>
+    <p class="math-note">Where it breaks: the helper re-reads the whole fridge note every single visit, and has a small "counter" where everything it's using must fit. That's why the note stays short and the cards stay in the box.</p>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">The model keeps calling <code>get_note</code> with titles like "Standup notes for Monday". What is the best first fix?</p>
+  <ol class="q-src">
+    <li>Rename the function to <code>x1</code></li>
+    <li>Improve the docstring: say titles are short keys and list examples such as 'standup' or 'oncall' (or add a tool that lists titles)</li>
+    <li>Remove the type hints</li>
+    <li>Switch from stdio to HTTP</li>
+  </ol>
+  <div class="q-explain">The docstring and schema are all the model sees about the tool. Clear examples, or a <code>list_notes</code> tool, fix most wrong-argument calls.</div>
+</div></div>
+
+<h2>Step 2: a skill for a repeatable task</h2>
+<p>Recap of <a href="ag-4.html">AG.4</a>: a skill is a folder with a <code>SKILL.md</code> file (plus optional scripts, references and templates). Its short frontmatter is always visible to the agent; the body loads only when a task matches. Pick a chore you explain to the agent more than once a month. Ours: writing release notes.</p>
+<figure class="file wrap">
+  <figcaption>release-notes/SKILL.md</figcaption>
+<pre><code>---
+name: release-notes
+description: Drafts user-facing release notes from merged pull requests since the last tag. Use when the user asks for release notes, a changelog entry, or "what shipped" in a version.
+---
+
+# Release notes
+
+1. Find the previous tag: `git describe --tags --abbrev=0`.
+2. List merged PRs since then: `git log &lt;tag&gt;..HEAD --merges --oneline`.
+3. Group them under Added, Changed and Fixed. Skip internal-only changes (CI, refactors).
+4. One line per change, in plain words a user understands. No PR numbers in the text.
+5. Fill in `template.md` from this folder and show the draft. Don't publish anything.</code></pre>
+</figure>
+<p>The rules that make a skill work, from the Agent Skills specification:</p>
+<ul>
+  <li><strong><code>name</code></strong>: up to 64 characters, lowercase letters, digits and hyphens, and it must match the folder name.</li>
+  <li><strong><code>description</code></strong>: up to 1,024 characters. Say <em>what</em> it does and <em>when</em> to use it, with the words users actually type ("release notes", "changelog"). This one line decides whether the skill ever fires.</li>
+  <li><strong>Body</strong>: concrete numbered steps; keep it under about 500 lines and move long reference material into separate files the body points to.</li>
+</ul>
+<p>Where the folder goes depends on the tool. Claude Code, for example, reads <code>.claude/skills/release-notes/SKILL.md</code> in a project; other agents that support the standard have their own skills folder. Notice the last step: the skill <em>drafts</em> but doesn't publish. Keep anything with side effects behind a human check.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Your skill never fires when people ask for a "changelog". What should you change first?</p>
+  <ol class="q-src">
+    <li>Make the body longer</li>
+    <li>Rename the folder to <code>Release_Notes</code></li>
+    <li>Move the steps into AGENTS.md</li>
+    <li>Add the word "changelog" (and similar phrases users type) to the description</li>
+  </ol>
+  <div class="q-explain">The agent decides from the description alone, before the body is loaded. Uppercase and underscores would also break the name rule.</div>
+</div></div>
+
+<h2>Step 3: an AGENTS.md for the repo</h2>
+<p>Recap of <a href="ag-5.html">AG.5</a>: the rules file loads in full at the start of every session, so it holds only what applies every time. For our small repo, containing the server and the skill:</p>
+<figure class="file wrap">
+  <figcaption>AGENTS.md</figcaption>
+<pre><code># AGENTS.md
+
+## Setup
+- Python 3.12. Install: `pip install -e ".[dev]"`
+
+## Before you finish
+- `pytest -q` must pass.
+- `ruff check .` must be clean.
+
+## Conventions
+- One MCP tool = one function in `notes_server.py`, with type hints and a docstring written for the model (what, when, an example).
+- New tools are read-only unless the user asks otherwise.
+- Skills live in `.agents/skills/&lt;name&gt;/SKILL.md`; the name matches the folder.
+
+## Gotchas
+- Tool docstrings are shown to the model as-is: keep them short and literal.
+- The server talks over stdout, so never `print()` debug output from a tool; log to stderr.
+
+## Don't
+- Don't add tools that write, delete or send anything without asking first.
+- Never put tokens or keys in this file, a skill or a docstring. Read them from environment variables.</code></pre>
+</figure>
+<p>Three details worth copying:</p>
+<ol class="steps">
+  <li><strong>Commands that run.</strong> "Before you finish" gives the agent a way to check its own work.</li>
+  <li><strong>A real gotcha.</strong> With the stdio transport, stray <code>print()</code> output corrupts the protocol messages. A newcomer would never guess it; one line saves an afternoon.</li>
+  <li><strong>Conventions for the other two files.</strong> The rules file says how tools and skills are written here, so the agent extends the kit in the same style. (The skills folder path is this repo's choice; use whatever your tools read.)</li>
+</ol>
+<p>If your team also uses a tool that wants its own file name, don't copy the text: point at this file instead, for example a <code>CLAUDE.md</code> whose only line is <code>@AGENTS.md</code>.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why does the AGENTS.md warn against <code>print()</code> inside tools?</p>
+  <ol class="q-src">
+    <li>A stdio MCP server uses standard output for protocol messages, so stray prints corrupt them</li>
+    <li>Python's <code>print()</code> is deprecated</li>
+    <li>Printing costs tokens in every session</li>
+    <li>MCP forbids text output of any kind</li>
+  </ol>
+  <div class="q-explain">With stdio, stdout is the wire. Logs belong on stderr. It is a classic "gotcha" line: specific, from real pain, impossible to guess.</div>
+</div></div>
+
+<h2>Step 4: try it</h2>
+<p>Don't trust a setup you haven't poked. Write a handful of prompts that <strong>should</strong> trigger each piece, and some that <strong>shouldn't</strong>, and watch what the agent does. Most agent apps show tool calls and loaded skills in the transcript.</p>
+<div class="table-wrap"><table class="ag-table">
+  <thead><tr><th>Prompt</th><th>Expected</th></tr></thead>
+  <tbody>
+    <tr><td>"What's in the standup note?"</td><td>Calls <code>get_note("standup")</code>, answers from the result</td></tr>
+    <tr><td>"Who is on call this week?"</td><td>Calls <code>get_note("oncall")</code>: the docstring's examples help it pick the key</td></tr>
+    <tr><td>"Draft release notes for v1.4"</td><td>Loads the release-notes skill, follows its steps, shows a draft</td></tr>
+    <tr><td>"What is a changelog, in general?"</td><td>Probably answers directly: a question about the idea, not the chore. Loading the skill here is a mild false positive</td></tr>
+    <tr><td>"Add a <code>delete_note</code> tool"</td><td>Asks before adding a write tool (AGENTS.md), then runs <code>pytest</code> and <code>ruff</code> before finishing</td></tr>
+    <tr><td>"What's the weather in Oslo?"</td><td>None of the three: says it has no weather tool (or uses one it really has)</td></tr>
+  </tbody>
+</table></div>
+<p>When something misfires, the fix is usually in the text the model sees:</p>
+<div class="table-wrap"><table class="ag-table">
+  <thead><tr><th>Symptom</th><th>Likely fix</th></tr></thead>
+  <tbody>
+    <tr><td>Tool never called</td><td>Check it's registered and appears in <code>tools/list</code>; make the docstring say when to use it</td></tr>
+    <tr><td>Wrong arguments</td><td>Add example values to the docstring; tighten the types; add a "list" tool</td></tr>
+    <tr><td>Skill never fires</td><td>Put the users' own words in the description</td></tr>
+    <tr><td>Skill fires too often</td><td>Narrow the description ("Use only when…")</td></tr>
+    <tr><td>Rule ignored</td><td>Shorten AGENTS.md, make the rule concrete, or turn a must-always rule into a hook (<a href="ag-7.html">AG.7</a>)</td></tr>
+  </tbody>
+</table></div>
+<p>Keep these prompts. Rerun them whenever you change a description, a docstring, the rules file or the model: they are a tiny <strong>regression eval</strong> for your agent, exactly the habit from <a href="m4-7.html">M4.7</a>.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why include prompts that should <em>not</em> trigger the skill or tool?</p>
+  <ol class="q-src">
+    <li>To make the eval longer</li>
+    <li>Because skills only load on negative prompts</li>
+    <li>A description that is too broad makes the skill or tool fire when it shouldn't, wasting context and sometimes doing the wrong thing</li>
+    <li>They test the network connection</li>
+  </ol>
+  <div class="q-explain">Triggering is a classifier made of words. Like any classifier, you check both misses and false alarms.</div>
+</div></div>
+
+<h2>Step 5: a safety checklist</h2>
+<p>Your agent now reads files, runs commands and calls a server. Before you share the kit or add more powerful tools, walk through this list:</p>
+<ul class="checklist">
+  <li><strong>Least privilege.</strong> Start with read-only tools. Give each server only the access and scoped tokens it needs; prefer one small server per system over one that can do everything.</li>
+  <li><strong>Confirm destructive actions.</strong> Anything that writes, deletes, sends, pays or deploys needs a human "yes". MCP lets a tool declare hints such as <code>readOnlyHint</code> and <code>destructiveHint</code>; clients may use them to ask for approval, but they are hints, not a guarantee. Back them with permission rules.</li>
+  <li><strong>No secrets in text files.</strong> Never put keys, tokens or passwords in AGENTS.md, a SKILL.md or a tool docstring. All of them end up in the model's context and usually in git. Use environment variables or a secrets manager.</li>
+  <li><strong>Review third-party servers and skills.</strong> Read the code before installing; check who publishes it; pin the version. A skill can ship scripts that run on your machine, and a tool description can hide instructions aimed at the model.</li>
+  <li><strong>Treat fetched content as data.</strong> Web pages, emails and documents can contain injected instructions (<a href="sy-7.html">SY.7</a>). Tools that read untrusted content and tools that can act should not be combined without a human check.</li>
+  <li><strong>Make must-always rules deterministic.</strong> Block dangerous commands with a hook or a deny rule, and run the agent in a sandbox or container when it can execute code (<a href="ag-7.html">AG.7</a>).</li>
+  <li><strong>Log tool calls.</strong> Keep a record of what was called, with which arguments, so you can see what happened when something goes wrong.</li>
+</ul>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A popular third-party MCP server would save you a day of work. What do you do before connecting it to an agent that can also send email?</p>
+  <ol class="q-src">
+    <li>Connect it; popular means safe</li>
+    <li>Read its code and tool descriptions, pin a version, give it minimal access, and require approval for actions like sending email</li>
+    <li>Paste your email password into its description so it works faster</li>
+    <li>Nothing; MCP servers can't affect other tools</li>
+  </ol>
+  <div class="q-explain">Tool descriptions enter the model's context and can steer it, including towards your other tools. Review, pin, limit, and keep a human in the loop for anything with side effects.</div>
+</div></div>
+
+<h2>Where to use what: your decision card</h2>
+<p>This is the map from <a href="ag-1.html">AG.1</a>, now that you've seen every piece. When a new need comes up, find its row:</p>
+<section class="card decision" aria-labelledby="dc">
+  <div class="card-label" id="dc">Where to use what · one screen</div>
+  <div class="table-wrap" style="margin:0"><table class="ag-table">
+    <thead><tr><th>If you need…</th><th>Use</th><th>Lesson</th></tr></thead>
+    <tbody>
+      <tr><td>The model must know facts from your documents</td><td>Retrieval / RAG</td><td><a href="sy-3.html">SY.3</a></td></tr>
+      <tr><td>A small, evolving body of knowledge, summarized and cross-linked once and reused</td><td>An LLM wiki</td><td><a href="ag-6.html">AG.6</a></td></tr>
+      <tr><td>The agent must follow your project's conventions every single time</td><td>A rules file: AGENTS.md / CLAUDE.md</td><td><a href="ag-5.html">AG.5</a></td></tr>
+      <tr><td>A repeatable procedure or specialist know-how, needed only sometimes</td><td>An Agent Skill</td><td><a href="ag-4.html">AG.4</a></td></tr>
+      <tr><td>Read from or act on an outside system, reusable across many apps or agents</td><td>A tool: an MCP server</td><td><a href="ag-3.html">AG.3</a></td></tr>
+      <tr><td>…the same, but a one-off inside your own app</td><td>Plain function calling</td><td><a href="sy-4.html">SY.4</a></td></tr>
+      <tr><td>A big task with separable parts, or the context window keeps overflowing</td><td>Subagents</td><td><a href="ag-7.html">AG.7</a></td></tr>
+      <tr><td>Agents built by different teams or vendors must cooperate</td><td>A2A</td><td><a href="ag-7.html">AG.7</a></td></tr>
+      <tr><td>Something must always happen, no matter what the model decides</td><td>Deterministic code / hooks, not a prompt</td><td><a href="ag-7.html">AG.7</a></td></tr>
+      <tr><td>Remember things across sessions</td><td>Memory files, or a wiki</td><td><a href="ag-5.html">AG.5</a>, <a href="ag-6.html">AG.6</a></td></tr>
+      <tr><td>Change the model's built-in behaviour, style or cost at scale</td><td>Fine-tuning</td><td><a href="sy-6.html">SY.6</a>, <a href="m3-7.html">M3.7</a></td></tr>
+    </tbody>
+  </table></div>
+  <p style="margin:12px 0 0">And across all of them: everything competes for the same context window, so <strong>context engineering</strong> (<a href="ag-2.html">AG.2</a>) decides what gets in.</p>
+</section>
+<p><strong>Your first week</strong> with an agent on a real project, about an hour a day:</p>
+<ol class="steps">
+  <li><strong>Day 1, rules.</strong> Write an AGENTS.md: setup, the test command, three gotchas, a don't-touch list. Give the agent a real task and note every correction you make.</li>
+  <li><strong>Day 2, tighten.</strong> Turn repeated corrections into one-line rules. Move any must-always rule (format, never force-push) into a hook or a permission setting.</li>
+  <li><strong>Day 3, a skill.</strong> Write one SKILL.md for the chore you explain most often. Test it with prompts that should and shouldn't trigger it.</li>
+  <li><strong>Day 4, a server.</strong> Wrap one read-only internal API (tickets, docs, metrics) as an MCP server. Try it in the Inspector, then register it.</li>
+  <li><strong>Day 5, check.</strong> Save your try-it prompts as a mini eval, run the safety checklist, and decide what's next: a wiki for your research notes, or subagents for broad searches.</li>
+</ol>
+
+<div class="why"><strong>Why this matters in practice:</strong> most of the value comes from small, boring files that you keep improving: a rules file that grows one line per mistake, a skill per repeated chore, a read-only server per system. Big frameworks can come later. Teams that start small also find it far easier to see which piece caused a problem when something goes wrong.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">"Every answer our support bot gives must quote the current refund policy, which changes monthly." Which row of the card fits best?</p>
+  <ol class="q-src">
+    <li>Fine-tuning, so the policy is in the weights</li>
+    <li>A rules file in the repo</li>
+    <li>Retrieval (or a tool that fetches the current policy), so the model reads the latest text each time</li>
+    <li>A2A</li>
+  </ol>
+  <div class="q-explain">Facts from your documents that change often belong in retrieval or a live lookup. Fine-tuning would freeze last month's policy into the weights, and a coding rules file isn't seen by a support bot.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Your new agent setup has an AGENTS.md, a skill and an MCP server. How does each one reach the model, and why does that difference matter?</p>
+  <div class="model-answer"><strong>Model answer:</strong> AGENTS.md loads in full every session, the skill shows only its name and description until a task matches and then loads its body, and the server's tools are listed up front but their results arrive only when the model calls them. Because the context window is shared, always-needed rules go in the small rules file, occasional procedures in skills, and live data behind tools.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which SKILL.md frontmatter is valid under the Agent Skills spec?</p>
+    <ol class="q-src">
+      <li><code>name: Release_Notes</code> in a folder called <code>release-notes</code></li>
+      <li><code>name: release-notes</code> in a folder called <code>release-notes</code>, with a description of what it does and when to use it</li>
+      <li>No frontmatter; the agent reads the folder name</li>
+      <li><code>name: release-notes</code> with a 3,000-character description</li>
+    </ol>
+    <div class="q-explain">Names are lowercase letters, digits and hyphens, up to 64 characters, matching the folder; descriptions are required and at most 1,024 characters.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In <code>notes_server.py</code>, what does the model actually see about <code>get_note</code> before calling it?</p>
+    <ol class="q-src">
+      <li>The full Python source</li>
+      <li>The contents of <code>NOTES</code></li>
+      <li>Nothing until the first call</li>
+      <li>The tool's name, its docstring as the description, and an input schema built from the type hints</li>
+    </ol>
+    <div class="q-explain">That listing is all it has to decide when and how to call the tool, which is why the docstring deserves as much care as a prompt.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Tool calling from SY.4 and an MCP server both give the model tools. When is it worth wrapping a tool as an MCP server?</p>
+    <ol class="q-src">
+      <li>When the same tool should be reusable across many apps or agents</li>
+      <li>Always; plain function calling is deprecated</li>
+      <li>Only when the tool needs no arguments</li>
+      <li>When you want the tool to be secret from the model</li>
+    </ol>
+    <div class="q-explain">Under the hood the model sees tools the same way. MCP pays off when you want one implementation that any MCP-capable client can plug in; a one-off inside your own app can stay a plain function.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which item from the safety checklist addresses "a web page told my agent to email our customer list to a stranger"?</p>
+    <ol class="q-src">
+      <li>Put the email password in AGENTS.md</li>
+      <li>Use a longer skill description</li>
+      <li>Treat fetched content as data, and require human approval before tools that send or delete</li>
+      <li>Switch the server to HTTP</li>
+    </ol>
+    <div class="q-explain">That is prompt injection. Separate reading untrusted content from acting, and keep a human check on side effects.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>An <strong>MCP server</strong> is a short Python file: decorate a typed, documented function with <code>@mcp.tool()</code>; the docstring is what the model reads. Test it in the Inspector, then register it.</li>
+    <li>A <strong>skill</strong> is a folder with SKILL.md: a valid name, a description that says what and when in users' words, and concrete steps.</li>
+    <li>An <strong>AGENTS.md</strong> holds commands that run, real gotchas, conventions for the rest of the kit, and no secrets.</li>
+    <li><strong>Test</strong> with should- and shouldn't-trigger prompts and keep them as a regression eval; run the <strong>safety checklist</strong> before adding power.</li>
+    <li>Use the <strong>decision card</strong>: always → rules file; sometimes → skill; outside systems → tools/MCP; must-always → hooks.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 30 minutes, pure Python, no API keys: build a tiny JSON-RPC tool server and client with <code>tools/list</code> and <code>tools/call</code>, validate SKILL.md files and route requests to the right skill, and generate an AGENTS.md that is checked for a test command and for anything that looks like a secret. An optional last section tries the official MCP SDK if it is installed.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="ag-8-starter-kit.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ag-8-a","front":"Minimal MCP server in Python: the three essential lines?","back":"Create the server (v2: from mcp.server import MCPServer; mcp = MCPServer(\"name\"); v1: FastMCP), decorate a typed, documented function with @mcp.tool(), and call mcp.run() (stdio by default)."},
+  {"id":"ag-8-b","front":"SKILL.md frontmatter rules?","back":"name: lowercase letters, digits and hyphens, up to 64 characters, matching the folder. description: required, up to 1,024 characters, saying what the skill does and when to use it in the words users type."},
+  {"id":"ag-8-c","front":"How do the rules file, a skill and an MCP tool each reach the model's context?","back":"Rules file: whole file, every session (always). Skill: name + description always, body only when a task matches (on demand). Tool: listed up front, results only when called (on call)."},
+  {"id":"ag-8-d","front":"Name four items of the agent safety checklist.","back":"Least privilege (read-only first, scoped tokens); human confirmation for destructive actions; no secrets in rules files, skills or docstrings; review and pin third-party servers and skills. Also: treat fetched content as data, hooks/sandbox for must-always rules, log tool calls."},
+  {"id":"ag-8-e","front":"Decision card: 'must always happen no matter what the model decides' and 'agents from different vendors must cooperate' map to…?","back":"Deterministic code / hooks (not a prompt), and A2A. Both in AG.7."},
+  {"id":"ag-8-f","front":"Why keep 'should' and 'shouldn't trigger' prompts after setup?","back":"They form a tiny regression eval: rerun them whenever you change a description, docstring, rules file or model to catch misses and false triggers."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ag-8-kit.js"></script>
+</body>
+</html>

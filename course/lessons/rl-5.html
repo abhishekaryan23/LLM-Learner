@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="rl-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Actor-critic &amp; PPO · LLMs, Animated</title>
+<meta name="description" content="Pair a policy with a learned critic, estimate advantages with TD errors and GAE, keep updates safe with trust regions and PPO's clipped objective, and see how RLHF and GRPO use all of it.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Actor-critic &amp; PPO</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Reinforcement learning</span></div>
+<p class="lede">REINFORCE works, but slowly and noisily. Give the policy a partner that predicts how well things <em>should</em> go, and every step can be graded on the spot. Add a rule that stops any single update from going too far, and you have <strong>PPO</strong>, the workhorse behind RLHF.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain the actor-critic split and use the TD error as an advantage estimate.</li>
+    <li>Describe GAE and what its $\lambda$ trades off.</li>
+    <li>Compute PPO's clipped objective by hand, and say how RLHF's KL penalty and GRPO build on it.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="rl-4.html">Policy gradients &amp; REINFORCE</a> (RL.4): the score function, returns as weights and baselines; and <a href="rl-2.html">Value functions &amp; the Bellman equation</a> (RL.2): $V^\pi$, $Q^\pi$ and the one-step Bellman relation. The LLM-specific version of this lesson is <a href="m3-3.html">RLHF with PPO</a> (M3.3); this one supplies the RL underneath it.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A critic predicted a state was worth 0.60. After one move with reward 0, it predicts the new state is worth 0.80 (with $\gamma = 0.9$). Was the move better or worse than expected?</p>
+    <ol class="q-src">
+      <li>Better: $0 + 0.9 \times 0.80 = 0.72$ beats the 0.60 expected</li>
+      <li>Worse: the reward was 0</li>
+      <li>Exactly as expected</li>
+      <li>You can't tell until the episode ends</li>
+    </ol>
+    <div class="q-explain">That difference, $0.72 - 0.60 = +0.12$, is the <strong>TD error</strong>. Actor-critic methods use it immediately as the advantage of the move.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">After one gradient step, a token's probability went from 0.10 to 0.50. Why might that worry an RL engineer?</p>
+    <ol class="q-src">
+      <li>Probabilities above 0.5 are not allowed</li>
+      <li>It means the learning rate was too small</li>
+      <li>It's fine; bigger steps always learn faster</li>
+      <li>The batch was sampled from the old policy, and one noisy estimate has moved the policy a long way; it may have got much worse</li>
+    </ol>
+    <div class="q-explain">A fivefold change from one batch is a huge jump. <strong>Trust-region</strong> methods such as TRPO and PPO exist to prevent exactly this.</div>
+  </div>
+</section>
+
+<h2>Actor-critic: a learned baseline</h2>
+<p>REINFORCE (RL.4) has two weaknesses: it must wait for the episode to end to know $G_t$, and $G_t$ is noisy. A baseline helps, and the best baseline is the state's value $V(s)$. So why not <em>learn</em> $V$ alongside the policy?</p>
+<p>That is the <strong>actor-critic</strong> architecture, introduced by Andrew Barto, Richard Sutton and Charles Anderson in 1983 for balancing a pole on a cart. The <strong>actor</strong> is the policy $\pi_\theta(a \mid s)$. The <strong>critic</strong> is a value function $V_\phi(s)$, trained by TD learning (RL.3). The critic's job is to tell the actor, at every step, whether things went better or worse than expected: the <strong>advantage</strong></p>
+$$A^\pi(s,a) = Q^\pi(s,a) - V^\pi(s)$$
+<p>Positive means "this action beat this state's average"; negative means it did worse. We don't have $Q$, but the one-step <strong>TD error</strong> estimates it:</p>
+$$\delta_t = r_{t+1} + \gamma V_\phi(s_{t+1}) - V_\phi(s_t)$$
+<p>If the critic were exact, the average of $\delta_t$ over what can happen next would be exactly $Q^\pi(s_t,a_t) - V^\pi(s_t)$, the true advantage. So the actor follows $\nabla_\theta \log \pi_\theta(a_t \mid s_t)\,\delta_t$, and the critic regresses $V_\phi(s_t)$ toward $r_{t+1} + \gamma V_\phi(s_{t+1})$. In our gridworld:</p>
+
+<figure class="anim wide" data-anim="rl-5-actor-critic"></figure>
+
+<p>Modern deep actor-critics such as A2C/A3C (Mnih et al., 2016) run many environments in parallel to collect experience fast. The price of using the critic is <strong>bias</strong>: early on, $V_\phi$ is wrong, and so is every $\delta$ computed from it.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">$V(s) = 1.0$, the agent gets $r = 0.5$ and lands in $s'$ with $V(s') = 0.4$; $\gamma = 0.9$. What does the actor-critic do with that action?</p>
+  <ol class="q-src">
+    <li>Makes it more likely, because the reward was positive</li>
+    <li>Nothing, because the TD error is zero</li>
+    <li>Makes it less likely: $\delta = 0.5 + 0.36 - 1.0 = -0.14$</li>
+    <li>Makes it more likely: $\delta = +0.86$</li>
+  </ol>
+  <div class="q-explain">$\delta = 0.5 + 0.9 \times 0.4 - 1.0 = -0.14$. A positive reward that leads somewhere worse than expected is a below-average move.</div>
+</div></div>
+
+<h2>GAE: dialling bias against variance</h2>
+<p>The one-step $\delta_t$ has low variance (one random step) but inherits the critic's errors. The full Monte Carlo advantage $G_t - V(s_t)$ is unbiased but noisy. In between are $n$-step estimates that use $n$ real rewards before trusting the critic. <strong>Generalized Advantage Estimation</strong> (GAE; Schulman, Moritz, Levine, Jordan &amp; Abbeel, 2015) averages all of them with exponentially decaying weights, which works out to a simple sum of future TD errors:</p>
+$$\hat A_t^{\text{GAE}(\gamma,\lambda)} = \sum_{l=0}^{\infty} (\gamma\lambda)^l\, \delta_{t+l} = \delta_t + \gamma\lambda\,\delta_{t+1} + (\gamma\lambda)^2\,\delta_{t+2} + \dots$$
+<ul>
+  <li>$\lambda = 0$: just $\delta_t$. Lowest variance, most bias.</li>
+  <li>$\lambda = 1$: the sum telescopes to $G_t - V(s_t)$. No bias from the critic, highest variance.</li>
+  <li>In between (0.95 is a common default), the weights fade over roughly $1/(1-\gamma\lambda)$ steps.</li>
+</ul>
+<h3>Worked example</h3>
+<p>Three TD errors along an episode: $\delta_t = 0.12$, $\delta_{t+1} = -0.05$, $\delta_{t+2} = 0.30$, then the episode ends. $\gamma = 0.9$, $\lambda = 0.95$, so $\gamma\lambda = 0.855$.</p>
+<ol class="steps">
+  <li>Weights: $1,\ 0.855,\ 0.855^2 = 0.731$.</li>
+  <li>$\hat A_t = 0.12 + 0.855 \times (-0.05) + 0.731 \times 0.30 = 0.12 - 0.043 + 0.219 = 0.297$.</li>
+  <li>The good news two steps later raises this step's advantage from 0.12 to about 0.30: credit flows back to earlier actions.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>Same TD errors ($0.12, -0.05, 0.30$), same $\gamma = 0.9$, but now $\lambda = 0.5$.</p>
+  <ol class="steps">
+    <li>$\gamma\lambda$ = <span class="blank" data-answer="0.45" data-tol="0.001" data-hint="0.9 × 0.5."></span></li>
+    <li>Weight on $\delta_{t+2}$, $(\gamma\lambda)^2$: <span class="blank" data-answer="0.2025" data-tol="0.001" data-hint="0.45 × 0.45."></span></li>
+    <li>$\hat A_t$: <span class="blank" data-answer="0.158" data-tol="0.002" data-hint="0.12 + 0.45 × (−0.05) + 0.2025 × 0.30."></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">A smaller $\lambda$ trusts the critic sooner, so later surprises count for less: $0.158$ instead of $0.297$.</p>
+</section>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>A kid is learning to skateboard with a coach watching. The kid is the <strong>actor</strong>: they try moves. The coach is the <strong>critic</strong>: before each move the coach has a feeling for how it will go.</p>
+    <p>After every move, the coach says "better than I expected!" or "worse than I expected". The kid does more of the "better" moves. The coach also <strong>updates their own expectations</strong>, so the feedback gets sharper over time.</p>
+    <p class="math-note">Where it breaks: a real coach knows skateboarding already. The critic starts out knowing nothing and learns at the same time as the actor, so early feedback can be plain wrong.</p>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">You set GAE's $\lambda = 1$. What advantage estimate do you get?</p>
+  <ol class="q-src">
+    <li>Just the one-step TD error $\delta_t$</li>
+    <li>The Monte Carlo return minus the value, $G_t - V(s_t)$: unbiased but high-variance</li>
+    <li>Zero</li>
+    <li>The critic's value $V(s_t)$ itself</li>
+  </ol>
+  <div class="q-explain">With $\lambda = 1$ the weighted TD errors telescope into the full discounted return minus $V(s_t)$. That's REINFORCE with a value baseline.</div>
+</div></div>
+
+<h2>Trust regions: from TRPO to PPO</h2>
+<p>Policy gradients have a nasty failure mode: one overly large step can wreck the policy, and since the policy also collects the next batch of data, a bad policy produces bad data and may never recover. The gradient only says which way is uphill <em>locally</em>.</p>
+<p><strong>TRPO</strong> (Trust Region Policy Optimization; Schulman et al., 2015) maximizes the expected advantage under a hard limit on how far the new policy may move, measured by the KL divergence (P1.6) between old and new action distributions. It works well but needs second-order machinery (conjugate gradients on the Fisher matrix). <strong>PPO</strong> (Proximal Policy Optimization; Schulman, Wolski, Dhariwal, Radford &amp; Klimov, 2017) gets most of the benefit with a first-order trick. Write the probability ratio between the new policy and the one that collected the data,</p>
+$$\rho_t(\theta) = \frac{\pi_\theta(a_t \mid s_t)}{\pi_{\theta_\text{old}}(a_t \mid s_t)}$$
+<p>and maximize the <strong>clipped surrogate objective</strong>:</p>
+$$L^{\text{CLIP}}(\theta) = \mathbb{E}_t\Big[\min\big(\rho_t\,\hat A_t,\ \operatorname{clip}(\rho_t,\,1-\epsilon,\,1+\epsilon)\,\hat A_t\big)\Big]$$
+<p>$\hat A_t$ is the (GAE) advantage and $\epsilon$, typically 0.2, is the half-width of the allowed band. Once a good token's probability has risen more than 20% (or a bad token's has fallen more than 20%), the objective goes flat and that token stops pushing. The min means the clip only removes incentives to move <em>further</em>; moves in the wrong direction keep their full penalty. Because each update stays near $\pi_{\theta_\text{old}}$, PPO can safely run several epochs of minibatch updates on every batch of samples.</p>
+<h3>Worked example ($\epsilon = 0.2$)</h3>
+<ol class="steps">
+  <li>$\hat A = +0.5$, $\rho = 1.4$: $\rho\hat A = 0.70$; clipped $1.2 \times 0.5 = 0.60$; min $= 0.60$. Flat: no further push up.</li>
+  <li>$\hat A = -1$, $\rho = 0.7$: $\rho\hat A = -0.70$; clipped $0.8 \times (-1) = -0.80$; min $= -0.80$. Flat: no further push down.</li>
+  <li>$\hat A = -1$, $\rho = 1.3$: $\rho\hat A = -1.30$; clipped $-1.20$; min $= -1.30$. <em>Not</em> clipped: the bad token got more likely, and the full gradient pulls it back.</li>
+</ol>
+
+<div class="playground" id="clip-playground">
+  <h3>Playground: the clip, one token at a time</h3>
+  <p class="math-note" style="margin:0">Slide the ratio $\rho = \pi_\theta / \pi_{\theta_\text{old}}$ and flip the sign of the advantage. Where the orange curve is flat, the gradient is zero.</p>
+  <div class="pg-stage" style="margin-top:10px"></div>
+  <div class="pg-controls">
+    <label><span>Ratio ρ = <output>1.00</output></span>
+      <input type="range" min="0.5" max="1.5" step="0.01" value="1">
+    </label>
+    <div class="chips" role="group" aria-label="Sign of the advantage">
+      <button type="button" class="chip" data-adv="1" aria-pressed="true" style="min-height:44px">A = +1 (good token)</button>
+      <button type="button" class="chip" data-adv="-1" aria-pressed="false" style="min-height:44px">A = −1 (bad token)</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>$\epsilon = 0.2$. Compute $\min(\rho\hat A,\ \operatorname{clip}(\rho, 0.8, 1.2)\,\hat A)$.</p>
+  <ol class="steps">
+    <li>$\hat A = +1$, $\rho = 1.25$: <span class="blank" data-answer="1.2" data-tol="0.001" data-hint="ρA = 1.25, clipped 1.2 × 1 = 1.2. Take the smaller."></span></li>
+    <li>$\hat A = -0.5$, $\rho = 0.5$: <span class="blank" data-answer="-0.4" data-tol="0.001" data-hint="ρA = −0.25, clipped 0.8 × (−0.5) = −0.4. The min is the more negative one."></span></li>
+    <li>$\hat A = +1$, $\rho = 0.6$ (a good token became <em>less</em> likely): <span class="blank" data-answer="0.6" data-tol="0.001" data-hint="ρA = 0.6, clipped 0.8. The min is 0.6, unclipped, so the gradient still pushes it up."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why can PPO reuse each batch of samples for several epochs, while vanilla policy gradient usually takes one step per batch?</p>
+  <ol class="q-src">
+    <li>PPO uses a bigger learning rate</li>
+    <li>PPO doesn't use advantages</li>
+    <li>PPO's samples come from a fixed dataset of human answers</li>
+    <li>The ratio corrects for the policy having moved, and the clip stops it from moving far from the data-collecting policy</li>
+  </ol>
+  <div class="q-explain">$\rho_t$ re-weights old samples for the new policy, which is only reliable nearby; the clip enforces "nearby". Without it, repeated steps on the same batch overfit and can collapse the policy.</div>
+</div></div>
+
+<h2>PPO for language models, and GRPO</h2>
+<p>RLHF (<a href="m3-3.html">M3.3</a>) runs exactly this machinery with tokens as actions. The actor is the LLM. The critic is a <strong>value model</strong>, usually a copy of a similar-sized LLM with a scalar head, predicting $V$ at every token position. A response gets a single reward at the end, from a reward model; GAE spreads it back over the tokens (RLHF setups commonly use $\gamma = 1$, so only $\lambda$ does the fading). Each token gets its own ratio $\rho_t$ and clipped term.</p>
+<p>One addition is specific to RLHF: a <strong>KL penalty to a frozen reference model</strong>, $R = r_\phi(x,y) - \beta\,\mathrm{KL}(\pi_\theta \,\|\, \pi_\text{ref})$, folded into the reward. PPO's clip limits how far each <em>update</em> moves from the previous policy; the KL term limits how far the <em>whole run</em> drifts from the SFT model, which keeps the policy where the reward model's judgement still holds (M3.3 covers it with a worked example).</p>
+<p><strong>GRPO</strong> (Group Relative Policy Optimization; Shao et al., 2024, in the DeepSeekMath paper) removes the critic entirely. For each prompt it samples a group of $G$ responses, scores them, and uses the group's statistics as the baseline: $\hat A_i = (r_i - \operatorname{mean}(r)) / \operatorname{std}(r)$, shared by every token of response $i$. The rest is PPO's clipped objective plus a KL term in the loss. No value network means roughly half the trained parameters and nothing to fit; in exchange you generate several responses per prompt. With verifier rewards it became the standard recipe for reasoning models after DeepSeek-R1 (2025); see <a href="m3-5.html">M3.5</a> and <a href="rs-3.html">RS.3</a>.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the family tree is short. REINFORCE gives the direction (raise log-probs of good samples). A baseline, learned (PPO's critic) or computed from a group (GRPO, RLOO), turns rewards into advantages. A trust region (clip and/or KL) keeps each step safe. As of 2026 most RL post-training of frontier models is some variant of this recipe; when a run misbehaves, the usual suspects are the advantage estimate, the clip range and the KL coefficient.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What does GRPO use instead of a learned critic?</p>
+  <ol class="q-src">
+    <li>The mean (and std) of rewards across several responses sampled for the same prompt</li>
+    <li>The reward model's hidden states</li>
+    <li>A Q-table over tokens</li>
+    <li>The reference model's log-probabilities</li>
+  </ol>
+  <div class="q-explain">The group is the baseline: $\hat A_i = (r_i - \text{mean})/\text{std}$. It's a Monte Carlo estimate of how good this prompt usually goes, with no value network to train.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain what PPO's clip does and why the objective takes a minimum.</p>
+  <div class="model-answer"><strong>Model answer:</strong> The ratio $\rho = \pi_\theta/\pi_{\text{old}}$ measures how much an update has changed a token's probability. Clipping it to $[1-\epsilon, 1+\epsilon]$ makes the objective flat (zero gradient) once a good token has become more than 20% more likely, or a bad one more than 20% less likely, so no single batch can move the policy far. Taking the min with the unclipped term keeps the full gradient when the policy has moved the <em>wrong</em> way, so the clip never hides a mistake.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Connect to RL.4: in actor-critic, what plays the role of REINFORCE's baseline?</p>
+    <ol class="q-src">
+      <li>The reward model</li>
+      <li>The critic's value estimate $V_\phi(s)$</li>
+      <li>The clip range $\epsilon$</li>
+      <li>The discount factor</li>
+    </ol>
+    <div class="q-explain">The critic is a learned, state-dependent baseline. Subtracting it (via $\delta$ or GAE) turns returns into advantages and cuts variance.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">$\epsilon = 0.2$, $\hat A = +2$, $\rho = 0.9$. What is PPO's clipped objective for this token?</p>
+    <ol class="q-src">
+      <li>2.4</li>
+      <li>1.6</li>
+      <li>1.8</li>
+      <li>0</li>
+    </ol>
+    <div class="q-explain">$\rho$ is inside $[0.8, 1.2]$, so both terms equal $0.9 \times 2 = 1.8$. Clipping only bites outside the band.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In PPO-based RLHF, what is the difference between the clip and the KL penalty?</p>
+    <ol class="q-src">
+      <li>They are the same thing written two ways</li>
+      <li>The clip limits drift from the SFT model; the KL limits each update</li>
+      <li>The KL penalty is only used in GRPO</li>
+      <li>The clip limits each update relative to the policy that sampled the batch; the KL penalty limits drift from the frozen reference (SFT) model over the whole run</li>
+    </ol>
+    <div class="q-explain">Two different leashes: one per step (clip, relative to $\pi_{\theta_\text{old}}$), one overall (KL, relative to $\pi_\text{ref}$). See M3.3.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Connect to RL.2: the TD error $\delta = r + \gamma V(s') - V(s)$ is zero on average when…</p>
+    <ol class="q-src">
+      <li>$V$ is the true value of the policy, so it satisfies the Bellman expectation equation</li>
+      <li>the reward is always zero</li>
+      <li>$\gamma = 0$</li>
+      <li>the policy is deterministic</li>
+    </ol>
+    <div class="q-explain">The Bellman expectation equation says $V^\pi(s) = \mathbb{E}[r + \gamma V^\pi(s')]$. Under the policy's own actions, $\delta$ averages to zero; individual actions above or below that average have positive or negative advantage.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Actor-critic</strong>: the actor (policy) learns from advantages; the critic $V_\phi$ learns by TD. The <strong>TD error</strong> $\delta$ is a one-step advantage estimate.</li>
+    <li><strong>GAE</strong>: $\hat A_t = \sum_l (\gamma\lambda)^l \delta_{t+l}$. $\lambda$ trades the critic's bias ($\lambda = 0$) against Monte Carlo variance ($\lambda = 1$).</li>
+    <li><strong>TRPO</strong> bounds each update's KL; <strong>PPO</strong> clips the ratio $\rho$ to $[1-\epsilon, 1+\epsilon]$ with a min, so it's simple and can reuse batches.</li>
+    <li><strong>RLHF</strong> = PPO on tokens + a value model + a KL penalty to the reference. <strong>GRPO</strong> replaces the critic with group-relative advantages.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"rl-5-a","front":"What are the actor and the critic in actor-critic RL?","back":"Actor: the policy $\\pi_\\theta(a|s)$, updated by policy gradient. Critic: a value function $V_\\phi(s)$, trained by TD, which supplies the baseline/advantage for the actor's updates."},
+  {"id":"rl-5-b","front":"Define the advantage and its TD-error estimate.","back":"$A(s,a) = Q(s,a) - V(s)$. One-step estimate: $\\delta_t = r_{t+1} + \\gamma V(s_{t+1}) - V(s_t)$, unbiased if $V$ is exact."},
+  {"id":"rl-5-c","front":"Write GAE and explain $\\lambda$.","back":"$\\hat A_t = \\sum_{l \\ge 0} (\\gamma\\lambda)^l \\delta_{t+l}$ (Schulman et al., 2015). $\\lambda = 0$: one-step TD error (low variance, biased). $\\lambda = 1$: $G_t - V(s_t)$ (unbiased, high variance). ~0.95 is common."},
+  {"id":"rl-5-d","front":"Write PPO's clipped objective.","back":"$\\mathbb{E}[\\min(\\rho_t \\hat A_t, \\mathrm{clip}(\\rho_t, 1-\\epsilon, 1+\\epsilon)\\hat A_t)]$, $\\rho_t = \\pi_\\theta(a_t|s_t)/\\pi_{\\theta_\\text{old}}(a_t|s_t)$, $\\epsilon \\approx 0.2$ (Schulman et al., 2017)."},
+  {"id":"rl-5-e","front":"PPO clip vs RLHF's KL penalty?","back":"Clip: limits each update relative to the policy that sampled the batch. KL penalty $R = r - \\beta\\,\\mathrm{KL}(\\pi_\\theta\\|\\pi_\\text{ref})$: limits drift from the frozen SFT reference over the whole run."},
+  {"id":"rl-5-f","front":"How does GRPO get advantages without a critic?","back":"Sample a group of $G$ responses per prompt; $\\hat A_i = (r_i - \\mathrm{mean}(r))/\\mathrm{std}(r)$, shared by all tokens of response $i$ (Shao et al., 2024, DeepSeekMath)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/rl-gridworld.js"></script>
+<script src="../assets/js/anims/rl-5-actor-critic.js"></script>
+<script src="../assets/js/anims/rl-5-clip-playground.js"></script>
+</body>
+</html>

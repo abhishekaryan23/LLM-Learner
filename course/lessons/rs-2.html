@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="rs-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Test-time compute: sampling, voting &amp; search · LLMs, Animated</title>
+<meta name="description" content="Spending more compute at answer time: best-of-N with a scorer, self-consistency (majority voting) and the binomial maths behind it, why correlated errors break it, pass@k vs maj@k, Tree of Thoughts and compute-optimal test-time scaling.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<style>
+  .vote-table { width: 100%; border-collapse: collapse; margin: 12px 0 8px; font-size: .95rem; font-variant-numeric: tabular-nums; }
+  .vote-table th, .vote-table td { text-align: right; padding: 8px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  .vote-table th { font: 600 .85rem/1.2 var(--font-body); color: var(--ink-2); }
+  .vote-table th:first-child, .vote-table td:first-child { text-align: left; font-weight: 650; }
+</style>
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Test-time compute: sampling, voting &amp; search</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Reasoning &amp; test-time compute</span></div>
+<p class="lede">For years the only way to get a better answer was a bigger model, trained for longer. But you can also spend compute <strong>after</strong> training: ask the same model several times and vote, let a scorer pick the best try, or search through partial solutions. Done well, a small model thinking longer can beat a bigger one answering once.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe best-of-N, self-consistency (majority voting) and tree search as ways to spend <strong>test-time compute</strong>.</li>
+    <li>Compute majority-vote accuracy with the <strong>binomial formula</strong>, and say when voting helps, hurts or levels off.</li>
+    <li>Tell <strong>pass@k</strong> from <strong>maj@k</strong>, and explain why the best strategy depends on how hard the question is.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="rs-1.html">Chain of thought</a> (each sample here is a full reasoning chain) and <a href="m1-5.html">KV cache &amp; sampling</a> (temperature is what makes repeated samples differ). Helpful but optional: <a href="m4-2.html">Benchmarks</a> for pass@k.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model gets a type of maths question right 70% of the time. You sample it 9 times independently and return the most common answer. Roughly how often is that right?</p>
+    <ol class="q-src">
+      <li>About 70%: voting can't beat a single sample</li>
+      <li>About 90%</li>
+      <li>Exactly 100%</li>
+      <li>About 50%</li>
+    </ol>
+    <div class="q-explain">If the correct answer gets at least 5 of the 9 votes, it wins. With independent samples that happens with probability about 0.90, from the binomial formula you'll use below.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Now the model is right only 40% of the time, and when it's wrong it always gives the <em>same</em> wrong number. What does majority voting over more and more samples do?</p>
+    <ol class="q-src">
+      <li>Pushes accuracy toward 100%</li>
+      <li>Leaves it at 40%</li>
+      <li>Pushes accuracy toward 0%</li>
+      <li>Makes it exactly 50%</li>
+    </ol>
+    <div class="q-explain">The wrong number is now the most likely single answer (60%), so with many votes it almost always wins. Voting amplifies whatever the majority is, right or wrong.</div>
+  </div>
+</section>
+
+<h2>Spending compute at answer time</h2>
+<p>Scaling laws (<a href="m2-4.html">M2.4</a>) are about <strong>training</strong> compute: more parameters, more data, lower loss. Once a model is trained, though, there is a second knob. Every answer can cost one sample, or ten, or a thousand. That is <strong>test-time compute</strong> (also called inference-time compute).</p>
+<p>The idea is older than reasoning models. Cobbe et al. (2021), who introduced the GSM8K maths benchmark, trained a <strong>verifier</strong> to score candidate solutions, sampled many solutions per question and kept the top-scored one. Wang et al. (2022) showed you don't even need a scorer: sample several chains of thought and take a <strong>majority vote</strong> over their final answers, which they called <strong>self-consistency</strong>. In 2024, OpenAI's o1 announcement and Snell et al.'s study made "scale test-time compute" a headline axis of progress.</p>
+<p>The methods fall into three families:</p>
+<ul>
+  <li><strong>Parallel sampling:</strong> draw $N$ independent answers, then aggregate by voting (self-consistency) or by a scorer (<strong>best-of-N</strong>, also called rejection sampling or reranking).</li>
+  <li><strong>Sequential:</strong> think longer in one chain, or revise an answer several times. Reasoning models (RS.3) do this inside one long chain.</li>
+  <li><strong>Search:</strong> grow partial solutions step by step, score them, and expand the promising ones.</li>
+</ul>
+<p>Here is parallel sampling on the pencil problem from RS.1:</p>
+
+<figure class="anim wide" data-anim="rs-2-voting"></figure>
+
+<p>Both aggregators need the samples to <strong>differ</strong>, so they use a temperature above 0 (<a href="m1-5.html">M1.5</a>). Voting also needs answers you can compare: a number, a multiple-choice letter, a short string after normalising. Majority voting over open-ended essays doesn't work as is.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What does self-consistency need that best-of-N doesn't, and vice versa?</p>
+  <ol class="q-src">
+    <li>Self-consistency needs comparable final answers; best-of-N needs a scorer (reward model or verifier)</li>
+    <li>Self-consistency needs a reward model; best-of-N needs a majority</li>
+    <li>Both need human labels for every sample</li>
+    <li>Self-consistency needs temperature 0; best-of-N needs temperature 2</li>
+  </ol>
+  <div class="q-explain">Voting counts identical answers, so they must be comparable. Best-of-N ranks samples, so it needs something that scores them. Both need diverse samples, which means a temperature above 0.</div>
+</div></div>
+
+<h2>Why voting works: the binomial</h2>
+<p>Suppose each sample is right with probability $p$, independently of the others, and $N$ is odd so there are no ties. Let $X$ be the number of correct samples. The correct answer is <strong>guaranteed</strong> to win the vote if it gets more than half of the votes:</p>
+$$P(\text{majority right}) = P\!\left(X > \tfrac{N}{2}\right) = \sum_{k = \lceil N/2 \rceil}^{N} \binom{N}{k}\, p^{k} (1-p)^{N-k}$$
+<ul>
+  <li>$\binom{N}{k}$ counts the ways to choose which $k$ of the $N$ samples are the correct ones.</li>
+  <li>$p^k (1-p)^{N-k}$ is the probability of one particular arrangement with exactly $k$ right and $N - k$ wrong.</li>
+  <li>The sum adds up every case where the right answers hold a strict majority, $k \ge \lceil N/2 \rceil$ (for $N = 9$: $k = 5, \dots, 9$).</li>
+</ul>
+<p>The numbers, computed exactly:</p>
+<div style="overflow-x:auto">
+<table class="vote-table">
+  <thead><tr><th>per-sample $p$</th><th>$N = 1$</th><th>$N = 5$</th><th>$N = 9$</th><th>$N = 21$</th><th>$N = 41$</th></tr></thead>
+  <tbody>
+    <tr><td>0.7</td><td>0.700</td><td>0.837</td><td>0.901</td><td>0.974</td><td>0.996</td></tr>
+    <tr><td>0.6</td><td>0.600</td><td>0.683</td><td>0.733</td><td>0.826</td><td>0.904</td></tr>
+    <tr><td>0.4</td><td>0.400</td><td>0.317</td><td>0.267</td><td>0.174</td><td>0.097</td></tr>
+  </tbody>
+</table>
+</div>
+<p>Above $p = 0.5$, more votes push accuracy toward 1; below it, toward 0. This is the <strong>Condorcet jury theorem</strong> (1785) in modern clothes. Voting amplifies the majority, right or wrong.</p>
+<p class="math-note">The formula is a floor, not the whole story. In real maths problems the wrong answers are usually <em>spread out</em> over many different values, so the correct answer can win the vote (have the most votes) with less than half of them. With $p = 0.4$ and wrong answers scattered over many values, voting can still help. The notebook simulates this.</p>
+
+<h3>Worked example</h3>
+<p>$N = 3$ samples, each right with $p = 0.7$. The majority is right when 2 or 3 are right.</p>
+<ol class="steps">
+  <li><strong>Exactly 2 right:</strong> $\binom{3}{2}\, 0.7^2 \times 0.3 = 3 \times 0.49 \times 0.3 = 0.441$</li>
+  <li><strong>All 3 right:</strong> $0.7^3 = 0.343$</li>
+  <li><strong>Total:</strong> $0.441 + 0.343 = 0.784$, up from $0.7$ for one sample, at 3× the cost.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>$N = 5$ samples with $p = 0.6$. The majority needs 3, 4 or 5 right.</p>
+  <ol class="steps">
+    <li>Exactly 3 right, $\binom{5}{3}\, 0.6^3 \times 0.4^2$: <span class="blank" data-answer="0.3456" data-tol="0.002" data-hint="10 × 0.216 × 0.16"></span></li>
+    <li>Exactly 4 right, $\binom{5}{4}\, 0.6^4 \times 0.4$: <span class="blank" data-answer="0.2592" data-tol="0.002" data-hint="5 × 0.1296 × 0.4"></span></li>
+    <li>All 5 right, $0.6^5$: <span class="blank" data-answer="0.0778" data-tol="0.001" data-hint="0.6 × 0.6 × 0.6 × 0.6 × 0.6"></span></li>
+    <li>Majority-vote accuracy: <span class="blank" data-answer="0.6826" data-tol="0.003" data-hint="Add the three cases. It should match the table row for p = 0.6."></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="vote-playground">
+  <h3>Playground: when does voting pay off?</h3>
+  <p class="math-note" style="margin:0">The orange curve is the exact binomial majority from above. Slide $p$ below 0.5 and watch voting turn harmful. Then switch on correlated errors.</p>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr">
+    <label><span>per-sample accuracy p = <output data-op>0.60</output></span><input data-p type="range" min="0.05" max="0.95" step="0.01" value="0.6"></label>
+    <label><span>samples N = <output data-on>9</output></span><input data-n type="range" min="1" max="41" step="2" value="9"></label>
+  </div>
+  <div class="chips" role="group" aria-label="Options" style="margin-top:8px">
+    <button type="button" class="chip" data-act="corr" aria-pressed="false" style="min-height:44px">Correlated errors: off</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-rs-2.webp" alt="At a jelly-bean guessing booth, five children hold up picture cards; three of the cards match and glow, two are different." width="1200" height="900" loading="lazy">
+    <div>
+      <p>At the fair there's a <strong>jelly-bean jar</strong>, and five children each count the beans on their own and draw their answer on a card.</p>
+      <p>Children who count carefully tend to land on the <strong>same number</strong>. Children who slip up each slip in their own way, so their cards all <strong>look different</strong>. Hold up the cards, and the number on the most cards (the three glowing ones) is probably right.</p>
+      <p class="math-note">Where it breaks: if every child made the <em>same</em> mistake, say they all forgot the beans hidden at the back, their cards would match and the vote would confidently pick the wrong number. Model samples share mistakes like that more often than children do.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Each independent sample is right with $p = 0.4$, and every wrong sample gives the same wrong answer. What happens to majority-vote accuracy as $N$ grows?</p>
+  <ol class="q-src">
+    <li>It rises toward 1</li>
+    <li>It stays at 0.4</li>
+    <li>It rises to 0.5 and stops</li>
+    <li>It falls toward 0, because the wrong answer is the more likely one</li>
+  </ol>
+  <div class="q-explain">With only two possible answers, the binomial applies directly: below 0.5 the wrong side wins more often as $N$ grows (0.317 at $N = 5$, 0.097 at $N = 41$).</div>
+</div></div>
+
+<h2>When voting fails, and pass@k vs maj@k</h2>
+<p><strong>Correlated errors.</strong> The binomial assumes the samples are independent. Real samples from one model are not: they share the same training, the same blind spots and the same misreadings of the question. If a model misunderstands a word problem, it tends to misunderstand it in every sample, and they all vote for the same wrong answer.</p>
+<p>The playground's toggle uses a deliberately simple model of this: 40% of the time all $N$ samples follow one shared line of reasoning (so they vote as one), otherwise they are independent. With $p = 0.7$, accuracy goes $0.700 \to 0.782 \to 0.821$ at $N = 1, 5, 9$ and levels off near $0.4 \times 0.7 + 0.6 = 0.88$, however many samples you add. Real curves look like this: big gains from the first few samples, then a plateau.</p>
+<p><strong>Two ways to score $k$ samples.</strong> Benchmarks report test-time compute in two very different ways:</p>
+<ul>
+  <li><strong>pass@k</strong> (<a href="m4-2.html">M4.2</a>): the question counts as solved if <em>any</em> of the $k$ samples is right. That assumes a perfect checker picks the right one for you, which is fair for code with unit tests, but not for a user who sees one answer.</li>
+  <li><strong>maj@k</strong> (also "cons@k"): take the majority answer of the $k$ samples and score that one answer. No oracle needed.</li>
+</ul>
+<p>Whenever the majority is right, at least one sample is right, so $\text{pass@}k \ge \text{maj@}k$ always. The gap can be huge. With independent samples at $p = 0.4$, $\text{pass@}5 = 1 - 0.6^5 \approx 0.922$, while the strict-majority formula gives $0.317$. The gap measures what a better <strong>scorer</strong> could recover: the right answer was sampled, but voting didn't pick it. That's the job of the verifiers in RS.4, and why best-of-N lives or dies by how good its scorer is.</p>
+<p class="math-note">Brown et al. (2024, "Large Language Monkeys") found that coverage (pass@k) kept rising with the number of samples across several orders of magnitude, while majority voting and reward-model reranking plateaued well below it. Sampling finds right answers; <em>picking</em> them is the bottleneck.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">On a maths benchmark, maj@16 is 0.62 and pass@16 is 0.91. What does the gap tell you?</p>
+  <ol class="q-src">
+    <li>The benchmark is broken, since pass@k can't exceed maj@k</li>
+    <li>A correct answer was often sampled but wasn't the most common, so a better scorer could recover up to about 0.29</li>
+    <li>The model needs a lower temperature</li>
+    <li>Voting is already optimal</li>
+  </ol>
+  <div class="q-explain">pass@k is an upper bound for any method that picks one of the $k$ samples. The difference is the room for a better verifier or reranker.</div>
+</div></div>
+
+<h2>Search, and spending compute wisely</h2>
+<p>Voting and best-of-N only judge <em>finished</em> answers. A <strong>search</strong> judges partial ones, so it can abandon a bad start early and spend the budget on promising paths.</p>
+<p><strong>Tree of Thoughts</strong> (Yao et al., 2023) makes each intermediate step (a "thought") a node in a tree:</p>
+<ol class="steps">
+  <li><strong>Propose:</strong> from the current partial solution, the model suggests a few possible next steps.</li>
+  <li><strong>Evaluate:</strong> the model (or another scorer) rates each partial solution, for example "sure / likely / impossible".</li>
+  <li><strong>Search:</strong> keep the best few (breadth-first) or go deep and backtrack on a dead end (depth-first).</li>
+</ol>
+<p>On the "Game of 24" puzzle (combine four numbers with $+ - \times \div$ to make 24), GPT-4 with chain-of-thought prompting solved 4% of the paper's test puzzles; with Tree of Thoughts, 74%. The catch is cost: many model calls per puzzle. Today, the scorer in step 2 is often a trained <strong>process reward model</strong> that rates each step (RS.4), and the search a step-level beam search.</p>
+<p><strong>Which method should you use?</strong> Snell et al. (2024, "Scaling LLM Test-Time Compute Optimally…") compared strategies on the MATH benchmark and found the answer depends on <strong>how hard the question is for the model</strong>:</p>
+<ul>
+  <li>On <strong>easier</strong> questions, where the first answer is often nearly right, <strong>sequential revision</strong> (let the model fix its own answer) used the budget best.</li>
+  <li>On <strong>harder</strong> questions, a mix that spends more on exploring <strong>different approaches in parallel</strong> (or searching against a process verifier) did better.</li>
+  <li>On the <strong>hardest</strong> questions, little test-time compute helped; a bigger or better-trained model was the better buy.</li>
+</ul>
+<p>Choosing the strategy per question ("compute-optimal" scaling) was more than 4× as efficient as plain best-of-N in their experiments. And in a FLOPs-matched comparison, a smaller model with extra test-time compute beat a 14× larger model, but only on questions where the small model already had a reasonable success rate. Test-time compute amplifies ability that is there; it doesn't create it from nothing.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> sampling several answers and voting (or checking them) is one of the cheapest accuracy boosts you can add to a pipeline, and the samples run in parallel, so latency barely grows. Code generation uses the strongest version: generate many candidates and run the tests. Two habits keep you honest: when you read a benchmark score, check whether it is pass@1, pass@k or maj@k, and how many samples were used; and when you compare models, compare at <em>equal inference cost</em>, not equal sample count.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">According to Snell et al. (2024), how should a fixed test-time budget be spent?</p>
+  <ol class="q-src">
+    <li>Always on majority voting with as many samples as possible</li>
+    <li>Always on the longest single chain of thought</li>
+    <li>It depends on difficulty: revise answers on easier questions, explore in parallel or search on harder ones, and expect little gain on the hardest</li>
+    <li>Never; a bigger model is always better per FLOP</li>
+  </ol>
+  <div class="q-explain">The best strategy changes with question difficulty, which is why adapting it per question beat a fixed best-of-N by more than 4× in compute efficiency in their setup.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does majority voting over samples raise accuracy, and when does it stop helping?</p>
+  <div class="model-answer"><strong>Model answer:</strong> If each sample is right with probability above 0.5 and mistakes are independent and spread over different wrong answers, the right answer is the most likely to collect the most votes, and the binomial shows that probability rises with $N$ (0.7 → 0.90 at $N = 9$). It stops helping when errors are correlated, because the samples share one mistake and vote together, and it backfires when one wrong answer is more likely than the right one.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You run self-consistency with 10 samples, but leave decoding on greedy (temperature 0). What happens?</p>
+    <ol class="q-src">
+      <li>Accuracy improves the most, since every sample is the model's best guess</li>
+      <li>The vote becomes a perfect verifier</li>
+      <li>All 10 chains come out (nearly) identical, so the vote adds nothing but cost</li>
+      <li>The model refuses to answer</li>
+    </ol>
+    <div class="q-explain">Greedy decoding (M1.5) always picks the top token, so repeated runs give the same chain. Voting needs diverse samples, which is why self-consistency samples with $T &gt; 0$.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why does real self-consistency usually level off well below 100%, even with many samples?</p>
+    <ol class="q-src">
+      <li>Samples share the model's misconceptions, so many errors are correlated and vote together</li>
+      <li>The binomial formula stops working above $N = 10$</li>
+      <li>GPUs can't sample more than 16 answers</li>
+      <li>Temperature decreases as $N$ grows</li>
+    </ol>
+    <div class="q-explain">Independence is the key assumption. When the model systematically misreads a question, extra samples repeat the same error, so the curve flattens.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which statement about pass@k and maj@k is always true?</p>
+    <ol class="q-src">
+      <li>maj@k ≥ pass@k</li>
+      <li>pass@k ≥ maj@k</li>
+      <li>They are equal for $k \ge 5$</li>
+      <li>pass@k needs no checker; maj@k needs a perfect one</li>
+    </ol>
+    <div class="q-explain">If the majority answer is right, at least one sample is right. The reverse fails: a right answer can be sampled once and lose the vote. And it's pass@k that assumes a perfect checker picks the right sample.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What does Tree of Thoughts add compared with best-of-N?</p>
+    <ol class="q-src">
+      <li>It trains the model with reinforcement learning</li>
+      <li>It removes the need for any scorer</li>
+      <li>It always uses fewer model calls</li>
+      <li>It scores <em>partial</em> solutions, so it can drop bad branches early and backtrack</li>
+    </ol>
+    <div class="q-explain">Best-of-N only judges finished answers. Tree search evaluates intermediate steps and expands the promising ones, at the cost of many more calls than a single chain.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Test-time compute</strong>: spend more inference per answer by sampling, voting, scoring, revising or searching.</li>
+    <li><strong>Self-consistency</strong> (Wang et al., 2022) votes over final answers: $P(\text{majority right}) = \sum_{k &gt; N/2} \binom{N}{k} p^k (1-p)^{N-k}$ rises toward 1 if $p &gt; 0.5$ and errors are independent; it falls if $p &lt; 0.5$ with one dominant wrong answer.</li>
+    <li><strong>Correlated errors</strong> make real curves plateau. <strong>pass@k ≥ maj@k</strong>; the gap is what a better scorer could recover.</li>
+    <li><strong>Search</strong> (Tree of Thoughts) scores partial solutions. The best strategy depends on question difficulty (Snell et al., 2024).</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Simulate a noisy "solver", implement majority voting and best-of-N with an imperfect verifier, check your simulation against the exact binomial formula, and see what correlated errors do. About 20 minutes, NumPy only.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="rs-2-self-consistency.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"rs-2-a","front":"What is self-consistency?","back":"Sample several chains of thought at temperature above 0, extract each final answer, and return the most common one (Wang et al., 2022). No scorer needed."},
+  {"id":"rs-2-b","front":"Majority-vote accuracy for $N$ independent samples, each right with probability $p$ (odd $N$)?","back":"$\\sum_{k > N/2} \\binom{N}{k} p^k (1-p)^{N-k}$. For $p = 0.7$: 0.70, 0.84, 0.90 at $N = 1, 5, 9$. A floor when wrong answers are spread out."},
+  {"id":"rs-2-c","front":"When does majority voting hurt?","back":"When one wrong answer is more likely than the right one (e.g. $p < 0.5$ with a single dominant wrong answer): more votes push accuracy toward 0. Correlated errors also make gains plateau."},
+  {"id":"rs-2-d","front":"pass@k vs maj@k?","back":"pass@k: solved if any of $k$ samples is right (needs a perfect checker). maj@k: score the majority answer. Always pass@k ≥ maj@k; the gap is what a better scorer could recover."},
+  {"id":"rs-2-e","front":"What is best-of-N, and what limits it?","back":"Sample $N$ answers, score each with a reward model or verifier, return the top-scored one. It is only as good as the scorer; a scorer with blind spots gets exploited as $N$ grows."},
+  {"id":"rs-2-f","front":"What did Snell et al. (2024) find about spending test-time compute?","back":"The best strategy depends on question difficulty (revisions for easier ones, parallel exploration or search for harder ones); adapting per question beat best-of-N by over 4× in efficiency, and only helps where the model already has some success."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/rs-2-voting.js"></script>
+<script src="../assets/js/anims/rs-2-vote-playground.js"></script>
+</body>
+</html>

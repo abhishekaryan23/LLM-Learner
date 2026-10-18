@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="g1-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Latent diffusion &amp; guidance · LLMs, Animated</title>
+<meta name="description" content="How Stable Diffusion-style models work: diffusion in a VAE's 8× compressed latent space, text conditioning by cross-attention, classifier guidance and classifier-free guidance, with a guidance-scale playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Latent diffusion &amp; guidance</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Image generation</span></div>
+<p class="lede">Plain diffusion works, but it is slow and it ignores your prompt. Two ideas fixed both and made text-to-image practical on a single GPU: run the diffusion in a <strong>compressed latent space</strong>, and <strong>guide</strong> every denoising step toward the text.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain latent diffusion and compute how much the VAE shrinks the work.</li>
+    <li>Describe how a text encoder conditions the denoiser through cross-attention.</li>
+    <li>Compute a classifier-free guidance step and predict the fidelity–diversity trade-off as $w$ grows.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> this lesson builds on <a href="g1-3.html">G1.3 Diffusion from scratch</a> (noise prediction, sampling), <a href="g1-1.html">G1.1 Variational autoencoders</a> (encoder, decoder, latent space) and <a href="v1-2.html">V1.2 Contrastive learning &amp; CLIP</a> (a text encoder aligned with images). Helpful but optional: <a href="m1-1.html">M1.1 Attention</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. It primes you for the answer.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Stable Diffusion generates a 512×512 image. On roughly how many numbers does its denoiser run at each step?</p>
+    <ol class="q-src">
+      <li>786,432 (every pixel and colour channel)</li>
+      <li>About 16,000 (a small compressed latent)</li>
+      <li>77 (one per prompt token)</li>
+      <li>1</li>
+    </ol>
+    <div class="q-explain">A VAE first compresses the image to a 64×64×4 latent, 16,384 numbers. All the denoising happens there; the full image appears only at the end.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Image apps expose a "guidance scale" (often around 7). Turning it up very high usually makes images…</p>
+    <ol class="q-src">
+      <li>More varied and creative</li>
+      <li>Blurrier</li>
+      <li>Follow the prompt more literally, but look more alike and eventually over-saturated</li>
+      <li>Faster to generate</li>
+    </ol>
+    <div class="q-explain">Guidance trades diversity for prompt fidelity. You'll see exactly why, and play with it, below.</div>
+  </div>
+</section>
+
+<h2>Why diffuse in a latent space?</h2>
+<p>A diffusion model's denoiser runs once per sampling step, over the whole image. At 512×512 pixels with 3 colour channels that's 786,432 numbers per step, tens of steps per image, and most of the network's effort goes into imperceptible high-frequency detail. Early pixel-space systems coped with cascades: Imagen (Saharia et al., 2022) generated at 64×64 and then ran two super-resolution diffusion models up to 1024×1024.</p>
+<p>Rombach et al. (2022, "High-Resolution Image Synthesis with Latent Diffusion Models") split the job in two. First train an <strong>autoencoder</strong> (G1.1) that compresses images to a much smaller latent and decodes them back almost perfectly. Freeze it. Then train the diffusion model <strong>in the latent space</strong>. The autoencoder handles perceptual detail; the diffusion model handles content and composition. Released in August 2022 with open weights as <strong>Stable Diffusion</strong>, it ran on a consumer GPU.</p>
+<p>The autoencoder is a VAE with a deliberately tiny KL weight (plus perceptual and adversarial losses, G1.2) that downsamples by a factor $f = 8$ per side. For Stable Diffusion 1.x, a 512×512×3 image becomes a 64×64×4 latent.</p>
+
+<figure class="anim wide" data-anim="g1-4-ldm"></figure>
+
+<h3>Worked example</h3>
+<ol class="steps">
+  <li>Pixels: $512 \times 512 \times 3 = 786{,}432$ numbers.</li>
+  <li>Latent: each side shrinks by $f = 8$, so $64 \times 64$ positions with 4 channels: $64 \times 64 \times 4 = 16{,}384$ numbers.</li>
+  <li>Reduction: $786{,}432 / 16{,}384 = 48$ times fewer numbers for the denoiser to process at every step.</li>
+</ol>
+
+<section class="card" aria-labelledby="fd1">
+  <div class="card-label" id="fd1">Your turn · faded example</div>
+  <p>A 1024×1024 RGB image, same VAE ($f = 8$, 4 channels).</p>
+  <ol class="steps">
+    <li>Latent side length: <span class="blank" data-answer="128" data-tol="0.5" data-hint="1024 / 8."></span></li>
+    <li>Numbers in the latent: <span class="blank" data-answer="65536" data-tol="0.5" data-hint="128 × 128 × 4."></span></li>
+    <li>Reduction factor versus pixels: <span class="blank" data-answer="48" data-tol="0.5" data-hint="(1024 × 1024 × 3) / 65,536. The ratio doesn't depend on resolution: 8 × 8 × 3 / 4."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">In latent diffusion, when is the VAE <em>decoder</em> used during generation?</p>
+  <ol class="q-src">
+    <li>At every denoising step</li>
+    <li>Before the first step, to make the starting noise</li>
+    <li>Never; the denoiser outputs pixels directly</li>
+    <li>Once, at the end, to turn the clean latent into an image</li>
+  </ol>
+  <div class="q-explain">The whole denoising loop runs on latents; the decoder is called a single time. (The encoder is only needed for training and for editing an existing image.)</div>
+</div></div>
+
+<h2>Following the prompt: cross-attention and guidance</h2>
+<p>To follow a prompt, the denoiser needs to read it. The prompt goes through a frozen, pretrained <strong>text encoder</strong>, which returns one vector per token. Stable Diffusion 1.x used CLIP's text encoder (V1.2), whose embeddings were trained to line up with images, so they already capture visual concepts. Imagen showed that a large text-only encoder (T5-XXL) improves how faithfully complex prompts are rendered, and later models combine both: SDXL uses two CLIP text encoders, and Stable Diffusion 3 (Esser et al., 2024) uses two CLIP encoders plus T5-XXL.</p>
+<p>The token vectors enter the denoiser through <strong>cross-attention</strong> layers placed between its convolution blocks. It's the attention from M1.1, with the two inputs coming from different places:</p>
+$$\mathrm{CrossAttn}(h, c) = \mathrm{softmax}\!\left(\frac{(hW_Q)(cW_K)^\top}{\sqrt{d}}\right)(cW_V)$$
+<ul>
+  <li>$h$: the denoiser's image features, one vector per latent position. They make the <strong>queries</strong>: "what does this patch of the picture need?"</li>
+  <li>$c$: the text encoder's token vectors. They make the <strong>keys and values</strong>: "here is what the prompt says".</li>
+</ul>
+<p>So each region of the image can attend to the words relevant to it: the sky region to "sunset", the water to "lake". The same mechanism lets other conditions in, such as image embeddings (G1.7). Diffusion transformers (G1.6) go further and put text and image tokens in one joint attention.</p>
+
+<h3>Guidance: classifier, then classifier-free</h3>
+<p>Conditioning alone turned out to be too weak: samples were often only loosely related to the prompt. <strong>Guidance</strong> pushes each step harder toward the condition $y$.</p>
+<p><strong>Classifier guidance</strong> (Dhariwal &amp; Nichol, 2021) uses Bayes' rule on scores: $\nabla_x \log p(x \mid y) = \nabla_x \log p(x) + \nabla_x \log p(y \mid x)$. Train a separate classifier on <em>noisy</em> images, and add its gradient, scaled up by a factor, to the diffusion model's score at every step. It worked (it's how diffusion first beat GANs on ImageNet), but it needs an extra classifier trained on noisy inputs, and only for a fixed set of labels.</p>
+<p><strong>Classifier-free guidance</strong> (CFG; Ho &amp; Salimans, 2022) removes the classifier. Train <em>one</em> denoiser that sometimes sees the condition and sometimes doesn't: during training, replace the prompt with an empty "null" prompt a fraction of the time (10–20% is typical). Then at every sampling step, run it twice and extrapolate:</p>
+$$\tilde\varepsilon = \varepsilon_u + w\,(\varepsilon_c - \varepsilon_u)$$
+<ul>
+  <li>$\varepsilon_c = \varepsilon_\theta(x_t, t, y)$: the noise prediction <em>with</em> the prompt.</li>
+  <li>$\varepsilon_u = \varepsilon_\theta(x_t, t, \varnothing)$: the prediction with the empty prompt.</li>
+  <li>$w$: the <strong>guidance scale</strong>. $w = 0$ is unconditional, $w = 1$ is the plain conditional model, $w &gt; 1$ pushes past it.</li>
+</ul>
+<p>Why it works: the difference $\varepsilon_c - \varepsilon_u$ is proportional to the gradient of an <em>implicit</em> classifier, $\nabla_x \log p(y \mid x_t)$, so CFG is classifier guidance with a classifier the model learned for free. Two notes: the paper writes the same rule as $(1+w)\varepsilon_c - w\,\varepsilon_u$, so its $w$ is our $w - 1$; and "negative prompts" simply replace the empty prompt in $\varepsilon_u$ with text you want to steer away from. The cost is two network evaluations per step (usually batched together).</p>
+
+<h3>Worked example</h3>
+<p>A 2-D toy with $\varepsilon_u = (0.2, -0.4)$, $\varepsilon_c = (0.5, 0.1)$ and $w = 3$:</p>
+<ol class="steps">
+  <li>Difference: $\varepsilon_c - \varepsilon_u = (0.3, 0.5)$</li>
+  <li>Scale it: $3 \times (0.3, 0.5) = (0.9, 1.5)$</li>
+  <li>$\tilde\varepsilon = (0.2, -0.4) + (0.9, 1.5) = (1.1, 1.1)$, well beyond $\varepsilon_c$ in the direction the prompt pointed.</li>
+</ol>
+
+<section class="card" aria-labelledby="fd2">
+  <div class="card-label" id="fd2">Your turn · faded example</div>
+  <p>Same $\varepsilon_u = (0.2, -0.4)$ and $\varepsilon_c = (0.5, 0.1)$, now with Stable Diffusion's popular default $w = 7.5$.</p>
+  <ol class="steps">
+    <li>First component of $\tilde\varepsilon$: <span class="blank" data-answer="2.45" data-tol="0.005" data-hint="0.2 + 7.5 × 0.3."></span></li>
+    <li>Second component: <span class="blank" data-answer="3.35" data-tol="0.005" data-hint="−0.4 + 7.5 × 0.5."></span></li>
+    <li>With $w = 1$ instead, the first component would be <span class="blank" data-answer="0.5" data-tol="0.005" data-hint="w = 1 gives exactly ε_c."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">How is a model trained so that classifier-free guidance is possible?</p>
+  <ol class="q-src">
+    <li>Two separate models are trained, one with and one without text</li>
+    <li>A classifier is trained on noisy images alongside it</li>
+    <li>One model is trained with the prompt randomly replaced by an empty prompt part of the time, so it learns both $\varepsilon_c$ and $\varepsilon_u$</li>
+    <li>The guidance scale is learned as a parameter</li>
+  </ol>
+  <div class="q-explain">Condition dropout gives a single network that can predict noise with or without the prompt. The guidance scale is a sampling-time knob, not a learned weight.</div>
+</div></div>
+
+<h2>The fidelity–diversity trade-off</h2>
+<p>Raising $w$ makes samples match the condition more strongly but also makes them more alike. Ho &amp; Salimans showed the effect on ImageNet: as guidance grows, sample quality scores (Inception Score) keep rising while diversity falls, and FID gets better and then worse. Text-to-image users see the same thing: low guidance gives varied images that drift from the prompt; very high guidance gives literal, samey, over-saturated images. Typical values for Stable Diffusion 1.x were around 5 to 9 (7.5 was a common default); many newer or distilled models use lower values or have guidance baked in, so check each model's recommended setting.</p>
+<p>The toy below makes the trade-off exact. Each moon is a class. Samples are drawn with the true guided noise $\varepsilon_u + w(\varepsilon_c - \varepsilon_u)$ of the toy data, so nothing here is learned or faked.</p>
+
+<div class="playground" id="cfg-playground">
+  <h3>Playground: turn up the guidance</h3>
+  <p class="math-note" style="margin:0">120 samples, deterministic DDIM with 25 steps, same starting noise every time. Pick a target class, then raise $w$.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Guidance scale w = <output>1.0</output></span>
+      <input type="range" min="0" max="12" step="0.5" value="1" aria-describedby="cfg-hint">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Target class" style="margin-top:12px">
+    <button type="button" class="chip" data-cls="0" aria-pressed="true">Upper moon</button>
+    <button type="button" class="chip" data-cls="1" aria-pressed="false">Lower moon</button>
+  </div>
+  <div class="chips" role="group" aria-label="Guidance presets" style="margin-top:8px">
+    <button type="button" class="chip" data-w="0" aria-pressed="false">w = 0</button>
+    <button type="button" class="chip" data-w="1" aria-pressed="false">w = 1</button>
+    <button type="button" class="chip" data-w="3" aria-pressed="false">w = 3</button>
+    <button type="button" class="chip" data-w="7.5" aria-pressed="false">w = 7.5</button>
+    <button type="button" class="chip" data-w="12" aria-pressed="false">w = 12</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="cfg-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p>Watch three things as $w$ climbs: the share of samples on the target moon jumps to 100% by $w = 1$; the <strong>spread</strong> shrinks as samples crowd toward the end of the moon furthest from the other class; and at large $w$ the average distance to the data creeps back <em>up</em>, the toy version of over-saturated, unnatural images.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>Two tricks. First, instead of painting a giant wall picture dot by dot, you plan it on a <strong>postcard</strong>. A helper who's great at enlarging turns the finished postcard into the big picture at the end. Planning on a postcard is much quicker.</p>
+      <p>Second, while planning, you look at your postcard twice: once while someone reads the request ("a lake at sunset") out loud, and once with no request. Whatever the request changed, you change <strong>even more</strong>. Turn that "even more" up too far and every postcard comes out as the same very orange sunset.</p>
+      <p>Where it breaks: the real "postcard" is not a small picture you could look at; it's a grid of numbers only the helper (the VAE decoder) knows how to read.</p>
+    </div>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the CFG trick of contrasting a conditional and an unconditional prediction and extrapolating has been carried over to language models. Sanchez et al. (2023) applied classifier-free guidance to LLM next-token logits to make outputs stick more closely to the prompt, and contrastive decoding uses a similar "strong minus weak" logit difference. Neither is standard in production chat models as of 2026, but the idea transfers.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In the playground, why does the spread of samples shrink as $w$ grows past 1?</p>
+  <ol class="q-src">
+    <li>Because fewer sampling steps are used</li>
+    <li>Guidance extrapolates away from what the unconditional model predicts, pushing samples into the most class-typical region and cutting diversity</li>
+    <li>Because the noise is smaller at high $w$</li>
+    <li>Because the target moon gets shorter</li>
+  </ol>
+  <div class="q-explain">$w &gt; 1$ amplifies whatever distinguishes "this class" from "any data", so samples bunch where that difference is largest. Fidelity rises, diversity falls.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain how a Stable Diffusion-style model turns a prompt into an image, mentioning the VAE, the text encoder and classifier-free guidance.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A frozen text encoder turns the prompt into token vectors. Starting from random noise in a VAE's compact latent space, a denoiser removes noise step by step, reading the text through cross-attention; at each step it predicts the noise with and without the prompt and extrapolates, $\varepsilon_u + w(\varepsilon_c - \varepsilon_u)$, to follow the prompt more closely. At the end the VAE decoder turns the clean latent into the full-size image.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Stable Diffusion's VAE maps 512×512×3 to 64×64×4. By what factor does that cut the numbers the denoiser processes?</p>
+    <ol class="q-src">
+      <li>8</li>
+      <li>64</li>
+      <li>48</li>
+      <li>12</li>
+    </ol>
+    <div class="q-explain">$786{,}432 / 16{,}384 = 48$. The spatial grid shrinks 64× ($8 \times 8$), but channels go from 3 to 4, so the total drops 48×.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">With classifier-free guidance, what does $w = 1$ give?</p>
+    <ol class="q-src">
+      <li>Exactly the conditional prediction $\varepsilon_c$</li>
+      <li>Exactly the unconditional prediction $\varepsilon_u$</li>
+      <li>The average of the two</li>
+      <li>Zero noise</li>
+    </ol>
+    <div class="q-explain">$\varepsilon_u + 1 \cdot (\varepsilon_c - \varepsilon_u) = \varepsilon_c$. Guidance only "pushes past" the condition when $w &gt; 1$.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">From V1.2: why was CLIP's text encoder a natural first choice for conditioning an image generator?</p>
+    <ol class="q-src">
+      <li>It is the largest text model available</li>
+      <li>It generates images itself</li>
+      <li>It was trained on captions only, with no images</li>
+      <li>It was trained contrastively to align text with matching images, so its embeddings already encode visual concepts</li>
+    </ol>
+    <div class="q-explain">CLIP pulls matching image and caption embeddings together. That makes its text features visually grounded, which is what a denoiser needs to read.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What is the main practical drawback of classifier guidance compared with classifier-free guidance?</p>
+    <ol class="q-src">
+      <li>It cannot improve sample quality</li>
+      <li>It needs a separate classifier trained on noisy images, for a fixed label set</li>
+      <li>It requires two diffusion models</li>
+      <li>It only works in pixel space</li>
+    </ol>
+    <div class="q-explain">The classifier must handle every noise level and only knows its labels. CFG gets an implicit classifier from condition dropout, and works with free-form text.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Latent diffusion</strong>: a frozen VAE compresses 8× per side (512×512×3 → 64×64×4, 48× fewer numbers); denoising runs in the latent, decoding happens once.</li>
+    <li>A frozen <strong>text encoder</strong> (CLIP, later also T5) conditions the denoiser through <strong>cross-attention</strong>: image queries, text keys and values.</li>
+    <li><strong>CFG</strong>: train with condition dropout, sample with $\tilde\varepsilon = \varepsilon_u + w(\varepsilon_c - \varepsilon_u)$; two passes per step.</li>
+    <li>Higher $w$ means better prompt fidelity and less diversity, and eventually over-saturated, off-distribution images.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"g1-4-a","front":"What is latent diffusion?","back":"Train a VAE to compress images (e.g. 512×512×3 → 64×64×4, f = 8), freeze it, and run diffusion in its latent space; decode once at the end (Rombach et al., 2022)."},
+  {"id":"g1-4-b","front":"How much does a 512×512×3 → 64×64×4 latent shrink the denoiser's input?","back":"786,432 → 16,384 numbers: 48× fewer."},
+  {"id":"g1-4-c","front":"How does text reach the denoiser in Stable Diffusion?","back":"A frozen text encoder (CLIP; later models add T5) gives token vectors; cross-attention layers use image features as queries and text tokens as keys and values."},
+  {"id":"g1-4-d","front":"Write the classifier-free guidance rule.","back":"$\\tilde\\varepsilon = \\varepsilon_u + w(\\varepsilon_c - \\varepsilon_u)$: run the model with and without the prompt and extrapolate. $w = 1$ is plain conditional."},
+  {"id":"g1-4-e","front":"How is a model trained to support CFG?","back":"Condition dropout: replace the prompt with an empty prompt part of the time (10–20% typical), so one network learns both conditional and unconditional noise prediction."},
+  {"id":"g1-4-f","front":"What happens as the guidance scale $w$ grows?","back":"Prompt fidelity rises and diversity falls; very high $w$ gives samey, over-saturated, off-distribution images."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/g1-toy.js"></script>
+<script src="../assets/js/anims/g1-4-ldm.js"></script>
+<script src="../assets/js/anims/g1-4-cfg-playground.js"></script>
+</body>
+</html>

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="vd-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Video understanding · LLMs, Animated</title>
+<meta name="description" content="How machines understand video: action recognition and video QA, from two-stream networks and I3D to video transformers and video-LLMs, plus the token-budget arithmetic of long videos and the benchmarks used to test them.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Video understanding</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Video</span></div>
+<p class="lede">Generating video is half the story; the other half is <strong>understanding</strong> it: what is happening, when, and why. This lesson goes from classic action recognition to today's video-LLMs that answer questions about an hour-long clip, and does the token arithmetic that decides how much of the video they actually see.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Name the main video understanding tasks and the classic models behind them (two-stream networks, I3D, video transformers).</li>
+    <li>Explain how a video-LLM turns sampled frames into tokens an LLM can read.</li>
+    <li>Compute a video's token budget (frames × tokens per frame vs context length) and pick strategies for long videos.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="vd-1.html">VD.1 Video as space-time patches</a> (tokens and attention cost for video) and <a href="mm-1.html">MM.1 Connecting vision to LLMs</a> (vision encoder → projector → LLM). Helpful but optional: <a href="v1-1.html">V1.1 Vision Transformers</a> for where "tokens per image" comes from.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; you'll check yourself below.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A classifier labels short clips as "swimming", "playing guitar", "riding a horse" and so on. How well does a model that sees only <em>one</em> frame per clip do?</p>
+    <ol class="q-src">
+      <li>Barely better than chance, because actions need motion</li>
+      <li>Surprisingly well, because the scene and objects often give the action away</li>
+      <li>Perfectly, because one frame contains everything</li>
+      <li>It can't be done at all</li>
+    </ol>
+    <div class="q-explain">A pool means swimming, a guitar means playing guitar. Single frames are strong baselines on many action datasets, which is why researchers built datasets where only motion tells classes apart (for example "pushing something left" vs "right").</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A video-LLM encodes each frame as 576 tokens. Roughly how many tokens is 1 hour sampled at 1 frame per second?</p>
+    <ol class="q-src">
+      <li>About 35,000</li>
+      <li>About 200,000</li>
+      <li>About 576,000</li>
+      <li>About 2 million</li>
+    </ol>
+    <div class="q-explain">3,600 frames × 576 tokens ≈ 2.07 million tokens, far beyond most context windows. The rest of the lesson is about how systems cope.</div>
+  </div>
+</section>
+
+<h2>The tasks, and the classic toolkit</h2>
+<p>Video understanding covers a family of tasks:</p>
+<ul>
+  <li><strong>Action recognition:</strong> label a short clip ("playing guitar"). The workhorse dataset is <strong>Kinetics</strong> (Kay et al., 2017): 400 human action classes, each with at least 400 clips of about 10 seconds from YouTube.</li>
+  <li><strong>Temporal localization:</strong> find <em>when</em> something happens: the start and end of each action in a long, untrimmed video.</li>
+  <li><strong>Video question answering, captioning and retrieval:</strong> answer "why did the man go back inside?", describe the clip, or find the clip that matches a query.</li>
+</ul>
+<p>Early deep models struggled with time. Karpathy et al. (2014) trained CNNs on a million sports videos and found that fusing several frames helped only a little over a single-frame model. <strong>Two-stream networks</strong> (Simonyan &amp; Zisserman, 2014) added motion explicitly: one CNN looks at a single RGB frame (appearance), a second looks at a stack of <strong>optical flow</strong> fields (how each pixel moves between frames), and their predictions are combined.</p>
+<p><strong>I3D</strong> (Carreira &amp; Zisserman, 2017), the paper that introduced Kinetics, "inflated" proven 2D image networks into 3D: each $k \times k$ filter becomes $t \times k \times k$, initialized by repeating the 2D weights over time and dividing by $t$, so the network starts out behaving like the image model and then learns motion. Later came SlowFast (Feichtenhofer et al., 2019), with a slow pathway for detail and a fast one for motion, and from 2021 the video transformers from <a href="vd-1.html">VD.1</a> (TimeSformer, ViViT), pretrained at scale with methods such as VideoMAE (Tong et al., 2022), which masks out 90% or more of the space-time patches and learns to reconstruct them.</p>
+<p>A recurring lesson: datasets where a single frame gives the answer away reward models that ignore time. Something-Something (Goyal et al., 2017) was built so that only motion distinguishes classes, such as "pushing something from left to right" versus "from right to left".</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In a two-stream network, what does the second (temporal) stream look at?</p>
+  <ol class="q-src">
+    <li>Stacked optical flow: how pixels move between consecutive frames</li>
+    <li>The audio track</li>
+    <li>The same RGB frame at a higher resolution</li>
+  </ol>
+  <div class="q-explain">The spatial stream sees appearance from one frame; the temporal stream sees motion from optical flow. Combining them was a big step for action recognition in 2014.</div>
+</div></div>
+
+<h2>Video-LLMs: frames in, words out</h2>
+<p>Classifiers answer a fixed question. Since 2023, <strong>video-LLMs</strong> answer any question in words. The recipe extends the vision-language model from <a href="mm-1.html">MM.1</a>:</p>
+<ol class="steps">
+  <li><strong>Sample frames</strong>: a fixed number (early systems such as Video-LLaVA, 2023, used 8) or a fixed rate such as 1 or 2 frames per second.</li>
+  <li><strong>Encode</strong> each frame with an image encoder, usually a ViT. At 336 × 336 pixels with 14-pixel patches that's $24 \times 24 = 576$ tokens per frame, as in LLaVA-1.5.</li>
+  <li><strong>Shrink</strong> the tokens (pooling or merging), <strong>project</strong> them into the LLM's embedding space, and add <strong>time information</strong>: timestamps written as text, or positions that encode real time. Qwen2.5-VL (2025), for example, samples at a dynamic frame rate and aligns its time position encoding with absolute time.</li>
+  <li>Put the frame tokens before the question and let the LLM generate the answer.</li>
+</ol>
+
+<figure class="anim wide" data-anim="vd-4-videollm"></figure>
+
+<p>Some models encode short groups of frames together, with space-time patches like the tubelets in <a href="vd-1.html">VD.1</a>, which captures motion better and halves the tokens. Others, like Google's Gemini models (from 2024), are trained natively on interleaved video, audio and text and accept very long inputs. Either way, the LLM only "sees" what survives sampling and compression.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Your friend watched a whole movie, but you only have time to look at a <strong>stack of photos</strong> from it. If someone took one photo every few seconds, you can tell a pretty good story: who was there, where they went, what happened at the end.</p>
+    <p>But if the photos are far apart, you might miss the moment the cat knocked over the vase. And if each photo is <strong>tiny and blurry</strong> so more of them fit in your hands, you might miss the vase altogether. A video-LLM juggles exactly that: how many photos, and how sharp.</p>
+    <p class="math-note">Where it breaks: a person flipping through photos remembers earlier ones loosely; a video-LLM reads every token in its context exactly, but can't see anything that never made it into the context.</p>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why does a video-LLM need explicit time information (timestamps or time-aware positions) for sampled frames?</p>
+  <ol class="q-src">
+    <li>To make the frames load faster</li>
+    <li>Because the image encoder needs it to recognize objects</li>
+    <li>Frames may be sampled at varying rates, so their order alone doesn't say when, or how far apart, events happened</li>
+  </ol>
+  <div class="q-explain">"At 12:40" or "two seconds later" needs real time. With dynamic or sparse sampling, frame index ≠ time, so models add timestamps or absolute-time positions.</div>
+</div></div>
+
+<h2>The token budget problem</h2>
+<p>Everything a video-LLM sees must fit in its context window, alongside the question and the answer. The budget is simple multiplication:</p>
+$$\text{tokens} = \underbrace{\text{duration} \times \text{sampling rate}}_{\text{frames}} \times \text{tokens per frame}$$
+<p><strong>Worked example:</strong> a 1-hour video, sampled at 1 frame per second.</p>
+<ol class="steps">
+  <li>Frames: $3{,}600 \times 1 = 3{,}600$.</li>
+  <li>At 576 tokens per frame: $3{,}600 \times 576 = 2{,}073{,}600$ tokens, about 16× a 128K-token context.</li>
+  <li>Pool 2 × 2 to 144 tokens per frame: $518{,}400$ tokens, still about 4×.</li>
+  <li>For comparison, Google's Gemini API documentation (as of 2025–26) describes sampling video at 1 frame per second with about 258 tokens per frame at default resolution: roughly 930,000 tokens for an hour of frames, plus audio. That fits only because those models accept around a million tokens or more.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A 10-minute video, sampled at 1 frame every 2 seconds, 144 tokens per frame, with a 32,000-token context.</p>
+  <ol class="steps">
+    <li>Frames $=$ <span class="blank" data-answer="300" data-tol="0.01" data-hint="600 seconds, one frame every 2 seconds."></span></li>
+    <li>Tokens $=$ <span class="blank" data-answer="43200" data-tol="1" data-hint="300 frames × 144 tokens."></span></li>
+    <li>The most frames that fit in 32,000 tokens (ignoring the question) $=$ <span class="blank" data-answer="222" data-tol="0.01" data-hint="32,000 / 144 = 222.2; round down."></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="vd4-budget-playground">
+  <h3>Playground: will this video fit?</h3>
+  <p class="math-note" style="margin:0">Pick the video length, how often you sample a frame, the tokens per frame and the context window.</p>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="pg-controls" style="grid-template-columns:repeat(auto-fit,minmax(230px,1fr))">
+    <label><span>Video length = <output data-k="min">1 h</output></span>
+      <input type="range" data-k="min" min="0" max="6" step="1" value="4" aria-label="Video length">
+    </label>
+    <label><span>Sampling = <output data-k="gap">1 frame / s</output></span>
+      <input type="range" data-k="gap" min="0" max="6" step="1" value="1" aria-label="Seconds between sampled frames">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Tokens per frame" style="margin-top:12px">
+    <button type="button" class="chip" data-tpf="576" aria-pressed="false" style="min-height:44px">576 tokens / frame</button>
+    <button type="button" class="chip" data-tpf="144" aria-pressed="true" style="min-height:44px">144 (2×2 pooled)</button>
+    <button type="button" class="chip" data-tpf="64" aria-pressed="false" style="min-height:44px">64</button>
+    <button type="button" class="chip" data-tpf="16" aria-pressed="false" style="min-height:44px">16</button>
+  </div>
+  <div class="chips" role="group" aria-label="Context window" style="margin-top:8px">
+    <button type="button" class="chip" data-ctx="32000" aria-pressed="false" style="min-height:44px">32K context</button>
+    <button type="button" class="chip" data-ctx="128000" aria-pressed="true" style="min-height:44px">128K context</button>
+    <button type="button" class="chip" data-ctx="1000000" aria-pressed="false" style="min-height:44px">1M context</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">You halve the tokens per frame and double the sampling rate. The total number of video tokens…</p>
+  <ol class="q-src">
+    <li>doubles</li>
+    <li>stays the same</li>
+    <li>halves</li>
+  </ol>
+  <div class="q-explain">Tokens = frames × tokens per frame: $2 \times \frac{1}{2} = 1$. Same budget, spent differently: more moments in time, less detail per moment.</div>
+</div></div>
+
+<h2>Long videos, and how we test them</h2>
+<p>When the budget doesn't fit, systems trade off three things: <em>when</em> they look, <em>how sharply</em>, and <em>what they remember</em>.</p>
+<ul>
+  <li><strong>Smarter sampling:</strong> sparser uniform sampling is cheap but misses short events. Alternatives pick frames at shot changes, or score frames for relevance to the question (for example with a CLIP-style text-image similarity) and keep the best.</li>
+  <li><strong>Fewer tokens per frame:</strong> spatial pooling, or <strong>token merging</strong> (ToMe, Bolya et al., 2023), which merges similar tokens. Consecutive frames of a static scene are near-duplicates, so merging across time saves a lot.</li>
+  <li><strong>Memory:</strong> stream the video, compress older frames into a fixed-size memory (MovieChat, Song et al., 2024, is one example), or caption segments first and retrieve only the relevant ones.</li>
+  <li><strong>Look again:</strong> agent-style systems skim at low frame rate, then "zoom in" by re-sampling densely around the moments that matter for the question.</li>
+  <li><strong>Longer context:</strong> long-context models (Gemini 1.5, 2024, was an early example) simply accept around a million tokens, at a correspondingly higher compute cost.</li>
+</ul>
+<p><strong>Benchmarks.</strong> Kinetics and Something-Something test recognition; NExT-QA (Xiao et al., 2021) asks causal and temporal questions; EgoSchema (Mangalam et al., 2023) uses 3-minute first-person clips; MVBench (Li et al., 2024) covers many short temporal skills; and <strong>Video-MME</strong> (Fu et al., 2024) has 900 videos from about 11 seconds to an hour long with 2,700 multiple-choice questions, tested with and without subtitles. Long-video suites such as LongVideoBench (Wu et al., 2024) push further.</p>
+<p>Read results with care. Many questions can be answered from one frame, the subtitles or general knowledge, and a model that ignores most of the video can still score well. Good benchmarks filter such questions (Video-MME's authors removed questions a text-only model could answer) and report results by video length; good evaluations include a "blind" or single-frame baseline.</p>
+
+<div class="why"><strong>Why this matters for LLM practice:</strong> a video-LLM is an LLM with a context-budget problem, the same one you meet with long documents in retrieval-augmented generation. Sampling is chunking, token merging is compression, segment captions plus retrieval is RAG over a video, and "look again" is an agent with a tool. If a product claims to "watch" an hour of video, ask how many frames per second it samples and how many tokens each frame gets.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">A video-LLM scores well on a video QA benchmark. Which extra check best tells you whether it actually used the video's temporal content?</p>
+  <ol class="q-src">
+    <li>Run it twice with the same input</li>
+    <li>Check that its answers are long and detailed</li>
+    <li>Compare with blind (text-only) and single-frame baselines on the same questions</li>
+  </ol>
+  <div class="q-explain">If a text-only or single-frame model scores nearly as well, the benchmark (or the model) isn't exercising temporal understanding.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a product manager why "our model can watch a one-hour video" needs a footnote.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A video-LLM reads sampled frames, each turned into hundreds of tokens, and everything must fit in its context window: an hour at 1 frame per second and 576 tokens per frame is about 2 million tokens. So it either samples sparsely (and can miss short events), compresses each frame (and loses detail), or uses memory and retrieval (and may skip parts). How many frames it samples and how many tokens each gets decides what it can actually notice.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What did I3D (2017) do to build a video network?</p>
+    <ol class="q-src">
+      <li>Replaced convolutions with self-attention over frames</li>
+      <li>Inflated a 2D image network's filters into 3D (adding a time dimension), initialized from the 2D weights</li>
+      <li>Used only optical flow, discarding RGB frames</li>
+      <li>Generated videos with a GAN</li>
+    </ol>
+    <div class="q-explain">I3D reused proven image architectures and ImageNet weights by repeating each $k \times k$ filter over $t$ frames (divided by $t$), then trained on Kinetics. Attention-only video models came in 2021.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Interleaving with <a href="v1-1.html">V1.1</a>: a ViT encodes a 448 × 448 frame with 14-pixel patches. How many tokens per frame, before any pooling?</p>
+    <ol class="q-src">
+      <li>576</li>
+      <li>784</li>
+      <li>196</li>
+      <li>1,024</li>
+    </ol>
+    <div class="q-explain">$448 / 14 = 32$ patches per side, so $32^2 = 1{,}024$ tokens. Higher resolution per frame eats the frame budget quickly.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A video-LLM samples 1 frame every 30 seconds to fit a 2-hour film into its context. Which question is it most likely to get wrong?</p>
+    <ol class="q-src">
+      <li>"What did the man pick up just before the door slammed?"</li>
+      <li>"Is this film set in a city or the countryside?"</li>
+      <li>"Roughly how many main characters are there?"</li>
+      <li>"Is it day or night in the final scene?"</li>
+    </ol>
+    <div class="q-explain">Brief, fine-grained events fall between sparse samples. Global questions about setting and characters survive sparse sampling well.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Interleaving with <a href="mm-1.html">MM.1</a>: what does the projector in a video-LLM do?</p>
+    <ol class="q-src">
+      <li>Chooses which frames to sample</li>
+      <li>Converts the LLM's answer into speech</li>
+      <li>Maps the vision encoder's frame tokens into the LLM's embedding space so they can sit in the same sequence as text tokens</li>
+      <li>Decodes tokens back into video frames</li>
+    </ol>
+    <div class="q-explain">Same role as for images: a small learned layer (often an MLP) translates visual features into "words" the LLM can read.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Core tasks: <strong>action recognition</strong> (Kinetics), <strong>temporal localization</strong>, <strong>video QA</strong>, captioning and retrieval.</li>
+    <li>Classic models added motion explicitly (two-stream optical flow) or through 3D filters (I3D); video transformers and VideoMAE-style pretraining followed.</li>
+    <li>Video-LLMs <strong>sample frames, encode, compress, project</strong> into an LLM, with timestamps.</li>
+    <li>Budget: <strong>frames × tokens per frame</strong> must fit the context; 1 h at 1 fps × 576 ≈ 2.1M tokens.</li>
+    <li>Long videos need trade-offs (sparser or smarter sampling, merging, memory, look-again), and benchmarks such as Video-MME need blind baselines to be meaningful.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"vd-4-a","front":"Name three video understanding tasks.","back":"Action recognition (e.g. Kinetics, 400 classes), temporal localization (when does an action start and end), and video question answering (plus captioning and retrieval)."},
+  {"id":"vd-4-b","front":"Two-stream networks vs I3D: how does each handle motion?","back":"Two-stream (Simonyan & Zisserman, 2014): a second CNN on stacked optical flow. I3D (Carreira & Zisserman, 2017): inflate 2D filters to 3D ($t \\times k \\times k$), initialized from ImageNet weights."},
+  {"id":"vd-4-c","front":"How does a typical video-LLM read a video?","back":"Sample frames (fixed count or fps) → image encoder (e.g. 576 tokens per frame) → pool/merge → projector into the LLM's embedding space, with timestamps → LLM answers the question."},
+  {"id":"vd-4-d","front":"Token budget of 1 h at 1 fps with 576 tokens per frame? With 2×2 pooling?","back":"3,600 × 576 ≈ 2.07M tokens (≈16× a 128K context); pooled to 144: 518,400 (≈4×)."},
+  {"id":"vd-4-e","front":"Four strategies for long videos in a video-LLM.","back":"Sparser or question-aware frame sampling; fewer tokens per frame (pooling, token merging); memory/retrieval over segments; look-again (skim, then re-sample densely); or simply a much longer context."},
+  {"id":"vd-4-f","front":"Why compare video-LLMs against blind and single-frame baselines?","back":"Many questions can be answered from text, subtitles or one frame. If those baselines score close to the model, the benchmark isn't testing temporal understanding."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/vd-4-videollm.js"></script>
+<script src="../assets/js/anims/vd-4-budget-playground.js"></script>
+</body>
+</html>

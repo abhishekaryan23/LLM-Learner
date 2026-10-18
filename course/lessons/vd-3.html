@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="vd-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Consistency, length & world models · LLMs, Animated</title>
+<meta name="description" content="Why generated videos break physics and lose track of objects, how models make longer videos (continuation, sliding windows, diffusion forcing), and how action-conditioned video models become world models for games, agents and robots.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Consistency, length &amp; world models</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Video</span></div>
+<p class="lede">A generated clip can look stunning for five seconds and then a dog walks behind a tree and never comes out. This lesson is about the hard part of video: keeping the world <strong>consistent</strong>, making it <strong>longer</strong>, and making it <strong>respond to actions</strong>, which turns a video generator into a world model that games, agents and robots can use.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe the typical consistency and physics failures of video generators, and why they happen.</li>
+    <li>Compare ways to make longer videos: continuation, sliding windows and diffusion forcing.</li>
+    <li>Explain what an action-conditioned world model is, from Ha &amp; Schmidhuber (2018) to GameNGen and Genie, and why agents and robots want one.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="vd-2.html">VD.2 Video diffusion transformers</a> (denoising a whole clip's latent at once, and what that costs). Helpful but optional: <a href="rl-1.html">RL.1 Agents, environments &amp; rewards</a> for the agent vocabulary in the last byte.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; the lesson will settle it.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A video model makes long videos by generating 5-second chunks, each conditioned on the end of the previous one. What tends to happen after many chunks?</p>
+    <ol class="q-src">
+      <li>Quality steadily improves as the model gets more context</li>
+      <li>Nothing changes; each chunk is as good as the first</li>
+      <li>Small errors accumulate: colours shift, faces drift, details melt</li>
+      <li>The model refuses to continue</li>
+    </ol>
+    <div class="q-explain">Each chunk is conditioned on generated, slightly imperfect frames, so errors feed back in and compound. Much of the research on long video is about stopping this drift.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What makes a video model a "world model" in the sense used for games and robots?</p>
+    <ol class="q-src">
+      <li>It predicts what will be seen next <em>given an action</em>, so you can act inside it</li>
+      <li>It was trained on more than a million hours of video</li>
+      <li>It produces 4K output</li>
+      <li>It has a 3D mesh of the world inside it</li>
+    </ol>
+    <div class="q-explain">The defining feature is action conditioning: frames + action → next frame. Then a player or an agent can interact with it, and an agent can plan by imagining outcomes.</div>
+  </div>
+</section>
+
+<h2>What goes wrong: consistency and physics</h2>
+<p>Early text-to-video models (2022–23) produced a few seconds of wobbly motion. By 2024–26 frontier systems make clips that can pass for real footage at a glance. But watch closely and the same families of failures keep showing up:</p>
+<ul>
+  <li><strong>Object permanence:</strong> a dog runs behind a tree and never reappears, or a second dog walks out. A passer-by goes behind a lamppost and emerges in a different shirt.</li>
+  <li><strong>Identity and count drift:</strong> a face changes subtly over a shot; a hand grows a sixth finger mid-gesture; a walker's legs swap sides.</li>
+  <li><strong>State changes that don't stick:</strong> OpenAI's own Sora report (2024) gives the example of a person biting a cookie that then shows no bite mark.</li>
+  <li><strong>Physics:</strong> the same report notes that glass shattering is not modelled accurately. Other common failures: a ball bounces higher than it was dropped from, liquid pours through the bottom of a cup, objects pass through each other.</li>
+</ul>
+<p>Why? The training objective rewards clips that <em>look</em> like training video, patch by patch, step by step. Nothing in it says "objects persist" or "momentum is conserved"; those have to be inferred from pixels, and rare events (shattering, collisions) are thinly represented. Physics-IQ (Motamed et al., 2025), a benchmark built from real filmed experiments, found that physical understanding in the models it tested was severely limited and <strong>unrelated to visual realism</strong>: looking real and behaving correctly are different skills.</p>
+<p>Within one clip, consistency is helped by what you saw in <a href="vd-2.html">VD.2</a>: every frame is denoised together with full space-time attention, so frame 100 can look at frame 1. Problems grow when a video is longer than what the model can attend to at once. Benchmarks such as VBench (Huang et al., 2024) score subject consistency, flicker and motion smoothness separately, because a single "quality" number hides these failures.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What did Physics-IQ (2025) report about the video models it tested?</p>
+  <ol class="q-src">
+    <li>The most realistic-looking models also understood physics best</li>
+    <li>Physical understanding was limited and unrelated to how realistic the videos looked</li>
+    <li>All models solved the benchmark once given longer context</li>
+  </ol>
+  <div class="q-explain">Visual realism and physical correctness came apart. A model can render convincing pixels for an outcome that couldn't happen.</div>
+</div></div>
+
+<h2>Making videos longer</h2>
+<p>A diffusion transformer generates one fixed window, typically a few to ten-odd seconds. Going longer by making the window bigger is expensive. At 720p, 24 fps, with the usual 4 × 8 × 8 VAE and $2 \times 2$ patches, 10 s is about 219,600 tokens. One minute is $1 + 1{,}440/4 = 361$ latent frames, or 1,299,600 tokens. Full attention scales with the square, so that is about $(1{,}299{,}600 / 219{,}600)^2 \approx 35$ times the attention cost, at every denoising step.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same settings, a 30-second clip: 721 frames.</p>
+  <ol class="steps">
+    <li>Latent frames $1 + 720/4 =$ <span class="blank" data-answer="181" data-tol="0.01" data-hint="720 / 4 = 180, plus the separately encoded first frame."></span></li>
+    <li>Tokens at 3,600 per latent frame $=$ <span class="blank" data-answer="651600" data-tol="1" data-hint="181 × 3,600."></span></li>
+    <li>Attention cost relative to the 10-second clip ≈ <span class="blank" data-answer="8.8" data-tol="0.15" data-hint="(651,600 / 219,600)²: about 2.97 squared."></span></li>
+  </ol>
+</section>
+
+<p>So long videos are usually built from pieces:</p>
+<ul>
+  <li><strong>Autoregressive continuation:</strong> generate a chunk, then generate the next one conditioned on the last few frames (as image-to-video does with one frame). Video Diffusion Models (Ho et al., 2022) already extended clips this way. Simple, but errors compound: each chunk inherits and amplifies the previous chunk's flaws.</li>
+  <li><strong>Sliding windows:</strong> overlap consecutive windows and blend or re-denoise the overlap so the seams don't show. Memory is limited to the window, so something that left the frame a minute ago is forgotten, the long-range version of the object-permanence failure.</li>
+  <li><strong>Diffusion forcing</strong> (Chen et al., 2024): train with an <em>independent noise level per frame</em> instead of one level for the whole clip. At sampling time the model can keep past frames clean and future frames noisy and roll forward causally, like next-token prediction, while keeping diffusion's quality. The paper reports stable rollouts well beyond the training length, where baselines diverged.</li>
+  <li><strong>Training on its own rollouts:</strong> a model trained only on real context never learns to recover from its own mistakes, the <strong>exposure bias</strong> known from teacher-forced language models. Self Forcing (Huang et al., 2025) trains an autoregressive video model on its own generated context, using a KV cache, and targets real-time streaming generation.</li>
+</ul>
+<p>As of 2026 the frontier systems generate clips of seconds to around a minute per shot and stitch longer pieces with these techniques; keeping identity and scene layout stable over minutes remains an open problem.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What is the key training change in diffusion forcing?</p>
+  <ol class="q-src">
+    <li>Each frame (token) gets its own independent noise level, instead of one level for the whole clip</li>
+    <li>The model is trained only on still images</li>
+    <li>The VAE is removed so the model works on pixels</li>
+  </ol>
+  <div class="q-explain">Per-frame noise levels let one model act both as a full-sequence denoiser and as a causal next-frame predictor that keeps the past clean and the future noisy.</div>
+</div></div>
+
+<h2>World models: video you can act in</h2>
+<p>A <strong>world model</strong> predicts what happens next <em>given an action</em>. The idea is old in control and reinforcement learning, and Ha &amp; Schmidhuber's "World Models" (2018) made it vivid: a VAE compressed each game frame, a recurrent network predicted the next latent from the current one and the action, and a tiny controller was trained <em>inside the model's "dream"</em>. In the VizDoom "take cover" task, a policy trained entirely in the dream transferred to the real game. They also saw the catch: the agent learned to exploit the dream's flaws, so they made the dream noisier to keep it honest.</p>
+<p>Modern video generators make far richer dreams. Add the action as a condition and the loop is:</p>
+
+<figure class="anim wide" data-anim="vd-3-world-loop"></figure>
+
+<ul>
+  <li><strong>GameNGen</strong> (Valevski et al., 2024) fine-tuned an image diffusion model (Stable Diffusion v1.4) to predict the next frame of <strong>DOOM</strong> from past frames and the player's actions, trained on gameplay recorded from a reinforcement-learning agent. It runs at 20 frames per second on a single TPU, and human raters were only slightly better than chance at telling short clips of the simulation from the real game. To curb drift it adds noise to the context frames during training, so the model learns to correct imperfect history.</li>
+  <li><strong>Genie</strong> (Bruce et al., 2024) learned from over 200,000 hours of unlabelled internet videos of 2D platform games, with no action labels at all. A <em>latent action model</em> discovered a small set of discrete actions (8 in the paper) from how frames change, which then let people "play" generated worlds. DeepMind's <strong>Genie 2</strong> (December 2024) generated 3D worlds from a single image, playable with keyboard and mouse for up to about a minute; <strong>Genie 3</strong> (August 2025) is described as running in real time at 720p and 24 fps, staying consistent for a few minutes. DeepMind has published few technical details about Genie 2 and 3.</li>
+</ul>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-vd-3.webp" alt="A child tilts a snow globe holding a tiny village; the people and snow move believably, with a ghosted preview of what happens next." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine a magic snow globe with a tiny village inside. When you <strong>tilt</strong> it, the snow swirls and the little people lean and walk, just as they would in a real tilted world.</p>
+      <p>Even better, before you tilt, the globe can show you a <strong>faint preview</strong> of what would happen. So you can try tilts in your head, pick the one that brings the snow down on the church, and only then do it.</p>
+      <p class="math-note">Where it breaks: a real snow globe obeys physics for free. A world model only guesses what comes next from what it has watched, so its village can glitch, forget a house that went out of view, or let snow fall upward.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Genie (2024) was trained on gaming videos without action labels. How could it still be controlled?</p>
+  <ol class="q-src">
+    <li>It read the controller inputs embedded in the video files</li>
+    <li>Humans labelled a small subset of frames with actions</li>
+    <li>A latent action model learned a small set of discrete actions from how consecutive frames change</li>
+  </ol>
+  <div class="q-explain">The latent actions are inferred from frame-to-frame changes; at play time a person picks one of them, and the dynamics model generates the next frame.</div>
+</div></div>
+
+<h2>Why agents and robots want world models</h2>
+<p>An agent that can predict the consequences of its actions can <strong>plan</strong>: imagine several action sequences, score where each one leads, take the first step of the best, observe, and re-plan. Control engineers call this model-predictive control. A good world model also gives cheap, safe practice: crashing a simulated car costs nothing.</p>
+<ul>
+  <li><strong>Learning in imagination:</strong> the Dreamer line of agents (Hafner et al., from 2020) learns a latent world model and trains its policy mostly on imagined rollouts.</li>
+  <li><strong>Robot planning:</strong> Meta's V-JEPA 2 (2025) pretrained a video model on over a million hours of video, then trained an action-conditioned version on under 62 hours of robot video, and used it to plan pick-and-place moves in new labs by imagining outcomes in its latent space. Note that it predicts compact representations, not pixels.</li>
+  <li><strong>Synthetic data and simulation:</strong> NVIDIA's Cosmos (January 2025) released "world foundation models" for generating training video for robots and self-driving cars, and DeepMind presented Genie 2 as a way to create environments for training and evaluating agents.</li>
+</ul>
+<p>The catches are the ones you met above, with higher stakes. A policy optimized inside a model will find and <strong>exploit the model's errors</strong> (Ha &amp; Schmidhuber saw this in 2018). Errors <strong>compound</strong> over long imagined rollouts. And real-time, action-conditioned generation is expensive. As of 2026, whether pixel-generating video models or compact latent predictors make the better world models for robots is an open, actively debated question.</p>
+
+<div class="why"><strong>Why this matters for LLM practice:</strong> the problems here have direct LLM twins. Compounding error from conditioning on your own outputs is <strong>exposure bias</strong>, familiar from teacher-forced text models and long agent trajectories. Sliding windows and the KV cache of streaming video generators echo <a href="m1-5.html">M1.5</a>. And "imagine, score, act" is the same loop LLM agents run when they plan with tools, only with a learned simulator of the world in place of a text scratchpad.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">An agent's policy is trained entirely inside a learned world model and scores brilliantly there, but fails in the real environment. What is the most likely reason?</p>
+  <ol class="q-src">
+    <li>The real environment has a different frame rate</li>
+    <li>The policy learned to exploit errors in the world model that don't exist in reality</li>
+    <li>World models cannot represent actions</li>
+  </ol>
+  <div class="q-explain">Optimizers are very good at finding loopholes. If the model lets you walk through a wall, the policy will. Noisier models, ensembles and real-world fine-tuning are common defences.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain why generating a long video chunk by chunk tends to drift, and name one technique that fights it.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Each new chunk is conditioned on frames the model generated itself, which contain small errors it never saw during training on real video, so the errors get copied and amplified chunk after chunk. Diffusion forcing (independent per-frame noise levels, so the model learns to work with imperfect, partly noisy history) or training on its own rollouts (Self Forcing), or adding noise to context frames as GameNGen did, makes the model robust to its own mistakes.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which failure is an <em>object permanence</em> failure?</p>
+    <ol class="q-src">
+      <li>The video flickers slightly between frames</li>
+      <li>The colours are oversaturated</li>
+      <li>The motion is too slow</li>
+      <li>A cat walks behind a sofa and a different cat comes out the other side</li>
+    </ol>
+    <div class="q-explain">Object permanence is about things continuing to exist, unchanged, while hidden. Flicker and colour are frame-quality issues.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What did GameNGen (2024) demonstrate?</p>
+    <ol class="q-src">
+      <li>A diffusion model conditioned on past frames and player actions can run DOOM interactively at 20 frames per second</li>
+      <li>A language model can write DOOM's source code</li>
+      <li>Video models can be trained without any video</li>
+      <li>World models need explicit 3D meshes</li>
+    </ol>
+    <div class="q-explain">GameNGen replaced the game engine with a next-frame diffusion model on one TPU. Short clips were hard for human raters to tell apart from the real game.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Interleaving with <a href="vd-1.html">VD.1</a>: why not simply generate a one-minute 720p video in a single window?</p>
+    <ol class="q-src">
+      <li>The VAE can't encode more than 10 seconds</li>
+      <li>Transformers can't take sequences longer than 100,000 tokens</li>
+      <li>It's about 1.3 million tokens, and full attention over them costs about 35× a 10-second clip at every step</li>
+      <li>Diffusion only works on images</li>
+    </ol>
+    <div class="q-explain">The limits are economic, not absolute: tokens grow linearly with duration and full attention quadratically. That pushes long-video work toward chunks, windows and causal rollouts.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Interleaving with LLM training (<a href="m2-2.html">M2.2</a>): which LLM problem is the closest analogue of drift in autoregressive video generation?</p>
+    <ol class="q-src">
+      <li>Tokenization errors</li>
+      <li>Exposure bias: trained on real prefixes, but at inference conditioned on its own, possibly flawed, outputs</li>
+      <li>Overfitting to the validation set</li>
+      <li>Quantization error</li>
+    </ol>
+    <div class="q-explain">Teacher forcing trains on ground-truth context; generation feeds the model its own samples. Video models face the same mismatch, frame by frame.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Video generators still fail at <strong>object permanence, identity, state changes and physics</strong>; looking real is not the same as behaving correctly.</li>
+    <li>Long videos are built from pieces: <strong>continuation</strong>, <strong>sliding windows</strong>, <strong>diffusion forcing</strong> (per-frame noise levels) and training on <strong>self-generated context</strong>, all fighting compounding error.</li>
+    <li>A <strong>world model</strong> predicts the next observation given an action: from Ha &amp; Schmidhuber (2018) to GameNGen (DOOM, 2024) and Genie (2024–25).</li>
+    <li>Agents and robots use world models to <strong>plan by imagination</strong> and to practise safely, but policies can exploit model errors.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"vd-3-a","front":"Name three typical consistency failures of video generators.","back":"Object permanence (things vanish or change while hidden), identity/count drift (faces change, extra fingers) and physics/state errors (glass that doesn't shatter properly, a bitten cookie with no bite mark)."},
+  {"id":"vd-3-b","front":"Why does chunk-by-chunk (autoregressive) video generation drift?","back":"Each chunk is conditioned on generated frames with small errors the model never saw in training, so errors compound (exposure bias). Noisy-context training, diffusion forcing and self-forcing fight it."},
+  {"id":"vd-3-c","front":"What is diffusion forcing (Chen et al., 2024)?","back":"Training a diffusion model with an independent noise level per frame/token, so it can roll out causally (clean past, noisy future) like next-token prediction while keeping diffusion's quality."},
+  {"id":"vd-3-d","front":"What is an action-conditioned world model? Give two examples.","back":"A model that predicts the next observation from recent observations plus an action. Examples: Ha & Schmidhuber (2018), GameNGen (DOOM, 2024), Genie (2024) and Genie 2/3."},
+  {"id":"vd-3-e","front":"Why do agents and robots want world models, and what is the main risk?","back":"They can plan by imagining the outcomes of candidate actions and practise cheaply and safely. Risk: the policy exploits the model's errors, and errors compound over long rollouts."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/vd-3-world-loop.js"></script>
+</body>
+</html>

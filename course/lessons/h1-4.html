@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="h1-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The scaling era (2018–2022) · LLMs, Animated</title>
+<meta name="description" content="From pretrain-then-fine-tune to ChatGPT: GPT, BERT, GPT-2, T5, scaling laws, GPT-3's in-context learning, diffusion and CLIP, Chinchilla and InstructGPT.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>The scaling era (2018–2022)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of The story of AI</span></div>
+<p class="lede">In five years, language models went from research curiosities to ChatGPT. The architecture barely changed. What changed was a recipe (pretrain on raw text, then adapt) and a discovery: make the model, the data and the compute bigger, and the results improve predictably.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain "pretrain, then fine-tune" and the difference between GPT-style and BERT-style models.</li>
+    <li>Describe what scaling laws, GPT-3's in-context learning and Chinchilla's "20 tokens per weight" showed.</li>
+    <li>Explain how instruction tuning and human feedback turned GPT-3 into ChatGPT.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="h1-3.html">H1.3 <em>Attention and the Transformer</em></a>: self-attention, and the encoder and decoder halves of the 2017 Transformer.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">GPT-3 (2020) could translate a word after seeing a few examples in its prompt, without any retraining. What is this ability called?</p>
+    <ol class="q-src">
+      <li>In-context (few-shot) learning</li>
+      <li>Fine-tuning</li>
+      <li>Backpropagation</li>
+      <li>Transfer learning by weight copying</li>
+    </ol>
+    <div class="q-explain">In-context learning: the examples sit in the prompt, and the model continues the pattern. No weights change.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">DeepMind's Chinchilla (2022) beat a model 4× its size. How?</p>
+    <ol class="q-src">
+      <li>A brand-new architecture</li>
+      <li>Training with human feedback</li>
+      <li>Training a smaller model on much more data with the same compute</li>
+      <li>Using a bigger vocabulary</li>
+    </ol>
+    <div class="q-explain">Chinchilla (70B weights, 1.4 trillion tokens) beat Gopher (280B weights, 300 billion tokens). Earlier big models had been trained on too little data for their size.</div>
+  </div>
+</section>
+
+<h2>Pretrain once, fine-tune for everything (2018–2019)</h2>
+<p>Until 2018, every language task (sentiment, question answering, translation) usually got its own model trained from scratch on its own labelled data, perhaps starting from word2vec vectors. Labelled data is expensive, so models stayed small. The fix was to learn from the cheapest data there is: <strong>raw text</strong>, where the text itself supplies the answers. Hide or cut off part of a sentence and ask the model to predict it. This is called <strong>self-supervised</strong> learning.</p>
+<p>2018 brought three versions of the idea. <strong>ELMo</strong> (Peters et al., February) produced word vectors that depend on context, using LSTMs pretrained on lots of text. <strong>GPT</strong> (Radford et al., OpenAI, June) pretrained a 12-layer transformer <strong>decoder</strong> (117 million weights) to predict the next word on about 7,000 unpublished books, then <strong>fine-tuned</strong> it briefly on each task. <strong>BERT</strong> (Devlin et al., Google, October) used the transformer <strong>encoder</strong>: hide about 15% of the words and predict them from both sides. BERT-large (340 million weights) topped almost every language-understanding benchmark of the time, and within a year Google was using BERT in Search.</p>
+<p>Then the models grew. <strong>GPT-2</strong> (February 2019) had 1.5 billion weights, trained on about 40 GB of web text. It wrote surprisingly fluent paragraphs and could attempt tasks with no fine-tuning at all. OpenAI released it in stages, citing worries about misuse, which was a first for an AI model. <strong>T5</strong> (Raffel et al., Google, October 2019) framed every task as text in, text out, and went up to 11 billion weights.</p>
+
+<figure class="anim wide" data-anim="h1-4-timeline"></figure>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What is the key difference between GPT-style and BERT-style pretraining?</p>
+  <ol class="q-src">
+    <li>GPT uses LSTMs; BERT uses transformers</li>
+    <li>GPT predicts the next word from the words before it; BERT fills in hidden words using context on both sides</li>
+    <li>GPT needs labelled data; BERT doesn't</li>
+    <li>BERT generates long text; GPT can only classify</li>
+  </ol>
+  <div class="q-explain">GPT is a decoder that only looks left, which makes it a natural text generator. BERT is an encoder that looks both ways, which suits understanding tasks. Both learn from raw text. Today's chat LLMs follow the GPT design (<a href="m2-2.html">M2.2 <em>The next-token objective</em></a>).</div>
+</div></div>
+
+<h2>Bigger is predictably better: scaling laws and GPT-3 (2020)</h2>
+<p>Was growing models just expensive guesswork? In January 2020, Jared Kaplan and colleagues at OpenAI trained many language models of different sizes and found the answer was surprisingly tidy. The model's error on new text (its <strong>loss</strong>) falls as a <strong>power law</strong> in the number of weights, the amount of data and the compute used, as long as none of them is the bottleneck. The trend held smoothly across more than seven orders of magnitude.</p>
+<p>A power law means "every 10× more, the loss shrinks by about the same fraction". On a plot where both axes are logarithmic (each step is 10×), it's a straight line. That made progress <em>plannable</em>: train small models, draw the line, and predict how a model 100× bigger will do before spending the money.</p>
+<p>OpenAI placed that bet with <strong>GPT-3</strong> (Brown et al., May 2020): <strong>175 billion weights</strong>, trained on about 300 billion tokens (pieces of words). The surprise was <strong>in-context learning</strong>. Show GPT-3 a few examples in the prompt, such as "sea otter => loutre de mer, peppermint => menthe poivrée, cheese =>", and it continues the pattern with "fromage". No weights change; the "learning" happens inside one forward pass. Bigger models were clearly better at it. The paper's title says it all: "Language Models are Few-Shot Learners".</p>
+<p>GPT-3 was offered through a paid API rather than released, and an ecosystem of apps grew around it. In 2021 a GPT-3 variant fine-tuned on code, <strong>Codex</strong>, powered GitHub Copilot, one of the first AI assistants that programmers used every day.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">What did the 2020 scaling laws let researchers do?</p>
+  <ol class="q-src">
+    <li>Train models without any data</li>
+    <li>Prove that bigger models always overfit</li>
+    <li>Skip pretraining entirely</li>
+    <li>Predict how much a bigger model would improve, from small experiments, before training it</li>
+  </ol>
+  <div class="q-explain">Loss follows a smooth power law in model size, data and compute, so small runs give a line you can extend. That turned scaling into an engineering plan. Details in <a href="m2-4.html">M2.4 <em>Scaling laws</em></a>.</div>
+</div></div>
+
+<h2>Beyond text, and fixing the recipe (2020–2022)</h2>
+<p>The same ingredients (transformers or big neural networks, huge datasets and lots of compute) spread to other fields:</p>
+<ul>
+  <li><strong>Images from noise.</strong> Diffusion models learn to remove a little noise at a time; run that backwards from pure noise and an image appears. Ho, Jain and Abbeel's <strong>DDPM</strong> (2020) made the idea work well. <strong>CLIP</strong> (OpenAI, January 2021) learned to match images with captions from about 400 million image–text pairs found online, and <strong>DALL·E</strong> generated images from text the same month. In 2022 came DALL·E 2, Imagen, Midjourney and <strong>Stable Diffusion</strong> (August), which ran diffusion in a compressed "latent" space (Rombach et al.) and was released openly, so anyone could run it.</li>
+  <li><strong>Science.</strong> DeepMind's <strong>AlphaFold 2</strong> predicted protein 3D structures with accuracy close to lab experiments at the CASP14 competition (late 2020; paper in 2021). Its creators Demis Hassabis and John Jumper shared the 2024 Nobel Prize in Chemistry.</li>
+  <li><strong>Speech.</strong> OpenAI's <strong>Whisper</strong> (September 2022) transcribed speech robustly in many languages, trained on 680,000 hours of audio.</li>
+</ul>
+<p>Meanwhile the scaling recipe got a correction. In March 2022, Jordan Hoffmann and colleagues at DeepMind asked: for a fixed compute budget, how should you split it between model size and data? Their answer: grow both <strong>equally</strong>. That works out to about <strong>20 training tokens per weight</strong>. Earlier giants had far fewer, so they were too big for their data. Their <strong>Chinchilla</strong> (70 billion weights, 1.4 trillion tokens) used about the same compute as DeepMind's Gopher (280 billion weights, 300 billion tokens) and beat it on most benchmarks.</p>
+
+<h3>Worked example</h3>
+<p>Tokens per weight for GPT-3: 300 billion tokens ÷ 175 billion weights.</p>
+<ol class="steps">
+  <li>$300 / 175 \approx 1.7$ tokens per weight.</li>
+  <li>Compared with Chinchilla's rule of about 20, GPT-3 saw roughly 12× too little data for its size.</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<ol class="steps">
+  <li>Chinchilla: 1,400 billion tokens ÷ 70 billion weights = <span class="blank" data-answer="20" data-tol="0.01" data-hint="1400 / 70."></span> tokens per weight</li>
+  <li>A 7-billion-weight model trained "Chinchilla-optimally" needs about how many billion tokens? <span class="blank" data-answer="140" data-tol="1" data-hint="20 tokens for every weight: 20 × 7."></span></li>
+</ol>
+<p class="math-note">Since 2023 many labs deliberately train <em>beyond</em> 20 tokens per weight: a smaller model trained longer costs more to train but is cheaper to run for millions of users. You'll explore this trade-off in <a href="m2-4.html">M2.4</a>.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What did the Chinchilla paper change about how big models are trained?</p>
+  <ol class="q-src">
+    <li>For a fixed compute budget, grow data along with model size, about 20 tokens per weight, instead of mostly growing the model</li>
+    <li>Always use the biggest model you can fit on your GPUs</li>
+    <li>Stop using transformers</li>
+    <li>Train only on human-labelled data</li>
+  </ol>
+  <div class="q-explain">GPT-3 and Gopher saw well under 2 tokens per weight. Chinchilla showed a smaller model trained on much more data does better for the same compute.</div>
+</div></div>
+
+<h2>From completion to conversation (2022)</h2>
+<p>A pretrained model like GPT-3 is a <strong>completer</strong>, not an assistant. Ask it "How do I bake bread?" and it might continue with three more questions, as if writing an FAQ page. Getting it to follow instructions took careful prompting.</p>
+<p>OpenAI's <strong>InstructGPT</strong> (Ouyang et al., March 2022) fixed this in three steps:</p>
+<ol>
+  <li><strong>Supervised fine-tuning (SFT):</strong> train on examples of good answers written by people.</li>
+  <li><strong>A reward model:</strong> people rank several model answers from best to worst, and a second model learns to predict their preferences.</li>
+  <li><strong>Reinforcement learning from human feedback (RLHF):</strong> tune the language model to get high scores from the reward model, with a leash that keeps it close to its original behaviour.</li>
+</ol>
+<p>The result was striking: human raters preferred answers from the <strong>1.3-billion</strong>-weight InstructGPT over those of the 175-billion-weight GPT-3. Alignment with what users want mattered more than 100× more weights. The same year, Wei et al. showed that asking a model to write out its reasoning step by step, <strong>chain-of-thought</strong> prompting, sharply improved large models on maths word problems.</p>
+<p>On <strong>30 November 2022</strong>, OpenAI released <strong>ChatGPT</strong>, a free chat interface to a model trained this way. It reportedly reached about 100 million users within two months, which analysts at the time called the fastest growth of any consumer app. AI had become an everyday tool.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Imagine a parrot that has listened to every book in the world's biggest library. It can continue any sentence you start, in any style. But ask it a question and it might just say more questions back, because that's what it heard in books.</p>
+    <p>So a teacher shows it lots of good answers (that's SFT), then keeps saying "this answer is better than that one" (that's human feedback) until the parrot learns what a helpful answer sounds like. Now it's a helper, not just a copier.</p>
+    <p class="math-note">Where it breaks: the model isn't a parrot repeating sentences. It learns patterns well enough to write new things, including mistakes that sound confident.</p>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> this is the recipe still used, refined, in 2026: <strong>pretrain</strong> on enormous text with next-token prediction (<a href="m2-2.html">M2.2</a>), sized using <strong>scaling laws</strong> (<a href="m2-4.html">M2.4</a>), then <strong>post-train</strong> with SFT and preference learning (<a href="m3-1.html">M3.1 <em>SFT</em></a>, <a href="m3-3.html">M3.3 <em>RLHF</em></a>, <a href="m3-4.html">M3.4 <em>DPO</em></a>).</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">In the InstructGPT study, how did a 1.3B-weight model beat 175B-weight GPT-3 in human ratings?</p>
+  <ol class="q-src">
+    <li>It was trained on far more pretraining data</li>
+    <li>It used a newer architecture</li>
+    <li>It was fine-tuned on human demonstrations and preferences, so it followed instructions the way people wanted</li>
+    <li>It was allowed to search the web</li>
+  </ol>
+  <div class="q-explain">Post-training with SFT and RLHF aligned it with what users actually ask for. Raw size can't substitute for that.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why did language models suddenly get so much better between 2018 and 2022, if the architecture barely changed?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Self-supervised pretraining let models learn from enormous amounts of raw text, and scaling laws showed that bigger models with more data and compute improve predictably, so labs scaled up (GPT-3) and then balanced size with data (Chinchilla). Finally, instruction tuning and RLHF turned these text completers into helpful assistants (ChatGPT).</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which order is right?</p>
+    <ol class="q-src">
+      <li>GPT-3 → BERT → GPT-2 → ChatGPT → Chinchilla</li>
+      <li>GPT and BERT (2018) → GPT-2 (2019) → GPT-3 (2020) → Chinchilla and InstructGPT (2022) → ChatGPT (Nov 2022)</li>
+      <li>ChatGPT → GPT-3 → GPT-2 → BERT</li>
+      <li>BERT → GPT-3 → GPT → Chinchilla → GPT-2</li>
+    </ol>
+    <div class="q-explain">2018, 2019, 2020, March 2022, November 2022.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A lab has compute for a model trained Chinchilla-optimally on 2 trillion tokens. About how many weights should the model have?</p>
+    <ol class="q-src">
+      <li>2 trillion</li>
+      <li>1 trillion</li>
+      <li>400 billion</li>
+      <li>100 billion</li>
+    </ol>
+    <div class="q-explain">About 20 tokens per weight: $2{,}000\text{B} / 20 = 100\text{B}$ weights.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why is pretraining on raw text called self-supervised?</p>
+    <ol class="q-src">
+      <li>The labels come from the text itself: the hidden or next word is the answer</li>
+      <li>The model labels its own data with a second model</li>
+      <li>No loss function is used</li>
+      <li>Humans supervise each training step</li>
+    </ol>
+    <div class="q-explain">Any text gives free training examples: cut it anywhere and the next word is the target. That's why web-scale data could be used.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">From H1.3: GPT keeps one half of the 2017 Transformer. Which half, and why does that suit text generation?</p>
+    <ol class="q-src">
+      <li>The encoder, because it looks in both directions</li>
+      <li>Both halves, because generation needs translation</li>
+      <li>The decoder, because it predicts each word from the words before it, which is exactly how you generate text one word at a time</li>
+      <li>Neither: GPT is a recurrent network</li>
+    </ol>
+    <div class="q-explain">The decoder only looks left. Train it to predict the next word and you can generate by sampling a word, appending it and repeating (<a href="m1-4.html">M1.4</a>).</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>2018: <strong>pretrain on raw text, then fine-tune</strong> (ELMo, GPT, BERT). GPT predicts the next word; BERT fills in blanks.</li>
+    <li>2019–2020: models grew 100× and more (GPT-2 1.5B, T5 11B, <strong>GPT-3 175B</strong>); <strong>scaling laws</strong> made gains predictable; GPT-3 showed <strong>in-context learning</strong>.</li>
+    <li>2020–2022: the same ingredients transformed images (<strong>diffusion</strong>, CLIP, Stable Diffusion), proteins (AlphaFold 2) and speech (Whisper).</li>
+    <li>2022: <strong>Chinchilla</strong>: about 20 tokens per weight for compute-optimal training. <strong>InstructGPT</strong> (SFT + RLHF) made models follow instructions, leading to <strong>ChatGPT</strong> (30 Nov 2022).</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"h1-4-a","front":"What was the 2018 'pretrain, then fine-tune' recipe, and which models introduced it?","back":"Pretrain one big model on raw text with a self-supervised objective, then fine-tune copies for each task. ELMo (Feb), GPT (June, decoder, next word) and BERT (Oct, encoder, masked words) in 2018."},
+  {"id":"h1-4-b","front":"What do scaling laws (Kaplan et al., 2020) say?","back":"Loss falls as a smooth power law in model size, data and compute (a straight line on log–log axes), so you can predict a bigger model's performance from small runs."},
+  {"id":"h1-4-c","front":"GPT-3 (2020): size and headline ability?","back":"175 billion weights, about 300 billion training tokens. In-context (few-shot) learning: it picks up a task from examples in the prompt, with no weight updates."},
+  {"id":"h1-4-d","front":"What did Chinchilla (Hoffmann et al., 2022) show?","back":"For a fixed compute budget, scale weights and tokens equally: about 20 tokens per weight. 70B Chinchilla on 1.4T tokens beat 280B Gopher on 300B tokens."},
+  {"id":"h1-4-e","front":"How did InstructGPT turn GPT-3 into an assistant, leading to ChatGPT?","back":"SFT on human-written answers, a reward model trained on human rankings, then RL (RLHF) against it. A 1.3B InstructGPT was preferred over 175B GPT-3. ChatGPT launched 30 Nov 2022."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/h1-timeline-kit.js"></script>
+<script src="../assets/js/anims/h1-4-timeline.js"></script>
+</body>
+</html>

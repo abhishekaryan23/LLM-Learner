@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="h1-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Today's landscape (2023–2026) · LLMs, Animated</title>
+<meta name="description" content="AI since ChatGPT: GPT-4 and the assistant race, open-weight and mixture-of-experts models, long context, natively multimodal models, reasoning models trained with RL, agents, and video generation.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Today's landscape (2023–2026)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of The story of AI</span></div>
+<p class="lede">Since ChatGPT, the field has moved faster than ever. Rather than list every model (they change monthly), this lesson maps the <strong>big shifts</strong> since 2023: stronger assistants, open weights, mixture of experts, longer context, native multimodality, reasoning, and agents that act. Each shift has its own track later in the course.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe the main shifts in AI since 2023 and name a landmark model for each.</li>
+    <li>Explain what "open weights", "mixture of experts", "natively multimodal" and "reasoning model" mean.</li>
+    <li>Say why any snapshot of this field dates quickly, and where to check what's new.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="h1-4.html">H1.4 <em>The scaling era</em></a>: pretraining, scaling laws, GPT-3 and how RLHF produced ChatGPT.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A "mixture of experts" model like DeepSeek-V3 has 671 billion weights. Roughly how many does it use for each token?</p>
+    <ol class="q-src">
+      <li>All 671 billion</li>
+      <li>About half</li>
+      <li>Exactly one expert's worth, about 1 billion</li>
+      <li>About 37 billion: a router picks a few experts per token</li>
+    </ol>
+    <div class="q-explain">DeepSeek-V3 activates about 37B of its 671B weights per token. Huge total capacity, much smaller compute per token.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What makes "reasoning models" like OpenAI's o1 (2024) different from earlier chat models?</p>
+    <ol class="q-src">
+      <li>They are much bigger</li>
+      <li>They are trained with reinforcement learning to work through a problem step by step before answering, and do better the longer they think</li>
+      <li>They look answers up in a database</li>
+      <li>They only answer maths questions</li>
+    </ol>
+    <div class="q-explain">Reasoning models spend extra tokens "thinking" before the final answer, a skill sharpened by reinforcement learning on problems with checkable answers.</div>
+  </div>
+</section>
+
+<h2>The assistant race and open weights (2023)</h2>
+<p>OpenAI's <strong>GPT-4</strong> (March 2023) was a big step up from the model behind the first ChatGPT. It could also take <strong>images</strong> as input, a feature that reached users later in 2023. Its technical report kept the model's size and training data secret, a sign of how competitive the field had become. OpenAI reported strong results on professional exams, such as a simulated bar exam (later analyses argued the headline percentile was overstated). Within weeks Anthropic launched <strong>Claude</strong> and Google launched <strong>Bard</strong>; Google's <strong>Gemini</strong> family followed in December 2023.</p>
+<p>Meanwhile, a second path opened: <strong>open-weight</strong> models, whose trained weights anyone can download, run and fine-tune. Meta's <strong>LLaMA</strong> (February 2023; 7 to 65 billion weights) was meant for researchers, but its weights leaked online within about a week. <strong>Llama 2</strong> (July 2023) allowed commercial use. Paris-based <strong>Mistral</strong> released Mistral 7B (September 2023) under a permissive licence, and Alibaba's <strong>Qwen</strong> and China's <strong>DeepSeek</strong> grew into leading open families through 2024–2025. "Open weights" isn't quite "open source", though: the training data and code are often not released, and licences range from fully permissive to restricted.</p>
+<p>Many of these models use a <strong>mixture of experts</strong> (MoE). Instead of one big MLP per layer, there are many smaller "expert" MLPs, and a small <strong>router</strong> sends each token to just a few of them. Mistral's <strong>Mixtral 8×7B</strong> (December 2023) used 2 of 8 experts per token: about 47 billion weights in total, about 13 billion used per token. <strong>DeepSeek-V3</strong> (December 2024) scaled this to 671 billion in total with about 37 billion active, and its report put the final training run at about 2.8 million GPU-hours, far less than many expected for a model of its quality.</p>
+
+<figure class="anim wide" data-anim="h1-5-timeline"></figure>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why does a mixture-of-experts model cost less to run than a dense model with the same total number of weights?</p>
+  <ol class="q-src">
+    <li>Its weights are stored in lower precision</li>
+    <li>It skips the attention layers</li>
+    <li>A router sends each token through only a few experts, so most weights sit idle for any given token</li>
+    <li>It uses a shorter context window</li>
+  </ol>
+  <div class="q-explain">Compute per token scales with the <em>active</em> weights, not the total. You'll build a router in <a href="m5-3.html">M5.3 <em>Mixture of experts</em></a> and go deeper in <a href="ar-1.html">AR.1</a>.</div>
+</div></div>
+
+<h2>Longer and wider: context and modalities (2023–2024)</h2>
+<p><strong>Context length</strong> is how much text, measured in tokens, a model can read at once. GPT-3 (2020) managed 2,048 tokens, a few pages. GPT-4 launched with up to 32,000. In November 2023, Anthropic's Claude 2.1 offered 200,000 and OpenAI's GPT-4 Turbo 128,000. In February 2024 Google's <strong>Gemini 1.5</strong> reached <strong>1 million tokens</strong>: several novels, a large codebase, or about an hour of video in one prompt. By 2025, million-token windows were offered by several frontier models. A long window isn't perfect memory, though: models can still miss details buried in the middle of a long input, so long-context evaluation remains an active area (<a href="ar-5.html">AR.5 <em>Long context</em></a>).</p>
+<p>Models also became <strong>natively multimodal</strong>. Early systems bolted an image or speech model onto a language model. Gemini (December 2023) was trained on text, images, audio and video from the start, and OpenAI's <strong>GPT-4o</strong> (May 2024, "o" for "omni") handled text, vision and audio in one network. That matters most for speech: instead of a pipeline of speech-to-text, then a language model, then text-to-speech, one model hears and speaks directly. It keeps tone of voice, and OpenAI reported audio replies in about 320 milliseconds on average, close to human conversational timing. Research models such as Kyutai's <strong>Moshi</strong> (2024) can even listen and speak at the same time. By 2025, chat models could also generate images directly inside the conversation.</p>
+<p class="math-note">Deeper dives: <a href="mm-1.html">MM.1 <em>Connecting vision to LLMs</em></a>, <a href="mm-2.html">MM.2 <em>Native multimodal models</em></a> and <a href="a1-6.html">A1.6 <em>Real-time speech-to-speech</em></a>.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What's the advantage of a natively multimodal model for voice conversation?</p>
+  <ol class="q-src">
+    <li>One network hears and speaks directly, so it's faster and keeps information like tone that a speech-to-text step would throw away</li>
+    <li>It needs no training data</li>
+    <li>It can only be used for images</li>
+    <li>It has a longer context window by definition</li>
+  </ol>
+  <div class="q-explain">A pipeline turns speech into plain text, losing tone and timing, and adds delay at every hand-off. A single multimodal model avoids both.</div>
+</div></div>
+
+<h2>Thinking longer: reasoning models (2024–2025)</h2>
+<p>In 2022, researchers found that asking a model to "think step by step" (chain-of-thought prompting) helped on maths and logic. In <strong>September 2024</strong>, OpenAI's <strong>o1</strong> turned that into a trained skill. It was trained with <strong>reinforcement learning</strong> to produce a long internal chain of thought before answering, and OpenAI reported that performance kept improving both with more RL training and with more <strong>thinking time</strong> at answer time. That opened a new way to buy performance: not only a bigger model, but more computation per question, called <strong>test-time compute</strong>.</p>
+<p>In <strong>January 2025</strong>, China's DeepSeek released <strong>DeepSeek-R1</strong> with open weights under the MIT licence, plus a paper describing how it was trained. The core idea: reinforcement learning on problems whose answers can be <strong>checked automatically</strong> (maths with a known answer, code with tests), rewarding correct final answers. Its RL method, <strong>GRPO</strong>, compares several answers to the same question and pushes the model toward the better ones. A variant trained with RL alone, R1-Zero, learned to write longer reasoning and to re-check its work without being shown how. R1's strong results at a reportedly low cost briefly rattled tech stocks.</p>
+<p>By 2025–2026, most major model families offered a "thinking" mode, and some models decide for themselves how long to think. As of 2026, reasoning-style training is a standard part of post-training for frontier models. It's still debated how far it generalises beyond problems with checkable answers.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>When you answer "what's 7 × 8?" you just know it. But for a tricky puzzle, you grab scrap paper, try something, notice a mistake and try again. Reasoning models get a big sheet of scrap paper.</p>
+    <p>They learned to use it well by practising lots of puzzles where the answer can be checked, and getting a gold star only when the final answer was right. Over time they figured out that careful working, and checking, earns more stars.</p>
+    <p class="math-note">Where it breaks: a model's "scrap paper" is generated text, and it doesn't always reflect what really drove the answer. Longer thinking also costs more time and money.</p>
+  </div>
+</details>
+
+<p class="math-note">The whole story, from chain of thought to training with verifiable rewards: <a href="rs-1.html">RS.1 <em>Chain of thought</em></a>, <a href="rs-3.html">RS.3 <em>Training reasoning models</em></a> and <a href="m3-5.html">M3.5 <em>GRPO &amp; verifiable rewards</em></a>.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">What did DeepSeek-R1's training reward, in its reasoning stage?</p>
+  <ol class="q-src">
+    <li>Answers that human raters liked best</li>
+    <li>The longest possible answers</li>
+    <li>Copying the reasoning of a bigger model, word for word</li>
+    <li>Correct final answers on problems that can be checked automatically, such as maths and code with tests</li>
+  </ol>
+  <div class="q-explain">Verifiable rewards are cheap and hard to game compared with a learned reward model. Longer, more careful reasoning emerged because it earned more correct answers.</div>
+</div></div>
+
+<h2>Agents, video and what's next (2024–2026)</h2>
+<p>Answering questions is one thing; getting things done is another. An <strong>agent</strong> is a model in a loop: it decides on a step, calls a <strong>tool</strong> (web search, a code interpreter, a calendar, a database), reads the result and decides the next step, until the task is done. Function calling became a standard API feature in 2023. In late 2024 Anthropic introduced <strong>computer use</strong> (a model operating a screen, keyboard and mouse) and the <strong>Model Context Protocol</strong> (MCP), an open standard for plugging tools into models that other major labs later adopted. In 2025, <strong>coding agents</strong> that read a codebase, edit files, run tests and fix their own errors became everyday tools for many programmers. See <a href="sy-4.html">SY.4 <em>Tool use</em></a>, <a href="sy-5.html">SY.5 <em>Agents</em></a> and <a href="ag-1.html">AG.1 <em>The agent toolkit</em></a>.</p>
+<p><strong>Video generation</strong> leapt too. OpenAI previewed <strong>Sora</strong> in February 2024, with clips up to a minute long; Google's <strong>Veo</strong> followed in May. In 2025, <strong>Veo 3</strong> and <strong>Sora 2</strong> generated synchronized dialogue and sound along with the video. Most of these models combine the diffusion ideas from H1.4 with transformers (<a href="vd-2.html">VD.2</a>).</p>
+<p>A few broad trends hold as of late 2026, with the usual caution that they can change quickly:</p>
+<ul>
+  <li><strong>Capability per dollar</strong> keeps rising: today's small models often match the flagship models of a year or two earlier, at a fraction of the price.</li>
+  <li><strong>Open-weight models</strong> trail the best closed models, but not by much.</li>
+  <li><strong>Evaluation is hard</strong>: benchmarks saturate quickly and can leak into training data, so careful, task-specific testing matters more than leaderboards (<a href="m4-2.html">M4.2</a>, <a href="m4-7.html">M4.7</a>).</li>
+</ul>
+
+<div class="why"><strong>Why this matters for you:</strong> any snapshot of this field dates within months, including this lesson. The fundamentals (transformers, pretraining, post-training, evaluation, efficiency) change much more slowly, and they are what this course teaches. For the latest, the course's <a href="../whats-new.html"><strong>What's new</strong></a> page collects short, checked notes on new papers and models, linked to the lessons they affect.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What makes a model an "agent"?</p>
+  <ol class="q-src">
+    <li>It has more than 100 billion weights</li>
+    <li>It works in a loop: choose an action, call a tool, read the result, decide the next step, until the task is done</li>
+    <li>It was trained with reinforcement learning</li>
+    <li>It can generate video</li>
+  </ol>
+  <div class="q-explain">The loop of acting and observing is what matters. Tools such as search, code execution or a computer screen extend what the model can do.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Pick two of the shifts since 2023 and explain how each changes what models can do, or what they cost to run.</p>
+  <div class="model-answer"><strong>Model answer (one possibility):</strong> Mixture of experts routes each token through a few experts, so a model can hold far more knowledge (total weights) without a matching rise in compute per token. Reasoning models are trained with RL to think before answering, so they can trade extra test-time compute for better answers on hard, checkable problems.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which pairing of model and milestone is right?</p>
+    <ol class="q-src">
+      <li>GPT-4o (2024): first open-weight model</li>
+      <li>LLaMA (2023): first model with a 1-million-token context</li>
+      <li>Gemini 1.5 (2024): a context window of 1 million tokens</li>
+      <li>DeepSeek-R1 (2025): first video generator</li>
+    </ol>
+    <div class="q-explain">Gemini 1.5 reached 1M tokens in February 2024. GPT-4o was natively multimodal (and closed), LLaMA was an early open-weight model, and R1 was an open reasoning model.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What does "open weights" mean, and what does it usually <em>not</em> include?</p>
+    <ol class="q-src">
+      <li>You can download and run the trained weights; the training data and full training code often aren't released</li>
+      <li>Anyone can edit the model on the developer's servers</li>
+      <li>The model is free to use with no licence at all</li>
+      <li>The weights are encrypted but the data is public</li>
+    </ol>
+    <div class="q-explain">Open weights let you run and fine-tune a model yourself. Licences vary, and data and code are often kept private, so "open weights" is narrower than "open source".</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Test-time compute means…</p>
+    <ol class="q-src">
+      <li>The compute used to pretrain the model</li>
+      <li>Running the benchmark suite before release</li>
+      <li>The GPU memory needed to store the weights</li>
+      <li>Spending more computation when answering, for example longer reasoning, to get better answers</li>
+    </ol>
+    <div class="q-explain">Reasoning models showed that thinking longer at answer time can improve accuracy, a second scaling axis next to model size (<a href="rs-2.html">RS.2</a>).</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">From H1.4: a reasoning model like R1 still starts from the same pipeline as ChatGPT. Which part is newest?</p>
+    <ol class="q-src">
+      <li>Pretraining on next-token prediction</li>
+      <li>Reinforcement learning on problems with automatically checkable answers, on top of the usual post-training</li>
+      <li>Supervised fine-tuning on human-written answers</li>
+      <li>The transformer architecture</li>
+    </ol>
+    <div class="q-explain">Pretraining, SFT and the transformer date from 2017–2022. RL with verifiable rewards for long reasoning is the 2024–2025 addition.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>2023: <strong>GPT-4</strong> and a race of assistants (Claude, Bard/Gemini); <strong>open-weight</strong> families (LLaMA, Mistral, Qwen, DeepSeek) close in.</li>
+    <li><strong>Mixture of experts</strong> (Mixtral; DeepSeek-V3: 671B total, 37B active) separates total capacity from compute per token.</li>
+    <li>Context grew from 2K tokens to <strong>1M</strong> (Gemini 1.5, 2024); <strong>natively multimodal</strong> models (Gemini, GPT-4o) see, hear and speak in one network.</li>
+    <li><strong>Reasoning models</strong> (o1, Sept 2024; DeepSeek-R1, Jan 2025) use RL to think before answering: <strong>test-time compute</strong> as a new scaling axis.</li>
+    <li><strong>Agents</strong> use tools in a loop; video generation gained sound (2025). It all moves fast, so check <a href="../whats-new.html">What's new</a>.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"h1-5-a","front":"What is an open-weight model? Name three open-weight families from 2023–2025.","back":"A model whose trained weights you can download, run and fine-tune (training data and code often not included; licences vary). E.g. Meta's LLaMA/Llama, Mistral/Mixtral, Alibaba's Qwen, DeepSeek."},
+  {"id":"h1-5-b","front":"How does a mixture-of-experts model work, and why use one?","back":"Each layer has many expert MLPs; a router sends each token to a few (Mixtral: 2 of 8). Total capacity is large but compute per token is small (DeepSeek-V3: 671B total, ~37B active)."},
+  {"id":"h1-5-c","front":"What does 'natively multimodal' mean? Give an example.","back":"One network trained on several modalities (text, images, audio) that can take them in and produce them directly, with no bolted-on pipeline. E.g. Gemini (2023), GPT-4o (2024)."},
+  {"id":"h1-5-d","front":"What are reasoning models, and how were they trained? Name two.","back":"Models trained with reinforcement learning (often on automatically checkable problems) to think step by step before answering; more thinking improves hard-problem accuracy. OpenAI o1 (Sept 2024), DeepSeek-R1 (Jan 2025, open weights)."},
+  {"id":"h1-5-e","front":"What is an AI agent, and what did late 2024 add?","back":"A model in a loop that chooses actions, calls tools and reads results until a task is done. Late 2024: computer use (operating a screen) and the Model Context Protocol (MCP) for connecting tools."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/h1-timeline-kit.js"></script>
+<script src="../assets/js/anims/h1-5-timeline.js"></script>
+</body>
+</html>

@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="g1-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GANs · LLMs, Animated</title>
+<meta name="description" content="Generative adversarial networks: a generator and a discriminator in a minimax game, the non-saturating loss, mode collapse, DCGAN, WGAN, StyleGAN, and where adversarial training lives on today.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>GANs</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Image generation</span></div>
+<p class="lede">What if, instead of writing down a loss for "looks real", you <em>trained</em> one? A generative adversarial network pits a forger against a detective. For about five years (roughly 2015 to 2020) this game produced the sharpest images any model could make.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write the GAN minimax objective and the optimal discriminator.</li>
+    <li>Explain why the generator uses the non-saturating loss, with numbers.</li>
+    <li>Describe mode collapse and instability, what DCGAN, WGAN and StyleGAN changed, and where adversarial losses are used today.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> this lesson builds on <a href="p6-1.html">P6.1 CNNs: filters, pooling &amp; receptive fields</a>, since both GAN networks are convolutional for images. Helpful but optional: <a href="g1-1.html">G1.1 Variational autoencoders</a> (the generative-modeling goal) and <a href="p1-6.html">P1.6 Entropy, cross-entropy &amp; KL</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; the lesson will tell you why.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In a GAN, how does the generator learn what real images look like?</p>
+    <ol class="q-src">
+      <li>It compares each fake pixel-by-pixel with a matching real image</li>
+      <li>Only through the discriminator's feedback: gradients of the discriminator's verdict on its fakes</li>
+      <li>It copies random training images and adds noise</li>
+      <li>It reads captions of the real images</li>
+    </ol>
+    <div class="q-explain">The generator never sees real data. All it gets is how the discriminator's "real or fake?" score would change if its output changed, which is a gradient.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A GAN trained on photos of many dog breeds only ever produces golden retrievers, all looking alike. This is called…</p>
+    <ol class="q-src">
+      <li>Overfitting</li>
+      <li>Vanishing gradients</li>
+      <li>Mode collapse</li>
+      <li>Posterior collapse</li>
+    </ol>
+    <div class="q-explain">The generator found one "mode" of the data that fools the discriminator and stopped covering the rest. Posterior collapse is a different failure, in VAEs.</div>
+  </div>
+</section>
+
+<h2>Two networks, one game, one trick</h2>
+<p>In 2014, Ian Goodfellow and colleagues ("Generative Adversarial Nets") proposed training <strong>two</strong> networks against each other. The <strong>generator</strong> $G$ turns a random noise vector $z \sim \mathcal{N}(0, I)$ into a sample $G(z)$. The <strong>discriminator</strong> $D$ takes an image and outputs $D(x)$, its probability that $x$ is real. $D$ is trained to be right; $G$ is trained to make $D$ wrong. Their objective is a <strong>minimax</strong> game:</p>
+$$\min_G \max_D \; V(D, G) = \mathbb{E}_{x \sim p_{\text{data}}}\big[\log D(x)\big] + \mathbb{E}_{z \sim p(z)}\big[\log\big(1 - D(G(z))\big)\big]$$
+<p>The first term rewards $D$ for saying "real" on real data; the second for saying "fake" on fakes. $D$ maximizes $V$ (it's ordinary binary cross-entropy, sign flipped), and $G$ minimizes the second term by pushing $D(G(z))$ up. Training alternates: a few gradient steps on $D$, then one on $G$.</p>
+
+<figure class="anim wide" data-anim="g1-2-gan"></figure>
+
+<p>Goodfellow et al. showed what this game converges to in the ideal case. For a fixed generator, the best discriminator is</p>
+$$D^*(x) = \frac{p_{\text{data}}(x)}{p_{\text{data}}(x) + p_g(x)}$$
+<p>where $p_g$ is the distribution of the generator's samples. Plugging $D^*$ back in gives $V = -\log 4 + 2\,\mathrm{JSD}(p_{\text{data}} \,\|\, p_g)$, where JSD is the Jensen–Shannon divergence, a symmetric cousin of KL. So the generator is, in effect, minimizing a divergence to the data, and the global optimum is $p_g = p_{\text{data}}$, where $D^* = \tfrac12$ everywhere.</p>
+<p>Notice what is missing: no likelihood, no reconstruction loss, no blur-inducing averaging. The discriminator <em>is</em> the loss function, and it is learned. That's why GAN samples were so sharp.</p>
+
+<h3>The non-saturating trick</h3>
+<p>The minimax objective has a practical flaw. Early in training the fakes are terrible, so $D$ rejects them confidently: $D(G(z)) \approx 0$. Exactly then, the generator's loss $\log(1 - D(G(z)))$ is flat, so $G$ gets almost no gradient when it needs one most.</p>
+<p>Goodfellow et al. suggested a fix that every practical GAN uses: instead of minimizing $\log(1 - D(G(z)))$, the generator <strong>maximizes</strong> $\log D(G(z))$, that is, minimizes $-\log D(G(z))$. Same goal (make $D$ say "real"), very different gradients. This is the <strong>non-saturating</strong> loss.</p>
+
+<h3>Worked example</h3>
+<p>$D$ ends in a sigmoid: $D = \sigma(a)$, where $a$ is the logit. Suppose a fake gets $D(G(z)) = 0.01$. Compare the gradient each generator loss sends back through $a$:</p>
+<ol class="steps">
+  <li>Saturating: $\frac{d}{da}\log(1-\sigma(a)) = -\sigma(a) = -0.01$. A whisper.</li>
+  <li>Non-saturating: $\frac{d}{da}\big(-\log\sigma(a)\big) = -(1-\sigma(a)) = -0.99$. A shout.</li>
+  <li>Same direction, but $0.99 / 0.01 = 99$ times stronger, precisely when the generator is losing badly.</li>
+</ol>
+
+<section class="card" aria-labelledby="fd1">
+  <div class="card-label" id="fd1">Your turn · faded example</div>
+  <ol class="steps">
+    <li>At some point $x$, $p_{\text{data}}(x) = 0.3$ and $p_g(x) = 0.1$. Optimal $D^*(x) =$ <span class="blank" data-answer="0.75" data-tol="0.005" data-hint="0.3 / (0.3 + 0.1)."></span></li>
+    <li>At another point, $p_{\text{data}} = 0.2$ and $p_g = 0.6$ (too many fakes there). $D^* =$ <span class="blank" data-answer="0.25" data-tol="0.005" data-hint="0.2 / (0.2 + 0.6)."></span></li>
+    <li>A fake gets $D = 0.1$. The size of the non-saturating gradient through the logit, $1 - D$, is <span class="blank" data-answer="0.9" data-tol="0.005" data-hint="1 − σ(a), with σ(a) = 0.1."></span>; the saturating one, $D$, is only 0.1.</li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why do practical GANs train the generator to minimize $-\log D(G(z))$ instead of $\log(1 - D(G(z)))$?</p>
+  <ol class="q-src">
+    <li>It changes the optimum to a different distribution</li>
+    <li>It makes the discriminator train faster</li>
+    <li>It gives strong gradients when the discriminator confidently rejects the fakes, which is exactly early in training</li>
+    <li>It removes the need for a discriminator</li>
+  </ol>
+  <div class="q-explain">Both losses push $D(G(z))$ up, but $\log(1 - D)$ is flat near $D = 0$. With $D = 0.01$ the non-saturating gradient is 99× larger.</div>
+</div></div>
+
+<h2>Hard to train, still everywhere</h2>
+<p>A minimax game is not a downhill slide. Each player's loss landscape moves whenever the other updates, so training can <strong>oscillate</strong> or diverge instead of converging, and success depended on careful balancing of learning rates, architectures and tricks. The most famous failure is <strong>mode collapse</strong>: the generator maps many different $z$ to the same few outputs that currently fool $D$. Nothing in the loss directly rewards <em>covering</em> all of the data, only fooling the discriminator, as the last step of the animation shows.</p>
+<p>A run of papers made GANs workable:</p>
+<ul>
+  <li><strong>DCGAN</strong> (Radford, Metz &amp; Chintala, 2015): architecture rules that made convolutional GANs train reliably: strided convolutions instead of pooling, batch normalization, ReLU in $G$ and LeakyReLU in $D$, no fully connected hidden layers.</li>
+  <li><strong>WGAN</strong> (Arjovsky, Chintala &amp; Bottou, 2017): replace the classifier with a <em>critic</em> that estimates the Wasserstein ("earth mover's") distance, which gives useful gradients even when real and fake don't overlap. The critic must be smooth (Lipschitz): first enforced by clipping weights, then by a gradient penalty (WGAN-GP, Gulrajani et al., 2017) and later spectral normalization (Miyato et al., 2018).</li>
+  <li><strong>Progressive growing</strong> (Karras et al., 2018) and <strong>StyleGAN</strong> (Karras, Laine &amp; Aila, 2019): StyleGAN maps $z$ through an MLP to an intermediate code $w$ that modulates every layer's features ("styles"), plus per-pixel noise for fine texture. Its 1024×1024 faces were, for many people, the first AI images indistinguishable from photos. BigGAN (Brock et al., 2018) scaled class-conditional GANs on ImageNet.</li>
+</ul>
+<p>Quality was measured with the <strong>FID</strong> (Fréchet Inception Distance, Heusel et al., 2017), which compares statistics of real and generated images in a pretrained network's feature space; lower is better. Diffusion models later report their wins on the same metric.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-g1-2.webp" alt="A young fox painter copies landscape paintings while an owl inspector with a magnifying glass compares them with real ones on the wall." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A young <strong>fox painter</strong> wants to paint landscapes so good they could hang in the gallery. An <strong>owl inspector</strong> with a magnifying glass compares each new painting with the real ones on the wall and says "real" or "copy".</p>
+      <p>Every time the owl spots a copy, the fox learns <em>what gave it away</em> and fixes that. Every time the fox gets better, the owl looks closer. They both improve until the owl just shrugs: it can't tell any more.</p>
+      <p>Where it breaks: a sneaky fox might paint the <em>same</em> mountain over and over because the owl liked it once (mode collapse). Real GANs are not two characters taking polite turns; they are two networks nudging numbers, and sometimes they chase each other in circles forever.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Where GAN ideas live today</h3>
+<p>From about 2021, diffusion models overtook GANs for general image generation: they train stably, cover the whole data distribution instead of collapsing to modes, and scale smoothly with text conditioning (G1.3, G1.4). GigaGAN (Kang et al., 2023) showed a scaled-up GAN can do text-to-image too, but it remained the exception. As of 2026, very few leading image generators are GANs.</p>
+<p>The <strong>adversarial loss</strong> itself, though, is everywhere, usually as a helper next to another objective:</p>
+<ul>
+  <li><strong>Autoencoder decoders.</strong> VQGAN (Esser et al., 2021) added a patch-based discriminator to a VQ-VAE so decoded images are sharp rather than blurry. The autoencoder inside Stable Diffusion (G1.4) is trained with reconstruction, perceptual and patch-adversarial losses for the same reason.</li>
+  <li><strong>Audio.</strong> Vocoders such as HiFi-GAN (2020) and neural audio codecs such as SoundStream (2021) and EnCodec (2022) use discriminators to make decoded sound crisp (A1.3).</li>
+  <li><strong>Few-step diffusion.</strong> Adversarial Diffusion Distillation (ADD; Sauer et al., 2023) trains a student diffusion model to produce good images in 1–4 steps, using a discriminator plus a diffusion teacher. It powers SDXL Turbo; similar adversarial distillation is used in other fast models (G1.5).</li>
+</ul>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> a GAN optimizes its generator against a <em>learned</em> judge, and a generator can find the judge's blind spots. RLHF (M3.2, M3.3) has the same shape: the policy is optimized against a learned reward model, and over-optimizing it produces outputs that score high but aren't better (reward hacking). The common lesson: a learned critic is only trustworthy near the data it was trained on.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In which of these does an adversarial (GAN-style) loss commonly appear in 2026-era systems?</p>
+  <ol class="q-src">
+    <li>The tokenizer of a text-only LLM</li>
+    <li>Training the decoder of an image or audio autoencoder, and distilling diffusion models into 1–4 step generators</li>
+    <li>Computing attention weights</li>
+    <li>The forward noising process of diffusion</li>
+  </ol>
+  <div class="q-explain">Discriminators are used as a sharpening loss for decoders (VQGAN, Stable Diffusion's VAE, audio codecs) and in adversarial distillation such as ADD.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a friend how a GAN learns, and name one way the training can go wrong.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A generator turns random noise into images and a discriminator tries to tell them from real ones; the discriminator trains to classify correctly, and the generator trains, through the discriminator's gradients, to make its fakes classified as real. At the ideal end, fakes match the data and the discriminator can only guess. It can go wrong through mode collapse, where the generator produces only a few kinds of output that fool the discriminator, or through oscillation, where neither network settles.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">For a fixed generator, which formula gives the optimal discriminator?</p>
+    <ol class="q-src">
+      <li>$D^*(x) = p_g(x) / p_{\text{data}}(x)$</li>
+      <li>$D^*(x) = p_{\text{data}}(x) - p_g(x)$</li>
+      <li>$D^*(x) = p_{\text{data}}(x) / \big(p_{\text{data}}(x) + p_g(x)\big)$</li>
+      <li>$D^*(x) = \tfrac12$ always</li>
+    </ol>
+    <div class="q-explain">It's the probability that a point at $x$ came from the data rather than the generator. It equals ½ everywhere only once $p_g = p_{\text{data}}$.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What does StyleGAN's mapping network do?</p>
+    <ol class="q-src">
+      <li>Maps noise $z$ to an intermediate code $w$ that modulates ("styles") the features at every generator layer</li>
+      <li>Maps images to captions</li>
+      <li>Maps the discriminator's output to a Wasserstein distance</li>
+      <li>Maps low-resolution images to tokens</li>
+    </ol>
+    <div class="q-explain">Feeding $w$ in at every layer, coarse to fine, gave StyleGAN control over pose, face shape, colour and texture at different scales.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">From M3.2: an RLHF policy learns to score highly on a learned reward model without actually getting better. Which GAN behaviour is most similar?</p>
+    <ol class="q-src">
+      <li>Batch normalization in DCGAN</li>
+      <li>The discriminator reaching $D = \tfrac12$</li>
+      <li>Using a mapping network</li>
+      <li>The generator exploiting a weak discriminator's blind spots, for example by collapsing to a few outputs it accepts</li>
+    </ol>
+    <div class="q-explain">In both cases a generator is optimized against a learned judge and finds outputs the judge over-rates. That's reward hacking in RLHF and mode collapse or artifacts in GANs.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Why did diffusion overtake GANs for general text-to-image generation?</p>
+    <ol class="q-src">
+      <li>Diffusion needs only one network call per image</li>
+      <li>Its training is a stable regression that covers the whole distribution, and it scaled smoothly with data, compute and text conditioning</li>
+      <li>GANs cannot produce sharp images</li>
+      <li>GANs cannot be conditioned on anything</li>
+    </ol>
+    <div class="q-explain">GANs are fast and sharp, but their adversarial training is fragile and prone to mode collapse. Diffusion traded sampling speed for stability and coverage.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A GAN trains a generator against a learned discriminator: $\min_G \max_D \mathbb{E}[\log D(x)] + \mathbb{E}[\log(1 - D(G(z)))]$.</li>
+    <li>The optimal discriminator is $p_{\text{data}}/(p_{\text{data}} + p_g)$; at the ideal end it outputs ½ everywhere.</li>
+    <li>Generators use the <strong>non-saturating</strong> loss $-\log D(G(z))$ for strong early gradients.</li>
+    <li>GANs are sharp but unstable and prone to <strong>mode collapse</strong>; DCGAN, WGAN and StyleGAN made them work.</li>
+    <li>Today the adversarial loss lives on in autoencoder decoders, audio codecs and fast diffusion distillation (ADD).</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"g1-2-a","front":"Write the GAN minimax objective.","back":"$\\min_G \\max_D \\; \\mathbb{E}_{x}[\\log D(x)] + \\mathbb{E}_{z}[\\log(1 - D(G(z)))]$: $D$ classifies real vs fake, $G$ tries to fool it."},
+  {"id":"g1-2-b","front":"What is the optimal discriminator for a fixed generator?","back":"$D^*(x) = p_{\\text{data}}(x)/(p_{\\text{data}}(x) + p_g(x))$; it is ½ everywhere when $p_g = p_{\\text{data}}$."},
+  {"id":"g1-2-c","front":"What is the non-saturating generator loss and why use it?","back":"Minimize $-\\log D(G(z))$ instead of $\\log(1 - D(G(z)))$. When $D$ rejects fakes ($D \\approx 0$) its gradient through the logit is ≈ 1 instead of ≈ 0."},
+  {"id":"g1-2-d","front":"What is mode collapse?","back":"The generator maps many noise vectors to a few outputs that fool the discriminator, covering only part of the data distribution."},
+  {"id":"g1-2-e","front":"What did WGAN and StyleGAN contribute?","back":"WGAN (2017): a critic estimating the Wasserstein distance, with Lipschitz constraints, for more stable gradients. StyleGAN (2019): a mapping network $z \\to w$ that styles every layer, giving photoreal 1024×1024 faces."},
+  {"id":"g1-2-f","front":"Where do adversarial losses appear in modern generators?","back":"In autoencoder/codec decoders (VQGAN, Stable Diffusion's VAE, SoundStream/EnCodec) for sharpness, and in adversarial distillation (ADD, 2023) for 1–4 step diffusion."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/g1-toy.js"></script>
+<script src="../assets/js/anims/g1-2-gan.js"></script>
+</body>
+</html>

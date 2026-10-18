@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p5-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Markov chains &amp; sampling · LLMs, Animated</title>
+<meta name="description" content="States and transition matrices, pushing a distribution through a chain, stationary distributions, ancestral sampling, Metropolis–Hastings in words, and Langevin dynamics, the bridge to score-based diffusion. With a Langevin playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Markov chains &amp; sampling</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Math for generative models</span></div>
+<p class="lede">Generating is mostly "take a random step, then another": a token after a token, a denoising step after a denoising step. A <strong>Markov chain</strong> is the mathematics of such random walks. Run long enough, many chains settle into a fixed distribution, and that turns them into a way to <strong>sample</strong> from distributions you could never sample directly.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write a transition matrix and push a distribution through it with $\pi_{t+1} = \pi_t P$.</li>
+    <li>Find a stationary distribution and explain why many chains forget where they started.</li>
+    <li>Explain how Metropolis–Hastings and Langevin dynamics use a chain to sample from a distribution known only up to a constant, and how that leads to score-based diffusion.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> distributions, conditional probability and sampling from <a href="p1-5.html">Probability &amp; expectation (P1.5)</a>. Helpful but optional: <a href="p1-2.html">Matrices as transformations (P1.2)</a> for $\pi P$, and <a href="p1-4.html">Gradients (P1.4)</a> for the Langevin byte. This lesson feeds <a href="g1-3.html">Diffusion from scratch (G1.3)</a> and, through the same state-and-transition picture, <a href="rl-1.html">Agents, environments &amp; rewards (RL.1)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Tomorrow's weather depends only on today's (sunny today: 70% sunny tomorrow, and so on). You know it's sunny today. How much does that tell you about the weather a year from now?</p>
+    <ol class="q-src">
+      <li>A lot: sunny days lead to sunny days</li>
+      <li>Everything: the chain is deterministic</li>
+      <li>Almost nothing: after many steps the chain forgets where it started</li>
+      <li>It guarantees rain, to balance out</li>
+    </ol>
+    <div class="q-explain">Each step mixes the possibilities. After a few dozen steps the probabilities settle into the chain's <strong>stationary distribution</strong>, whatever today was.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">When an LLM samples its next token, what does that choice depend on?</p>
+    <ol class="q-src">
+      <li>Only the previous token</li>
+      <li>The whole context so far (up to the context window)</li>
+      <li>Nothing: each token is drawn independently</li>
+      <li>Only the first token of the prompt</li>
+    </ol>
+    <div class="q-explain">It conditions on everything it can see. If you call the <em>entire context</em> the state, generation is a Markov chain, but one over ever-growing sequences, not over single tokens.</div>
+  </div>
+</section>
+
+<h2>States, transitions and the Markov property</h2>
+<p>In 1906 the Russian mathematician Andrey Markov set out to show that the law of large numbers can hold even when events depend on each other. He invented chains in which each step depends only on the one before. In 1913 he put them to work on 20,000 letters of Pushkin's poem <em>Eugene Onegin</em>, counting how often a vowel follows a vowel or a consonant, arguably the first statistical language model.</p>
+<p>A <strong>Markov chain</strong> has a set of <strong>states</strong> and moves between them at random, with one rule, the <strong>Markov property</strong>: the next state depends only on the current one, not on the path that led there.</p>
+$$P(X_{t+1} \mid X_t, X_{t-1}, \dots, X_0) = P(X_{t+1} \mid X_t)$$
+<p>For a handful of states, the rules fit in a <strong>transition matrix</strong> $P$, where $P_{ij}$ is the probability of moving from state $i$ to state $j$. Each row is a probability distribution (<a href="p1-5.html">P1.5</a>), so every row sums to 1. If $\pi_t$ is a row vector holding the probability of each state at time $t$, one step of the chain is one vector-matrix product (<a href="p1-2.html">P1.2</a>):</p>
+$$\pi_{t+1} = \pi_t\,P \qquad\text{so}\qquad \pi_t = \pi_0\,P^t$$
+
+<figure class="anim wide" data-anim="p5-3-markov"></figure>
+
+<h3>Worked example</h3>
+<p>From the animation: $\pi_1 = (0.7, 0.2, 0.1)$. Each entry of $\pi_2$ is $\pi_1$ dotted with a <em>column</em> of $P$:</p>
+<ol class="steps">
+  <li>Sunny: $0.7 \times 0.7 + 0.2 \times 0.2 + 0.1 \times 0.2 = 0.49 + 0.04 + 0.02 = 0.55$</li>
+  <li>Cloudy: $0.7 \times 0.2 + 0.2 \times 0.6 + 0.1 \times 0.4 = 0.14 + 0.12 + 0.04 = 0.30$</li>
+  <li>Rainy: $0.7 \times 0.1 + 0.2 \times 0.2 + 0.1 \times 0.4 = 0.07 + 0.04 + 0.04 = 0.15$</li>
+  <li>Check: $0.55 + 0.30 + 0.15 = 1$ ✓ (a distribution times a transition matrix stays a distribution)</li>
+</ol>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Which of these could be a row of a transition matrix?</p>
+  <ol class="q-src">
+    <li>$(0.5, 0.5, 0.5)$</li>
+    <li>$(1.2, -0.2, 0)$</li>
+    <li>$(0.3, 0.3, 0.3)$</li>
+    <li>$(0, 0, 1)$</li>
+  </ol>
+  <div class="q-explain">A row is the distribution of the next state, so it needs non-negative entries summing to 1. $(0, 0, 1)$ means "from here, always go to state 3", which is allowed.</div>
+</div></div>
+
+<h2>The stationary distribution</h2>
+<p>In the animation the bars stopped moving at $(0.4, 0.4, 0.2)$, and they got there from a sunny start and from a rainy one. That limit is the <strong>stationary distribution</strong> $\pi$: one step of the chain leaves it unchanged,</p>
+$$\pi P = \pi, \qquad \sum_i \pi_i = 1$$
+<p>Check it for the weather chain: the Sunny entry of $\pi P$ is $0.4 \times 0.7 + 0.4 \times 0.2 + 0.2 \times 0.2 = 0.28 + 0.08 + 0.04 = 0.4$ ✓.</p>
+<p>When does every start lead to the same $\pi$? For a finite chain, two conditions are enough. It must be <strong>irreducible</strong> (every state can eventually reach every other) and <strong>aperiodic</strong> (it doesn't cycle on a fixed timetable, like A→B→A→B). Then $\pi$ is unique and $\pi_0 P^t \to \pi$ from any $\pi_0$. A single long run also spends a fraction $\pi_i$ of its time in state $i$, which is why the lone walker at the end of the animation reproduced $\pi$.</p>
+<p>The most famous stationary distribution is Google's PageRank (Brin &amp; Page, 1998): imagine a surfer clicking random links forever, and rank each page by the share of time spent on it.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-p5-3.webp" alt="A frog hopping between four lily pads, with dotted arrows of different thickness showing where it might hop next from its current pad." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A frog lives on four lily pads. Every minute it hops. From each pad, some hops are popular (thick arrows) and some are rare (thin arrows). The frog doesn't remember where it was before; it only looks at the pad it's sitting on. That's the <strong>Markov property</strong>.</p>
+      <p>Watch the frog all day and count where it sits. Some pads get lots of visits, some few. Come back tomorrow and the counts have the same shares, no matter which pad the frog started on. Those shares are the <strong>stationary distribution</strong>.</p>
+      <p class="math-note">Where it breaks: a real frog might get tired or hungry and change its habits. A Markov chain's arrows never change, and it has no memory at all.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Your turn (faded example)</h3>
+<p>A two-state chain: from A, stay in A with probability 0.9 (go to B with 0.1); from B, go to A with 0.5 (stay in B with 0.5). Start in A.</p>
+<ol class="steps">
+  <li>$\pi_1$ for state A: <span class="blank" data-answer="0.9" data-tol="0.001" data-hint="Starting in A for sure, π₁ is just A's row."></span></li>
+  <li>$\pi_2$ for state A: <span class="blank" data-answer="0.86" data-tol="0.001" data-hint="0.9 × 0.9 (stay in A) + 0.1 × 0.5 (come back from B)."></span></li>
+  <li>Stationary probability of A, to three decimals: <span class="blank" data-answer="0.833" data-tol="0.002" data-hint="In balance, the flow A→B equals the flow B→A: 0.1·π_A = 0.5·π_B, with π_A + π_B = 1."></span></li>
+</ol>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A chain alternates deterministically: A→B→A→B… Why does it <em>not</em> converge to a stationary distribution from a start in A?</p>
+  <ol class="q-src">
+    <li>It is periodic: $\pi_t$ flips between $(1, 0)$ and $(0, 1)$ forever</li>
+    <li>It is not irreducible: B can't reach A</li>
+    <li>Its rows don't sum to 1</li>
+    <li>It has no stationary distribution at all</li>
+  </ol>
+  <div class="q-explain">$(0.5, 0.5)$ <em>is</em> stationary for this chain, but starting from A the distribution never settles; it alternates. That's what the aperiodicity condition rules out.</div>
+</div></div>
+
+<h2>Sampling with chains: ancestral sampling and MCMC</h2>
+<p>Generative models use chains in two quite different ways.</p>
+<p><strong>Ancestral sampling</strong> generates variables in order, parents before children, drawing each from its distribution given what's already drawn. The latent-variable model of <a href="p5-2.html">P5.2</a> does it in two steps: $z \sim p(z)$, then $x \sim p(x \mid z)$. A diffusion model does it in many: start from pure noise $x_T$, then draw $x_{T-1}$ given $x_T$, and so on down to an image $x_0$ (<a href="g1-3.html">G1.3</a>). Each step looks only at the current noisy image, so the reverse process is a Markov chain.</p>
+<p>An LLM also samples ancestrally, one token at a time (<a href="m1-5.html">M1.5</a>). But be careful with the word "Markov" here. Each token depends on the <em>whole</em> context, not on the last token. Generation is a Markov chain only if the state is the entire sequence so far. A chain whose state is just the last token is a bigram model, the kind Claude Shannon used in 1948 to generate eerie, almost-English word salad.</p>
+<p><strong>Markov chain Monte Carlo (MCMC)</strong> runs the logic of the previous byte backwards. Instead of asking "what is this chain's stationary distribution?", it asks "can I design a chain whose stationary distribution is the $p(x)$ I want?". That's useful when you can evaluate $p$ only up to an unknown constant, $\tilde p(x) = Z\,p(x)$, which is exactly the situation of the intractable evidence in <a href="p5-2.html">P5.2</a>.</p>
+<p>The classic recipe, <strong>Metropolis–Hastings</strong> (Metropolis et al., 1953, at Los Alamos; generalised by Hastings, 1970), in words:</p>
+<ol class="steps">
+  <li>From the current point $x$, propose a random nearby point $x'$.</li>
+  <li>If $x'$ is more probable, move there. If it's less probable, move there only with probability $\tilde p(x') / \tilde p(x)$; otherwise stay put. (For a symmetric proposal, the acceptance probability is $\min\big(1, \tilde p(x') / \tilde p(x)\big)$.)</li>
+  <li>Repeat. After a burn-in period, the visited points are (correlated) samples from $p$.</li>
+</ol>
+<p>The unknown constant $Z$ cancels in the ratio, so it is never needed. Uphill moves are always taken and downhill moves sometimes, which is what lets the walker cover the whole distribution instead of getting stuck on the peak.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why can Metropolis–Hastings sample from $p(x) = \tilde p(x) / Z$ without ever computing $Z$?</p>
+  <ol class="q-src">
+    <li>It estimates $Z$ first, using a separate chain</li>
+    <li>It only works when $Z = 1$</li>
+    <li>It only uses ratios $\tilde p(x') / \tilde p(x)$, in which $Z$ cancels</li>
+    <li>It rejects every downhill move, so $Z$ doesn't matter</li>
+  </ol>
+  <div class="q-explain">$p(x') / p(x) = \tilde p(x') / \tilde p(x)$. And it does accept some downhill moves; that's essential for covering the distribution.</div>
+</div></div>
+
+<h2>Langevin dynamics: follow the score, add noise</h2>
+<p>Metropolis–Hastings proposes blindly. If you can also compute which way the probability rises, you can do much better. That direction is the <strong>score</strong>, the gradient of the log-density, $\nabla_x \log p(x)$ (<a href="p1-4.html">P1.4</a>). Like the Metropolis ratio, it ignores $Z$: $\nabla_x \log \big(\tilde p(x)/Z\big) = \nabla_x \log \tilde p(x)$, because the constant's log has zero gradient.</p>
+<p><strong>Langevin dynamics</strong>, named after Paul Langevin's 1908 equation for particles jostled by molecules (Brownian motion), takes a small step up the score and adds fresh Gaussian noise:</p>
+$$x \;\leftarrow\; x + \frac{\eta}{2}\,\nabla_x \log p(x) + \sqrt{\eta}\;z, \qquad z \sim \mathcal N(\mathbf 0, \mathbf I)$$
+<p>$\eta$ is the step size. The first term is gradient <em>ascent</em> on $\log p$ (<a href="p2-2.html">P2.2</a>), which on its own would drag every point to the nearest peak. The noise term (<a href="p5-1.html">P5.1</a>) keeps knocking points around, and the two balance exactly so that, for small $\eta$ and many steps, the points end up distributed as $p$. Each update depends only on the current $x$: it's a Markov chain whose stationary distribution is (approximately) $p$. Try it:</p>
+
+<div class="playground" id="p5-3-langevin-playground">
+  <h3>Playground: 500 particles following the score</h3>
+  <p class="math-note" style="margin:0">Target $p(x) = 0.3\,\mathcal N(-1.4, 0.6^2) + 0.7\,\mathcal N(1.2, 0.8^2)$. Every particle starts near $x = -4$ and repeats $x \leftarrow x + \frac{\eta}{2}\nabla\log p(x) + \sqrt\eta\,z$. The dashed line marks the dip between the bumps.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Step size η = <output>0.10</output></span>
+      <input type="range" min="0.01" max="0.3" step="0.01" value="0.1">
+    </label>
+    <div class="pg-buttons">
+      <button type="button" class="btn btn-primary" data-act="run">Run 300 steps</button>
+      <button type="button" class="btn" data-act="step">Step ×10</button>
+      <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+    </div>
+  </div>
+  <div class="chips" role="group" aria-label="Noise term" style="margin-top:12px">
+    <button type="button" class="chip" data-noise="on" aria-pressed="true">Noise on (Langevin)</button>
+    <button type="button" class="chip" data-noise="off" aria-pressed="false">Noise off (gradient ascent)</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<p>With the noise on, the particles flow up the slope, spill over the dip, and fill both bumps in roughly the right proportions (about 70% on the right). With the noise off, every particle piles onto the left peak, the nearest one, and stays: that's an optimizer, not a sampler. Notice also how slowly particles cross the dip: real samplers struggle most with separated modes.</p>
+<p><strong>The bridge to diffusion.</strong> Langevin needs the score of the data distribution, which nobody knows for images. Song &amp; Ermon (2019) <em>trained</em> a network $s_\theta(x) \approx \nabla_x \log p(x)$ on noisy copies of the data at many noise levels, then generated images by running Langevin dynamics while lowering the noise level (annealed Langevin). Song et al. (2021) showed that this and DDPM-style diffusion are two views of the same process: each reverse diffusion step is a small move along a learned score plus fresh noise. That's the sampler you'll build in <a href="g1-3.html">G1.3</a>, and the reason <a href="g1-5.html">flow matching (G1.5)</a> asks whether the noise can be dropped altogether.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> temperature sampling, top-p and beam search are all choices about how to walk the token-by-token chain (<a href="m1-5.html">M1.5</a>), and "sample many chains, then vote or verify" is a core test-time-compute trick (<a href="rs-2.html">RS.2</a>). The same state-to-state picture, with actions added, becomes the Markov decision process behind reinforcement learning and RLHF (<a href="rl-1.html">RL.1</a>).</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In the playground, why did turning the noise off make every particle end on the left peak?</p>
+  <ol class="q-src">
+    <li>Because the left peak has the higher probability</li>
+    <li>Without noise the update is gradient ascent on $\log p$, which climbs to the nearest peak and stops</li>
+    <li>Because the step size becomes zero</li>
+    <li>Because the score is zero everywhere on the left</li>
+  </ol>
+  <div class="q-explain">All particles started on the left, so the nearest peak is the left one, even though it holds only 30% of the probability. The noise is what lets Langevin sample instead of optimise.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">How can a Markov chain help you sample from a distribution you can only evaluate up to a constant?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Design the chain's transitions so that its stationary distribution is the target $p$: Metropolis–Hastings accepts moves using ratios of $\tilde p$, and Langevin dynamics steps along $\nabla \log \tilde p$ plus noise. Neither needs the constant, and after enough steps the chain's states are samples from $p$, whatever the starting point.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which statement is the Markov property?</p>
+    <ol class="q-src">
+      <li>All states are equally likely in the long run</li>
+      <li>Given the current state, the next state doesn't depend on earlier ones</li>
+      <li>The chain never visits a state twice</li>
+      <li>The transition matrix is symmetric</li>
+    </ol>
+    <div class="q-explain">$P(X_{t+1} \mid X_t, \dots, X_0) = P(X_{t+1} \mid X_t)$. The present carries everything the future needs.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A two-state chain has $P = \begin{pmatrix} 0.5 & 0.5 \\ 0.25 & 0.75 \end{pmatrix}$. What is the stationary probability of the first state?</p>
+    <ol class="q-src">
+      <li>$1/2$</li>
+      <li>$2/3$</li>
+      <li>$1/3$</li>
+      <li>$1/4$</li>
+    </ol>
+    <div class="q-explain">Balance the flows: $0.5\,\pi_1 = 0.25\,\pi_2$, so $\pi_2 = 2\pi_1$ and $\pi_1 = 1/3$. Check: $\tfrac13 \times 0.5 + \tfrac23 \times 0.25 = \tfrac13$ ✓.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why is an LLM's text generation only a Markov chain if the state is the whole context?</p>
+    <ol class="q-src">
+      <li>Because the next-token distribution depends on all previous tokens, not just the last one</li>
+      <li>Because LLMs sample with temperature</li>
+      <li>Because the vocabulary is too large for a transition matrix</li>
+      <li>It isn't a Markov chain under any choice of state</li>
+    </ol>
+    <div class="q-explain">The model computes $P(\text{next} \mid \text{all previous tokens})$. Taking the full prefix as the state makes the Markov property hold trivially; a last-token state would be a bigram model.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">(From P2.2) Drop the noise term from Langevin dynamics. What's left?</p>
+    <ol class="q-src">
+      <li>Gradient descent on $p(x)$ with learning rate $\eta$</li>
+      <li>Random-walk Metropolis</li>
+      <li>Ancestral sampling</li>
+      <li>Gradient ascent on $\log p(x)$ with step size $\eta / 2$</li>
+    </ol>
+    <div class="q-explain">$x \leftarrow x + \frac{\eta}{2}\nabla\log p(x)$ climbs the log-density, the mirror image of $\theta \leftarrow \theta - \eta\nabla L$. It finds a mode instead of drawing samples.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A <strong>Markov chain</strong>: the next state depends only on the current one. Rows of the transition matrix $P$ sum to 1, and $\pi_{t+1} = \pi_t P$.</li>
+    <li>An irreducible, aperiodic finite chain converges to a unique <strong>stationary distribution</strong> $\pi = \pi P$ from any start.</li>
+    <li><strong>Ancestral sampling</strong> draws parents first: latent then data, token after token (state = whole context), noise to image.</li>
+    <li><strong>MCMC</strong> builds a chain whose stationary distribution is your target; Metropolis–Hastings needs only ratios, so the normalising constant cancels.</li>
+    <li><strong>Langevin</strong>: $x \leftarrow x + \frac{\eta}{2}\nabla\log p(x) + \sqrt\eta\,z$. With a learned score, this becomes score-based diffusion.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p5-3-a","front":"State the Markov property.","back":"$P(X_{t+1} \\mid X_t, X_{t-1}, \\dots, X_0) = P(X_{t+1} \\mid X_t)$: given the present state, the past adds nothing about the next step."},
+  {"id":"p5-3-b","front":"How do you push a distribution one step through a chain, and what is a stationary distribution?","back":"$\\pi_{t+1} = \\pi_t P$ (row vector times transition matrix, rows of $P$ sum to 1). A stationary $\\pi$ satisfies $\\pi P = \\pi$; irreducible, aperiodic finite chains converge to it from any start."},
+  {"id":"p5-3-c","front":"Metropolis–Hastings in words (symmetric proposal).","back":"Propose a nearby $x'$; accept with probability $\\min(1, \\tilde p(x')/\\tilde p(x))$, otherwise stay. Repeat. The normalising constant cancels in the ratio, and the chain's stationary distribution is $p$."},
+  {"id":"p5-3-d","front":"Write the Langevin dynamics update and name each term.","back":"$x \\leftarrow x + \\frac{\\eta}{2}\\nabla_x \\log p(x) + \\sqrt{\\eta}\\,z$, $z \\sim \\mathcal N(0, I)$: a step up the score (gradient of log-density) plus fresh noise. Without the noise it's gradient ascent to a mode."},
+  {"id":"p5-3-e","front":"In what sense is LLM generation a Markov chain?","back":"Only if the state is the whole context so far: each token is sampled from $P(\\text{next} \\mid \\text{all previous tokens})$. A chain over just the last token would be a bigram model."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p5-3-markov.js"></script>
+<script src="../assets/js/anims/p5-3-langevin-playground.js"></script>
+</body>
+</html>

@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="a1-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Text-to-speech &amp; voice · LLMs, Animated</title>
+<meta name="description" content="How machines learned to talk: concatenative and parametric TTS, WaveNet, Tacotron 2 and FastSpeech, codec language models like VALL-E, flow-matching TTS, prosody, and the ethics of voice cloning.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Text-to-speech &amp; voice</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Audio &amp; speech</span></div>
+<p class="lede">Text-to-speech went from robotic to hard-to-tell-apart-from-human in about a decade. This lesson follows the main designs: two-stage neural TTS (text to spectrogram, spectrogram to wave), codec language models that clone a voice from three seconds of audio, and flow-matching models. It ends with the hard part that isn't technical: consent.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe the two-stage TTS pipeline (acoustic model + vocoder) and why FastSpeech made it non-autoregressive.</li>
+    <li>Explain how a codec language model such as VALL-E clones a voice from a short prompt.</li>
+    <li>Name the main misuse risks of voice cloning and the safeguards in use, including watermarking.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> you'll need <a href="a1-3.html">Neural audio codecs &amp; audio tokens (A1.3)</a>, since codec language models generate those tokens, and <a href="m1-5.html">KV cache &amp; sampling (M1.5)</a>, since they're sampled exactly like text. Helpful but optional: <a href="g1-5.html">Flow matching (G1.5)</a> for the last family of models.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; you'll find out below.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why is text-to-speech called a "one-to-many" problem?</p>
+    <ol class="q-src">
+      <li>One model must support many languages</li>
+      <li>One sentence becomes many tokens</li>
+      <li>One speaker can record many sentences</li>
+      <li>The same text can be spoken in many valid ways (speed, pitch, emphasis, emotion, voice)</li>
+    </ol>
+    <div class="q-explain">"Really?" can be curious, sarcastic or shocked. A model trained to output one average answer produces flat, muffled speech; good TTS has to pick one plausible way to say it.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">How much of a new speaker's audio did VALL-E (2023) need to imitate their voice?</p>
+    <ol class="q-src">
+      <li>About 3 seconds</li>
+      <li>About 30 minutes</li>
+      <li>About 20 hours of studio recordings</li>
+      <li>None; it only needs a written description</li>
+    </ol>
+    <div class="q-explain">A 3-second recording was enough as an acoustic prompt. That's a big part of why voice cloning now raises serious consent questions.</div>
+  </div>
+</section>
+
+<h2>From stitched recordings to WaveNet</h2>
+<p>Computers have talked since the 1960s, badly. Early <strong>formant synthesizers</strong> generated speech from hand-written acoustic rules: intelligible, unmistakably robotic. From the 1990s, <strong>concatenative</strong> or <strong>unit-selection</strong> systems recorded one voice actor for many hours, chopped the recordings into small units (parts of phonemes), and at runtime searched for units that joined smoothly (Hunt &amp; Black, 1996). They sounded natural when the right units existed, and glitchy when they didn't; changing the voice or the emotion meant recording a new database.</p>
+<p><strong>Statistical parametric</strong> synthesis (HMM-based systems in the 2000s, then neural networks) predicted acoustic parameters such as spectra and pitch, and a signal-processing <strong>vocoder</strong> turned those into sound. Flexible and small, but buzzy and muffled: averaging many plausible outputs smooths away detail.</p>
+<p>Every TTS system shares a <strong>front-end</strong>: normalize the text ("Dr." → "doctor", "3/4" → "three quarters" or "March fourth"), then convert graphemes to phonemes, which can need context ("I read it yesterday" vs "I read every day").</p>
+<p>The jump in quality came from <strong>WaveNet</strong> (van den Oord et al., 2016, DeepMind): an autoregressive network that generates the waveform <em>one sample at a time</em>, each sample a 256-way softmax (8-bit μ-law levels) conditioned on all previous samples through stacks of dilated causal convolutions. In listening tests it closed a large part of the gap between the best existing systems and human speech. The catch: at 16 kHz that's 16,000 sequential network evaluations per second of audio, far slower than real time in its original form. Much of the next few years went into making it fast.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why was the original WaveNet so slow to generate audio?</p>
+  <ol class="q-src">
+    <li>It used a huge text tokenizer</li>
+    <li>It needed hours of reference audio for every sentence</li>
+    <li>It predicted every waveform sample one after another, thousands per second of audio</li>
+    <li>It ran a separate model for every phoneme</li>
+  </ol>
+  <div class="q-explain">Sample-level autoregression means one network pass per sample: 16,000 sequential steps per second at 16 kHz. Later vocoders (Parallel WaveNet, WaveRNN, GAN vocoders like HiFi-GAN) generate in parallel or far more cheaply.</div>
+</div></div>
+
+<h2>Two stages: text → mel spectrogram → waveform</h2>
+<p><strong>Tacotron 2</strong> (Shen et al., 2017, Google) split the job in two. An attention-based sequence-to-sequence network turns characters into an 80-band <strong>mel spectrogram</strong>, one frame every 12.5 ms (80 frames per second). A modified WaveNet then serves as a neural <strong>vocoder</strong>, turning those frames into a waveform. Its listeners rated it 4.53 on a 5-point mean opinion score (MOS), against 4.58 for professional recordings. The mel spectrogram is a convenient middle layer: compact, easy to predict, and close enough to sound that a vocoder can fill in the rest.</p>
+<p>Tacotron 2's acoustic model was still autoregressive with attention, which brought two problems: it was slow, and on long or unusual sentences the attention could skip, repeat or mumble words.</p>
+<p><strong>FastSpeech</strong> (Ren et al., 2019) made the acoustic model <strong>non-autoregressive</strong>. A <strong>duration predictor</strong> estimates how many spectrogram frames each phoneme lasts, and a <strong>length regulator</strong> copies each phoneme's hidden vector that many times. Then every frame is predicted in parallel. No attention alignment to go wrong, and the paper reports a 270× speed-up of spectrogram generation. Speed is also controllable: scale the durations. FastSpeech 2 (2020) added predictors for pitch and energy. Fast GAN-based vocoders such as <strong>HiFi-GAN</strong> (Kong et al., 2020) replaced slow WaveNet vocoders.</p>
+
+<figure class="anim wide" data-anim="a1-4-tts"></figure>
+
+<h3>Worked example: the length regulator</h3>
+<p>The word "hello" as phonemes HH, AH, L, OW, with predicted durations $[3, 5, 4, 8]$ frames, at 80 frames per second.</p>
+<ol class="steps">
+  <li>Total frames: $3 + 5 + 4 + 8 = 20$. The length regulator turns 4 phoneme vectors into 20 frame vectors.</li>
+  <li>Duration: $20 / 80 = 0.25$ s.</li>
+  <li>To speak 25% faster, multiply every duration by $0.8$: $[2.4, 4, 3.2, 6.4]$, which rounds to $[2, 4, 3, 6]$ = 15 frames. (Rounding is why real systems handle fractional durations carefully.)</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Phonemes for "cat", K, AE, T, with durations $[4, 10, 6]$ frames at 80 frames per second.</p>
+  <ol class="steps">
+    <li>Total frames: <span class="blank" data-answer="20" data-tol="0.01" data-hint="4 + 10 + 6."></span></li>
+    <li>Duration in seconds: <span class="blank" data-answer="0.25" data-tol="0.001" data-hint="Frames ÷ 80."></span></li>
+    <li>To speak more slowly, scale durations by 1.5. New total frames: <span class="blank" data-answer="30" data-tol="0.01" data-hint="6 + 15 + 9."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What replaced the autoregressive attention of Tacotron 2 in FastSpeech?</p>
+  <ol class="q-src">
+    <li>A bigger WaveNet</li>
+    <li>A duration predictor plus a length regulator, so all frames can be generated in parallel</li>
+    <li>Concatenating recorded units</li>
+    <li>A language model over text tokens</li>
+  </ol>
+  <div class="q-explain">Predicting each phoneme's duration explicitly fixes the alignment up front, which removes skipped or repeated words and lets every frame be computed at once.</div>
+</div></div>
+
+<h2>Codec language models: VALL-E and zero-shot voices</h2>
+<p>In 2023, <strong>VALL-E</strong> (Wang et al., 2023, Microsoft) recast TTS as <strong>language modelling over codec tokens</strong> (A1.3). Instead of predicting a spectrogram, it predicts EnCodec tokens (75 frames per second, 8 codebooks), which the codec's decoder turns into audio. It was trained on LibriLight, about 60,000 hours of English audiobook speech from over 7,000 speakers, far more and messier data than earlier TTS used.</p>
+<p>The prompt is a sequence: the <strong>phonemes</strong> of the text to say, plus the codec tokens of a <strong>3-second recording</strong> of the target speaker (with that recording's transcript). The model continues the token sequence in the same voice, and often with the same room acoustics and emotion, because continuing the prompt is exactly what a language model does. Generation has two parts:</p>
+<ul>
+  <li>An <strong>autoregressive</strong> Transformer predicts the first-codebook tokens one frame at a time. This is where timing and prosody are decided, and where sampling (M1.5) gives each run a slightly different delivery.</li>
+  <li>A <strong>non-autoregressive</strong> Transformer then predicts codebooks 2 to 8, one codebook per pass, for all frames at once, each pass conditioned on the codebooks before it.</li>
+</ul>
+<p>So 10 seconds of speech costs about 750 sequential steps plus 7 parallel passes, rather than $750 \times 8 = 6{,}000$ steps. The weaknesses are those of sampled language models: occasional skipped or repeated words, and quality that depends on the prompt (a noisy prompt yields noisy speech). Follow-ups added more robust decoding and other languages.</p>
+<p class="math-note">Codec language models became a mainstream TTS design: many open and commercial systems since 2023 generate audio tokens with a Transformer, often from an LLM backbone, sometimes with a separate model refining the acoustic detail. The KV cache, temperature and top-p from M1.5 apply directly.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>Imagine a parrot that has listened to thousands of people read stories aloud. You play it <strong>three seconds of your voice</strong> and hand it a new sentence.</p>
+      <p>It has learned how voices tend to continue, so it reads the new sentence <strong>in a voice like yours</strong>: same pitch, same accent, even the same echo from your room.</p>
+      <p>Where it breaks: the parrot doesn't know you. It copies the sound from a tiny sample and fills the gaps with guesses learned from other people, which is also why it can copy anyone whose voice it hears, with or without their permission.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In VALL-E, why is only the first codebook generated autoregressively?</p>
+  <ol class="q-src">
+    <li>It carries the coarse content and timing, so sequential sampling there decides prosody; the finer codebooks can be filled in parallel</li>
+    <li>Because codebooks 2–8 are copied from the prompt</li>
+    <li>Because EnCodec has only one codebook</li>
+    <li>Because autoregressive models can't produce audio</li>
+  </ol>
+  <div class="q-explain">RVQ puts the coarse picture in codebook 1 (A1.3). Sampling it frame by frame fixes rhythm and intonation; the rest adds detail and is much cheaper to predict in parallel.</div>
+</div></div>
+
+<h2>Flow matching, prosody, and judging TTS</h2>
+<p>A second modern family generates continuous features with <strong>flow matching</strong> or diffusion instead of tokens (the idea of G1.3–G1.5: learn to turn noise into data step by step). <strong>Voicebox</strong> (Le et al., 2023, Meta) is a non-autoregressive flow-matching model trained on more than 50,000 hours of speech to <em>infill</em> speech: given audio with a gap and the full transcript, fill the gap. That one task covers TTS (an empty gap after a voice prompt), editing a word in a recording, and noise removal. Meta did not release it, citing the risk of misuse. <strong>F5-TTS</strong> (Chen et al., 2024) is an open flow-matching model built on a diffusion transformer; it dropped the separate duration model and phoneme alignment by simply padding the text with filler tokens to the length of the target speech, trained on about 100,000 hours of multilingual data.</p>
+<p><strong>Prosody</strong> is the melody of speech: pitch contour, timing, loudness and pauses. It carries meaning ("I didn't say <em>he</em> took it" vs "I didn't say he <em>took</em> it") and emotion. Systems control it through the voice prompt (copy the style), explicit pitch and duration predictors (FastSpeech 2), sampling (more or less varied delivery), and, increasingly, natural-language instructions ("say it warmly, slightly faster"); as of 2026 many systems accept such instructions, with varying reliability.</p>
+<p>How do you judge TTS? There's no single number:</p>
+<ul>
+  <li><strong>Naturalness:</strong> listeners rate clips 1–5, averaged into a <strong>MOS</strong>, or compare two systems side by side. Expensive and noisy, but still the reference.</li>
+  <li><strong>Intelligibility:</strong> transcribe the output with a recognizer (A1.2) and compute the <strong>WER</strong> against the input text. Catches skipped and repeated words.</li>
+  <li><strong>Speaker similarity:</strong> cosine similarity between speaker-verification embeddings of the prompt and the output.</li>
+</ul>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">A TTS model sometimes skips words in long sentences. Which automatic metric catches this best?</p>
+  <ol class="q-src">
+    <li>Speaker similarity between prompt and output</li>
+    <li>The audio's sample rate</li>
+    <li>Mean opinion score from a single listener</li>
+    <li>Word error rate of an ASR transcript of the output, against the input text</li>
+  </ol>
+  <div class="q-explain">If words are skipped, the recognizer's transcript will be missing them, raising WER. Speaker similarity measures the voice, not the words.</div>
+</div></div>
+
+<h2>Voice cloning: consent, misuse and watermarks</h2>
+<p>A system that can imitate anyone from a few seconds of audio is a gift to people who have lost their voice, to dubbing and accessibility. It is also a tool for fraud. Real cases already exist: in January 2024, robocalls imitating President Biden's voice told New Hampshire voters not to vote in the primary, and in February 2024 the US Federal Communications Commission ruled that AI-generated voices in robocalls count as "artificial" voices under existing telephone law, making such calls illegal without consent. Scammers also use cloned voices of relatives or executives to request money, and voice-based bank authentication is weaker than it used to be.</p>
+<p>The safeguards in use are layered, and none is complete:</p>
+<ul>
+  <li><strong>Consent and verification:</strong> some services only clone a voice after the speaker reads a specific consent statement, or only offer a fixed set of preset voices.</li>
+  <li><strong>Release decisions:</strong> some labs have withheld their strongest models (Voicebox was one) or restricted them to vetted users.</li>
+  <li><strong>Watermarking:</strong> embed an inaudible signal in generated audio that a detector can find later. <strong>AudioSeal</strong> (San Roman et al., 2024, Meta) detects the watermark sample by sample, so it can find generated segments inside a longer clip; Google DeepMind's SynthID also watermarks generated audio. Watermarks can be weakened by heavy editing or re-recording, and open-weight models can be run without them.</li>
+  <li><strong>Detection:</strong> classifiers trained to spot synthetic speech (research benchmarks such as the ASVspoof challenges). They tend to struggle with generators they haven't seen.</li>
+</ul>
+
+<div class="why"><strong>Why this matters for LLM practice:</strong> TTS is now the "mouth" of voice assistants (A1.6) and is often itself a language model over audio tokens, so decoding choices from M1.5 directly shape how it sounds, and its latency to first audio is part of every voice product's response time. Shipping it also means shipping policies: which voices are allowed, how consent is checked, and whether outputs are watermarked.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">What is an important limit of audio watermarking as a safeguard?</p>
+  <ol class="q-src">
+    <li>Watermarks are always clearly audible</li>
+    <li>Watermarks make TTS much slower</li>
+    <li>Only cooperating generators add them, and heavy editing or re-recording can weaken them</li>
+    <li>Watermarks can only be detected in music</li>
+  </ol>
+  <div class="q-explain">A watermark proves provenance when present, but absence proves little: someone using a model that doesn't watermark, or degrading the signal, avoids it. That's why consent checks and detection are used alongside.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Contrast a two-stage neural TTS system with a codec language model like VALL-E, and say why the second can clone voices zero-shot.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A two-stage system maps phonemes to a mel spectrogram with an acoustic model (autoregressive like Tacotron 2, or parallel with predicted durations like FastSpeech), then a vocoder such as HiFi-GAN turns the spectrogram into a waveform; voices come from the training speakers. A codec language model treats TTS as next-token prediction over neural-codec tokens: given the text's phonemes and a few seconds of a speaker's codec tokens, it continues the sequence, generating coarse tokens autoregressively and finer codebooks in parallel. Because it was trained on tens of thousands of speakers and simply continues its prompt, it imitates a new voice from about 3 seconds without retraining.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In a two-stage TTS system, what does the vocoder do?</p>
+    <ol class="q-src">
+      <li>Converts text into phonemes</li>
+      <li>Predicts how long each phoneme lasts</li>
+      <li>Turns the predicted mel spectrogram into a waveform</li>
+      <li>Rates the naturalness of the output</li>
+    </ol>
+    <div class="q-explain">The acoustic model predicts the spectrogram; the vocoder (WaveNet, then faster ones like HiFi-GAN) reconstructs the audible waveform from it.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A codec-LM TTS system sounds monotone and repetitive at temperature 0.1. Using what you know from M1.5, what is a reasonable first change?</p>
+    <ol class="q-src">
+      <li>Raise the temperature (perhaps with top-p) so it samples more varied prosody</li>
+      <li>Lower the temperature to 0</li>
+      <li>Increase the codec's sample rate</li>
+      <li>Remove the voice prompt</li>
+    </ol>
+    <div class="q-explain">Near-greedy decoding of audio tokens produces flat, loop-prone output, just as with text. Moderate temperature with top-p truncation gives natural variation without wandering off.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">FastSpeech predicts phoneme durations of 5, 7 and 8 frames at 80 frames per second. How long is the utterance?</p>
+    <ol class="q-src">
+      <li>0.2 s</li>
+      <li>0.25 s</li>
+      <li>20 s</li>
+      <li>1.6 s</li>
+    </ol>
+    <div class="q-explain">$5 + 7 + 8 = 20$ frames, and $20 / 80 = 0.25$ s.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which statement about Voicebox is accurate?</p>
+    <ol class="q-src">
+      <li>It generates one waveform sample at a time</li>
+      <li>It is a codec language model trained on 3 seconds of audio</li>
+      <li>It was released openly with full weights</li>
+      <li>It is a flow-matching model trained to fill in missing speech, and Meta withheld it citing misuse risk</li>
+    </ol>
+    <div class="q-explain">Voicebox learns speech infilling with flow matching, which covers TTS, editing and denoising. Meta described it but didn't release the model.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>TTS evolved from rules and stitched recordings to neural models; <strong>WaveNet</strong> (2016) made sample-level neural audio sound natural.</li>
+    <li>Two-stage TTS: acoustic model → <strong>mel spectrogram</strong> → <strong>vocoder</strong>. FastSpeech's duration predictor makes the first stage parallel and robust.</li>
+    <li><strong>Codec LMs</strong> (VALL-E) predict codec tokens like text: AR for the coarse codebook, parallel for the rest, and clone a voice from a ~3 s prompt.</li>
+    <li><strong>Flow-matching</strong> models (Voicebox, F5-TTS) generate speech non-autoregressively; judge TTS with MOS, ASR-WER and speaker similarity.</li>
+    <li>Voice cloning needs <strong>consent</strong> checks, careful release and <strong>watermarking</strong>, each with limits.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"a1-4-a","front":"What did WaveNet (2016) do, and what was its drawback?","back":"Generated raw audio one sample at a time with dilated causal convolutions and a 256-way softmax (μ-law), giving much more natural speech; but one network pass per sample made it far slower than real time."},
+  {"id":"a1-4-b","front":"Describe two-stage neural TTS (Tacotron 2).","back":"Seq2seq-with-attention acoustic model: characters → 80-band mel spectrogram (12.5 ms frames); then a WaveNet vocoder turns the mel frames into a waveform. MOS 4.53 vs 4.58 for recordings."},
+  {"id":"a1-4-c","front":"What do FastSpeech's duration predictor and length regulator do?","back":"Predict how many frames each phoneme lasts, then repeat each phoneme vector that many times so all frames are generated in parallel. No attention failures; speed is adjustable by scaling durations."},
+  {"id":"a1-4-d","front":"How does VALL-E generate speech?","back":"Language modelling over EnCodec tokens: prompt = phonemes + ~3 s of the target speaker's codec tokens. An AR Transformer predicts codebook 1 frame by frame; a NAR Transformer fills codebooks 2–8 in parallel. Trained on ~60k hours (LibriLight)."},
+  {"id":"a1-4-e","front":"Three ways to evaluate TTS?","back":"Naturalness: listener MOS or A/B tests. Intelligibility: WER of an ASR transcript vs the input text. Voice match: speaker-embedding cosine similarity."},
+  {"id":"a1-4-f","front":"Safeguards against voice-cloning misuse, and a limit of each?","back":"Consent statements / preset voices (bypassed by other tools); withheld releases (others release); watermarking such as AudioSeal or SynthID (only if the generator adds it; editing can weaken it); synthetic-speech detectors (struggle on unseen generators)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/a1-4-tts.js"></script>
+</body>
+</html>

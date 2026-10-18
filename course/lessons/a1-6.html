@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="a1-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Real-time speech-to-speech models · LLMs, Animated</title>
+<meta name="description" content="How voice assistants talk back fast: cascaded ASR, LLM and TTS pipelines and their latency budget, end-to-end and full-duplex speech models like Moshi and GPT-4o, turn-taking, interruptions and evaluation.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Real-time speech-to-speech models</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of Audio &amp; speech</span></div>
+<p class="lede">In conversation, people reply within a fraction of a second and talk over each other all the time. A voice assistant that waits, thinks, then speaks feels robotic. This lesson builds the classic cascade, adds up its latency, then looks at models that listen and speak at the same time.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Draw a cascaded voice assistant (ASR → LLM → TTS) and compute its response latency from a stage budget.</li>
+    <li>Explain how end-to-end and full-duplex speech models (such as Moshi) remove stages, and what they gain and lose.</li>
+    <li>Describe turn-taking, interruptions and the main difficulties in evaluating voice agents.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> you'll need <a href="a1-2.html">Speech recognition (A1.2)</a> and <a href="a1-4.html">Text-to-speech (A1.4)</a>, the two ends of the pipeline. Helpful but optional: <a href="a1-3.html">audio tokens (A1.3)</a> and <a href="m5-6.html">serving metrics like time-to-first-token (M5.6)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; you'll check below.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In everyday conversation, roughly how long is the typical gap between one person stopping and the other starting?</p>
+    <ol class="q-src">
+      <li>About 200 milliseconds</li>
+      <li>About 2 seconds</li>
+      <li>About 5 seconds</li>
+      <li>There's never any overlap or gap</li>
+    </ol>
+    <div class="q-explain">Studies across many languages find the most common gap is around 200 ms, faster than we could plan a reply after the other person stops. We predict when a turn will end and prepare in advance.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Besides speed, what does a pipeline of speech-to-text, text LLM, then text-to-speech lose?</p>
+    <ol class="q-src">
+      <li>Nothing; text captures everything in speech</li>
+      <li>The ability to answer questions</li>
+      <li>Tone, emotion, emphasis, laughter and who is speaking, since only text passes between stages</li>
+      <li>The ability to use more than one language</li>
+    </ol>
+    <div class="q-explain">"Great." can be delighted or sarcastic; the transcript is the same. The text bottleneck drops everything that isn't words.</div>
+  </div>
+</section>
+
+<h2>The cascade: ASR → LLM → TTS</h2>
+<p>Voice assistants have been pipelines since Siri (2011) and Alexa (2014): recognize the words, decide what to do, speak a reply. The LLM era kept the shape and upgraded the middle. When ChatGPT added voice in 2023, it chained a speech recognizer, the text model and a TTS model. OpenAI later reported that this Voice Mode had average latencies of 2.8 seconds with GPT-3.5 and 5.4 seconds with GPT-4.</p>
+<p>A cascade has four moving parts:</p>
+<ol class="steps">
+  <li><strong>Voice activity detection and endpointing:</strong> decide that the user has <em>finished</em>, usually after a stretch of silence.</li>
+  <li><strong>ASR</strong> (A1.2): turn the audio into text.</li>
+  <li><strong>LLM:</strong> generate a reply as text, token by token.</li>
+  <li><strong>TTS</strong> (A1.4): turn the reply into audio and play it.</li>
+</ol>
+<p>Cascades are popular for good reasons. Each part can be swapped for the best available one, including the strongest text LLM; the text in the middle is easy to log, filter and inspect; and tools, retrieval and safety checks plug in where they already work for text. But two costs are built in:</p>
+<ul>
+  <li><strong>Information loss.</strong> Only words cross the text bottleneck. Tone, emphasis, hesitation, laughter, background sounds and speaker identity are gone, so the LLM can't hear that you're upset, and the TTS has to guess how to say the reply. Recognition errors also propagate: the LLM confidently answers a question you didn't ask.</li>
+  <li><strong>Latency.</strong> The stages add up, as the next byte shows.</li>
+</ul>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A user says "Oh, great" sarcastically after a failed request. Why might a cascaded assistant respond cheerfully?</p>
+  <ol class="q-src">
+    <li>Because TTS can only produce happy voices</li>
+    <li>Because the LLM only receives the transcript "Oh, great", without the sarcastic tone</li>
+    <li>Because ASR can't transcribe short phrases</li>
+    <li>Because endpointing cut off the audio</li>
+  </ol>
+  <div class="q-explain">The words are positive; the meaning is in the prosody, which the text bottleneck drops. End-to-end speech models can, in principle, hear it.</div>
+</div></div>
+
+<h2>A latency budget, worked out</h2>
+<p>What users feel is the time from when they stop talking to when they hear the first sound of the reply. In a cascade, the stages on that path add up:</p>
+$$t_{\text{response}} = t_{\text{endpoint}} + t_{\text{ASR}} + t_{\text{LLM, first token}} + t_{\text{TTS, first audio}} + t_{\text{network}}$$
+<p class="math-note">$t_{\text{endpoint}}$ is the silence the system waits for before deciding you've finished; $t_{\text{ASR}}$ is the time to finalize the transcript; the LLM term is its time to first token (M5.6), plus however much text the TTS needs to start; $t_{\text{TTS, first audio}}$ is how long TTS takes to produce its first chunk of sound; $t_{\text{network}}$ covers round trips between device and servers.</p>
+<p>The numbers below are <strong>illustrative</strong>, picked to be in a plausible range; real values depend heavily on models, hardware, load and network.</p>
+<h3>Worked example</h3>
+<ol class="steps">
+  <li>Endpointing: wait for 500 ms of silence.</li>
+  <li>ASR finalizes the transcript: 100 ms.</li>
+  <li>LLM time to first token: 300 ms.</li>
+  <li>TTS time to first audio: 150 ms. Network: 100 ms.</li>
+  <li>Total: $500 + 100 + 300 + 150 + 100 = 1{,}150$ ms, more than five times a typical 200 ms human gap. Notice the biggest single term is <em>waiting</em>, not computing.</li>
+</ol>
+<p>Engineers shrink this by <strong>streaming</strong> every stage: transcribe while the user is still talking (so ASR finishes almost as soon as they stop), start the LLM on partial transcripts, stream LLM tokens into a TTS that starts speaking after the first phrase, and keep connections open. The endpointing wait is the hardest: shorten it and the assistant interrupts people who pause mid-sentence; lengthen it and everything feels slow. Smarter <em>turn detection</em> models, which judge from the words and intonation whether a turn is finished, help here.</p>
+
+<div class="playground" id="a1-6-latency-playground">
+  <h3>Playground: build your own latency budget</h3>
+  <p class="math-note" style="margin:0">Each bar starts where the previous stage ends. Try the presets, then see which single change helps most. The dashed line marks a typical human turn gap of about 200 ms.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr">
+    <label><span>Endpointing silence = <output data-out="ep">500</output> ms</span><input type="range" data-in="ep" min="100" max="1000" step="50" value="500"></label>
+    <label><span>ASR finalization = <output data-out="asr">100</output> ms</span><input type="range" data-in="asr" min="0" max="500" step="10" value="100"></label>
+    <label><span>LLM time to first token = <output data-out="llm">300</output> ms</span><input type="range" data-in="llm" min="50" max="1500" step="25" value="300"></label>
+    <label><span>TTS time to first audio = <output data-out="tts">150</output> ms</span><input type="range" data-in="tts" min="30" max="800" step="10" value="150"></label>
+    <label><span>Network round trips = <output data-out="net">100</output> ms</span><input type="range" data-in="net" min="0" max="400" step="10" value="100"></label>
+  </div>
+  <div class="chips" role="group" aria-label="Latency presets" style="margin-top:12px">
+    <button type="button" class="chip" data-p="500,100,300,150,100" aria-pressed="false">Worked example</button>
+    <button type="button" class="chip" data-p="800,300,900,500,150" aria-pressed="false">Naive cascade</button>
+    <button type="button" class="chip" data-p="300,50,200,100,60" aria-pressed="false">Tuned, streaming</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A tuned cascade: endpointing 300 ms, ASR 80 ms, LLM first token 250 ms, TTS first audio 120 ms, network 60 ms.</p>
+  <ol class="steps">
+    <li>Total response latency in ms: <span class="blank" data-answer="810" data-tol="0.5" data-hint="300 + 80 + 250 + 120 + 60."></span></li>
+    <li>How many times a 200 ms human gap is that? <span class="blank" data-answer="4.05" data-tol="0.06" data-hint="810 / 200."></span></li>
+    <li>If endpointing alone dropped to 100 ms, the new total in ms: <span class="blank" data-answer="610" data-tol="0.5" data-hint="Subtract 200 ms from 810."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why not just set the endpointing silence to 50 ms?</p>
+  <ol class="q-src">
+    <li>Because ASR can't run that fast</li>
+    <li>Because it would increase network latency</li>
+    <li>Because the LLM needs at least 1 second of audio</li>
+    <li>Because people pause mid-sentence; the assistant would keep cutting them off</li>
+  </ol>
+  <div class="q-explain">Short pauses inside turns are normal. Silence alone can't tell "I'm thinking" from "I'm done", which is why learned turn-detection models (and full-duplex models) help.</div>
+</div></div>
+
+<h2>End-to-end and full-duplex: GPT-4o and Moshi</h2>
+<p>The alternative is to let one model hear and speak directly, using audio tokens (A1.3) or audio features as input and audio tokens as output. Research systems explored this from 2021 (speech-only "textless" language models, then LLMs extended with speech tokens).</p>
+<p><strong>GPT-4o</strong> (OpenAI, May 2024) brought it to a mainstream product. OpenAI described it as a single model trained end to end across text, vision and audio, and reported audio response times as low as 232 ms, with an average of 320 ms, similar to human response times in conversation. OpenAI hasn't published the architecture, so how it represents audio internally is not public.</p>
+<p><strong>Moshi</strong> (Défossez et al., 2024, Kyutai) is a fully described open model, and it goes one step further: it is <strong>full-duplex</strong>. Instead of taking turns, it models <em>two audio streams at once</em>, the user's and its own, at every 80 ms frame. Its parts:</p>
+<ul>
+  <li><strong>Mimi</strong> (A1.3): a streaming codec at 12.5 frames per second with 8 codebooks per stream.</li>
+  <li><strong>A temporal Transformer</strong>, built on a 7-billion-parameter text LLM (Helium), steps through time one frame at a time; a small <strong>depth Transformer</strong> then predicts that frame's codebook tokens one after another. This split handles many tokens per frame without making the time axis longer (compare MusicGen's delay pattern in A1.5).</li>
+  <li><strong>Inner monologue:</strong> at each frame Moshi also predicts the text of its own speech, time-aligned, just before the audio tokens. Thinking in text first improves the linguistic quality of what it says.</li>
+</ul>
+<p>Because it is always listening and always producing output (silence is just more tokens), Moshi needs no endpointing: it can start replying as you finish, say "mm-hm" while you talk, and stop when interrupted. The paper reports a theoretical latency of 160 ms (an 80 ms frame plus 80 ms of acoustic delay) and about 200 ms in practice on an L4 GPU.</p>
+
+<figure class="anim wide" data-anim="a1-6-duplex"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-a1-6.webp" alt="Two children talk through tin-can telephones; one is still speaking while the other already nods and starts to reply." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Two kids talk through tin-can telephones. An old-style robot friend would wait until you stop, count to three in its head, write down what you said, think, then read its answer out loud. Slow!</p>
+      <p>A full-duplex robot is like a real friend: it <strong>listens and talks on the same string at the same time</strong>. It nods "uh-huh" while you're still talking and starts answering right as you finish, and if you cut in, it stops and listens.</p>
+      <p>Where it breaks: the robot doesn't really understand you like a friend does, and listening all the time means it sometimes jumps in too early or talks over you.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What makes Moshi "full-duplex"?</p>
+  <ol class="q-src">
+    <li>It models the user's audio stream and its own audio stream simultaneously, at every frame, so it can listen while speaking</li>
+    <li>It uses two separate LLMs</li>
+    <li>It transcribes the user's speech twice for accuracy</li>
+    <li>It replies in two languages at once</li>
+  </ol>
+  <div class="q-explain">Two parallel streams per 80 ms frame mean there's no "your turn, my turn" switch: speaking, listening, backchannels and interruptions are all just patterns in the streams.</div>
+</div></div>
+
+<h2>Turn-taking, interruptions and evaluation</h2>
+<p>Real conversation is messy, and the hardest problems in voice agents are about timing, not words:</p>
+<ul>
+  <li><strong>Turn-taking:</strong> knowing when the user has finished. Cascades use endpointing, increasingly with a learned turn detector; full-duplex models learn it from conversational data.</li>
+  <li><strong>Barge-in (interruptions):</strong> when the user starts talking over the assistant, a cascade must detect speech during playback, stop the audio, cancel generation, and record in the conversation history only the part of the reply that was actually heard. Full-duplex models handle it natively, but can also interrupt the user too eagerly.</li>
+  <li><strong>Backchannels:</strong> the "mm-hm", "right" that show you're listening without taking the turn. Cascades rarely produce them; duplex models can.</li>
+  <li><strong>Streaming everywhere:</strong> every component must work on partial input and produce partial output, or it becomes the bottleneck.</li>
+</ul>
+<p><strong>Evaluating</strong> voice agents is harder than evaluating text models, and as of 2026 there's no single accepted benchmark. Teams typically combine:</p>
+<ul>
+  <li><strong>Content quality:</strong> transcribe the spoken answers and score them with text benchmarks or LLM judges (M4.4). This misses <em>how</em> it was said.</li>
+  <li><strong>Speech quality:</strong> naturalness ratings (MOS) and ASR word error rate on the output (A1.4).</li>
+  <li><strong>Latency:</strong> time from end of user speech to first audio, measured end to end on real networks, reported as a distribution (median and tail), not one number.</li>
+  <li><strong>Interaction behaviour:</strong> how often it interrupts, how fast it yields when interrupted, whether it backchannels. Newer research benchmarks target full-duplex behaviour specifically, but methods are still settling.</li>
+</ul>
+<p>Safety also changes with voice: a speech model could imitate voices, including the user's, so products commonly restrict outputs to a set of preset voices and add classifiers to catch deviations (A1.4).</p>
+
+<div class="why"><strong>Why this matters for LLM practice:</strong> voice is becoming a default interface to LLMs, and the design choice is real: a cascade lets you use the strongest text model, tools and guardrails you already have, at the cost of latency and lost tone; an end-to-end or full-duplex model feels natural but is harder to inspect, steer and evaluate. Many production systems in 2026 still use carefully streamed cascades, while speech-native models are improving fast, so it's worth knowing how to measure both.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">A user interrupts a cascaded assistant halfway through a long answer. Besides stopping playback, what should the system record in the conversation history?</p>
+  <ol class="q-src">
+    <li>The full answer the LLM generated</li>
+    <li>Nothing from the assistant's turn</li>
+    <li>Only the part of the answer that was actually played before the interruption</li>
+    <li>The user's interruption, but not the answer</li>
+  </ol>
+  <div class="q-explain">Otherwise the LLM "remembers" saying things the user never heard, and the conversation drifts out of sync.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain why a cascaded voice assistant feels slower than a person, and how a full-duplex model like Moshi changes that.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A cascade waits for silence to decide you've finished, then runs ASR, the LLM's first token and TTS's first audio in sequence, plus network time, so even a tuned pipeline adds up to most of a second versus about 200 ms between human turns; it also loses tone because only text passes between stages. A full-duplex model processes the user's audio stream and its own speech stream together at every 80 ms frame, so it needs no endpointing, can backchannel and handle interruptions, and Moshi reports about 200 ms latency in practice. The cost is a model that's harder to inspect and evaluate than a text pipeline.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A cascade has endpointing 400 ms, ASR 100 ms, LLM first token 350 ms, TTS first audio 200 ms and network 50 ms. What is the response latency?</p>
+    <ol class="q-src">
+      <li>350 ms</li>
+      <li>1,100 ms</li>
+      <li>1,050 ms</li>
+      <li>700 ms</li>
+    </ol>
+    <div class="q-explain">$400 + 100 + 350 + 200 + 50 = 1{,}100$ ms. The stages are sequential on the critical path, so they add.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Moshi's temporal Transformer steps through 80 ms frames, and a small depth Transformer predicts each frame's codebook tokens. Which earlier idea solves the same problem?</p>
+    <ol class="q-src">
+      <li>CTC's blank token (A1.2)</li>
+      <li>Whisper's 30-second windows (A1.2)</li>
+      <li>FAD's Gaussian fit (A1.5)</li>
+      <li>MusicGen's codebook delay pattern (A1.5)</li>
+    </ol>
+    <div class="q-explain">Both handle several RVQ tokens per frame without multiplying the number of sequential time steps.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What did OpenAI report about GPT-4o's audio response latency at launch?</p>
+    <ol class="q-src">
+      <li>As low as 232 ms, about 320 ms on average</li>
+      <li>About 5.4 seconds on average</li>
+      <li>Exactly 0 ms, because it predicts the end of your sentence</li>
+      <li>Nothing; no latency figures were given</li>
+    </ol>
+    <div class="q-explain">232 ms minimum and 320 ms average were OpenAI's reported figures; 2.8 s and 5.4 s were the earlier cascaded Voice Mode averages.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">The LLM in a cascade streams its reply token by token. Which serving metric from M5.6 matters most for when the user first hears audio?</p>
+    <ol class="q-src">
+      <li>Total tokens per second across all users</li>
+      <li>The model's parameter count</li>
+      <li>Time to first token (plus enough tokens for TTS to start)</li>
+      <li>Time to generate the full reply</li>
+    </ol>
+    <div class="q-explain">With streaming TTS, speech can start once the first phrase exists, so time to first token sits on the critical path; the rest of the reply is generated while earlier words are being spoken.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A <strong>cascade</strong> (endpointing → ASR → LLM → TTS) is modular and inspectable, but loses tone and adds latency.</li>
+    <li>Latency $= t_{\text{endpoint}} + t_{\text{ASR}} + t_{\text{LLM first token}} + t_{\text{TTS first audio}} + t_{\text{network}}$; streaming every stage and smarter turn detection cut it.</li>
+    <li><strong>End-to-end</strong> models (GPT-4o: 320 ms average reported) and <strong>full-duplex</strong> models (Moshi: two streams, ~200 ms reported) listen and speak in audio directly.</li>
+    <li>Turn-taking, barge-in and backchannels are the hard parts; evaluation combines content, speech quality, latency distributions and interaction behaviour.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"a1-6-a","front":"The stages of a cascaded voice assistant, and its two built-in costs?","back":"VAD/endpointing → ASR → LLM → TTS. Costs: information loss (only text passes: tone, emotion, speaker are dropped; ASR errors propagate) and summed latency."},
+  {"id":"a1-6-b","front":"Write the cascade's response-latency budget.","back":"$t = t_{\\text{endpoint}} + t_{\\text{ASR}} + t_{\\text{LLM first token}} + t_{\\text{TTS first audio}} + t_{\\text{network}}$. E.g. 500 + 100 + 300 + 150 + 100 = 1,150 ms vs a ~200 ms human turn gap."},
+  {"id":"a1-6-c","front":"What is a full-duplex speech model? Example?","back":"A model that processes the user's and its own audio streams at once, every frame, so it can listen while speaking (backchannels, interruptions, no endpointing). Moshi (Kyutai, 2024): Mimi codec at 12.5 Hz, ~160 ms theoretical / ~200 ms practical latency."},
+  {"id":"a1-6-d","front":"Moshi's 'inner monologue' and temporal/depth Transformers?","back":"Temporal Transformer (from a 7B text LLM) steps over 80 ms frames; a small depth Transformer predicts the frame's codebook tokens. Inner monologue: it predicts time-aligned text of its own speech before the audio tokens, improving content quality."},
+  {"id":"a1-6-e","front":"What latency did OpenAI report for GPT-4o voice (May 2024), vs the earlier Voice Mode?","back":"As low as 232 ms, ~320 ms average for audio responses; earlier cascaded Voice Mode averaged 2.8 s (GPT-3.5) and 5.4 s (GPT-4). Architecture details were not published."},
+  {"id":"a1-6-f","front":"How should a cascade handle barge-in?","back":"Detect user speech during playback, stop audio, cancel generation, and keep in the history only the part of the reply that was actually played."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/a1-6-duplex.js"></script>
+<script src="../assets/js/anims/a1-6-latency-playground.js"></script>
+</body>
+</html>

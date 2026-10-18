@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ag-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Where to use what: the agent toolkit on one page · LLMs, Animated</title>
+<meta name="description" content="The starting point for building with AI agents: every building block (system prompts, RAG, MCP, Agent Skills, AGENTS.md, memory, the LLM wiki, subagents, hooks) in one sentence, and a one-page map of which to use when.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<style>
+  .kit-table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: .97rem; }
+  .kit-table th, .kit-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .kit-table th { font: 600 .82rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+  .kit-table td:first-child { font-weight: 650; }
+  @media (max-width: 600px) {
+    .kit-table thead { display: none; }
+    .kit-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .kit-table td { display: block; border: 0; padding: 2px 0; }
+    .kit-table td[data-l]::before { content: attr(data-l) " · "; font-weight: 600; color: var(--ink-2); }
+  }
+  #ag1-chooser .pg-buttons .btn { flex: 1 1 130px; }
+  #ag1-chooser .btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  #ag1-chooser .pg-hint { margin: 10px 0 0; min-height: 4.5em; }
+  #ag1-chooser .pg-links { display: block; margin-top: 6px; }
+</style>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Where to use what: the agent toolkit on one page</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of The agent toolkit</span></div>
+<p class="lede">RAG, MCP, Agent Skills, AGENTS.md, memory, subagents, hooks… The words pile up fast. This lesson puts every building block on one page, says in plain words what each one is for, and gives you a map for choosing. Start here, even if you have only ever used a chatbot.</p>
+
+<div class="cover"><img src="../assets/img/cover-ag.webp" alt="Illustration: a friendly robot at a workbench with a pegboard of neatly arranged tools. Cables run from one universal plug on its back to icons of a database, a calendar, a browser window and a folder; recipe cards and a pinned note lie on the bench." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Say in one sentence, with an everyday picture, what each agent building block does: system prompt, context window, RAG, fine-tuning, tools, MCP, skills, rules files, memory, the LLM wiki, subagents, A2A, hooks, guardrails and evals.</li>
+    <li>Use a one-page map to pick the right building block for a goal.</li>
+    <li>Spot three common mistakes, such as writing a prompt where you need a hook.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> none. If you have chatted with an AI assistant, you are ready. Every building block here links forward to the lesson that teaches it properly.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Your coding agent sometimes forgets to run the tests before it says “done”. Which fix makes the tests run <em>every single time</em>?</p>
+    <ol class="q-src">
+      <li>Add “ALWAYS RUN THE TESTS!!” in capitals to the prompt</li>
+      <li>A hook: a small script the agent's software runs automatically at that moment</li>
+      <li>Fine-tune the model on examples of running tests</li>
+      <li>Switch to a model with a bigger context window</li>
+    </ol>
+    <div class="q-explain">Prompts and training make the right behaviour <em>more likely</em>, never certain. A <strong>hook</strong> is ordinary code that the agent's software runs at a fixed point (for example before it finishes), so it happens no matter what the model decides.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A support bot must answer questions from 2,000 help-centre articles that change every week. What fits best?</p>
+    <ol class="q-src">
+      <li>Look up the few relevant articles when each question arrives, and give only those to the model</li>
+      <li>Fine-tune the model on all the articles every week</li>
+      <li>Paste all 2,000 articles into the system prompt</li>
+      <li>Nothing: the model already knows them</li>
+    </ol>
+    <div class="q-explain">This is <strong>retrieval-augmented generation (RAG)</strong>. Fine-tuning is slow, costly and bad at memorising exact, changing facts, and 2,000 articles would not fit in (or would badly clutter) the model's context window.</div>
+  </div>
+</section>
+
+<h2>From chatbot to agent: why there are so many pieces</h2>
+<p>When ChatGPT arrived in late 2022, using an AI model at work meant copy and paste: you pasted text in, the model wrote something, you pasted the answer somewhere else. The model knew only two things: what it had learned in training, and what you had just pasted.</p>
+<p>To do real work, it needed more. It needed <strong>your facts</strong> (today's prices, your refund policy), <strong>your rules</strong> (“we use tabs”, “never touch the billing code”), <strong>your tools</strong> (GitHub, a database, a calendar) and a way to <strong>act</strong>, not just talk. Each need got its own fix, and most arrived within three years:</p>
+<ul>
+  <li><strong>2023:</strong> retrieval-augmented generation (RAG, first described by Lewis et al., 2020) went mainstream, and OpenAI added <strong>function calling</strong> to its API (June 2023), letting a model ask your code to run a function.</li>
+  <li><strong>Nov 2024:</strong> Anthropic released the <strong>Model Context Protocol (MCP)</strong>, one standard plug for connecting tools.</li>
+  <li><strong>2025:</strong> <strong>AGENTS.md</strong> became a shared name for a project's rules file; Google launched the <strong>A2A</strong> protocol for agents to talk to each other (April); Anthropic introduced <strong>Agent Skills</strong> (October) and published them as an open standard (December).</li>
+  <li><strong>Dec 2025:</strong> MCP and AGENTS.md moved, with Block's goose agent, to a neutral home: the Linux Foundation's new <strong>Agentic AI Foundation</strong>.</li>
+  <li><strong>2026:</strong> the <strong>LLM wiki</strong>, a knowledge base an AI writes and keeps up to date, spread after Andrej Karpathy described his setup in April.</li>
+</ul>
+<p>An <strong>agent</strong> is a model running in a loop: it reads, decides, uses a tool, looks at the result, and repeats until the job is done (<a href="sy-5.html">SY.5</a> covers the loop). Coding agents such as Claude Code, OpenAI Codex, Cursor, Gemini CLI or GitHub Copilot are the best-known examples, but support bots and research assistants work the same way.</p>
+<p>Hold on to one idea for this whole module: <strong>in the moment it answers, everything a model knows is text in its context window</strong>. Almost every building block is a different way to get the right text in at the right time. The rest do things outside the model.</p>
+
+<h3>The blocks that decide what the model reads</h3>
+<table class="kit-table">
+  <thead><tr><th>Building block</th><th>What it is</th><th>Everyday picture</th></tr></thead>
+  <tbody>
+    <tr><td>Prompt &amp; system prompt</td><td data-l="What">Your message, plus standing instructions the app adds before it (“You are a support agent for…”).</td><td data-l="Picture">A question, plus the job description pinned above the desk.</td></tr>
+    <tr><td>Context window</td><td data-l="What">Everything the model can see in one go, measured in tokens (word pieces). Fixed size; all the blocks below compete for it (<a href="ag-2.html">AG.2</a>).</td><td data-l="Picture">The desk itself: only what's on it can be used.</td></tr>
+    <tr><td>RAG (retrieval)</td><td data-l="What">Search your documents when a question comes in, and paste just the relevant passages into the context (<a href="sy-3.html">SY.3</a>).</td><td data-l="Picture">A librarian who fetches the three pages you need.</td></tr>
+    <tr><td>LLM wiki</td><td data-l="What">A set of linked notes that an AI writes from your sources and keeps up to date, so knowledge is summarised once and reused (<a href="ag-6.html">AG.6</a>).</td><td data-l="Picture">A well-kept team notebook, instead of re-reading every file.</td></tr>
+    <tr><td>Rules file (AGENTS.md, CLAUDE.md…)</td><td data-l="What">A plain text file in your project that the agent reads at the start of every session: commands, conventions, don'ts (<a href="ag-5.html">AG.5</a>).</td><td data-l="Picture">The house rules taped to the fridge.</td></tr>
+    <tr><td>Memory</td><td data-l="What">Notes the agent saves and reads back next session, so it doesn't start from zero (<a href="ag-5.html">AG.5</a>).</td><td data-l="Picture">A diary you read each morning.</td></tr>
+    <tr><td>Fine-tuning</td><td data-l="What">Training the model's weights further on your examples, changing its built-in habits (<a href="m3-7.html">M3.7</a>, <a href="sy-6.html">SY.6</a>).</td><td data-l="Picture">Months of practice that change how someone writes, not a note they read.</td></tr>
+  </tbody>
+</table>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Which building block changes the model itself, rather than what it reads?</p>
+  <ol class="q-src">
+    <li>A rules file</li>
+    <li>RAG</li>
+    <li>Fine-tuning</li>
+    <li>A system prompt</li>
+  </ol>
+  <div class="q-explain">Fine-tuning updates the model's weights. Rules files, retrieved passages and system prompts are all just text placed in the context window; remove them and the model is unchanged.</div>
+</div></div>
+
+<h2>What the model can do: tools, skills, teams and safety rails</h2>
+<p>Reading is half the story. An agent also <em>does</em> things, and it needs know-how, helpers and limits. Here is the second half of the kit.</p>
+<table class="kit-table">
+  <thead><tr><th>Building block</th><th>What it is</th><th>Everyday picture</th></tr></thead>
+  <tbody>
+    <tr><td>Tool / function calling</td><td data-l="What">The model writes a structured request (“call <code>get_order</code> with id A17”); your code runs it and returns the result (<a href="sy-4.html">SY.4</a>).</td><td data-l="Picture">Asking a colleague to look something up for you.</td></tr>
+    <tr><td>MCP server</td><td data-l="What">A small program that offers tools (and data) through one standard protocol, so any MCP-aware app can use them (<a href="ag-3.html">AG.3</a>).</td><td data-l="Picture">A USB-C port: one plug shape for every device.</td></tr>
+    <tr><td>Agent Skill</td><td data-l="What">A folder with a <code>SKILL.md</code> of instructions (plus optional scripts and files) that loads only when a task needs it (<a href="ag-4.html">AG.4</a>).</td><td data-l="Picture">A recipe card you pull from the box only when you cook that dish.</td></tr>
+    <tr><td>Subagent</td><td data-l="What">A helper agent with its own fresh context window; it does one part and hands back a short summary (<a href="ag-7.html">AG.7</a>).</td><td data-l="Picture">Sending an intern to research one question and report back in a paragraph.</td></tr>
+    <tr><td>Multi-agent &amp; A2A</td><td data-l="What">Several agents working together; A2A (Agent2Agent) is an open protocol so agents built by different teams or vendors can talk (<a href="ag-7.html">AG.7</a>).</td><td data-l="Picture">Two companies' staff using a shared phone line and form.</td></tr>
+    <tr><td>Hooks</td><td data-l="What">Your own scripts that the agent software runs automatically at set moments (before a command, after an edit), whatever the model decides (<a href="ag-7.html">AG.7</a>).</td><td data-l="Picture">A door that locks itself, instead of a sign saying “please lock”.</td></tr>
+    <tr><td>Guardrails &amp; evals</td><td data-l="What">Guardrails check inputs and outputs in production (<a href="sy-7.html">SY.7</a>); evals are test sets that measure whether a change made the agent better (<a href="m4-7.html">M4.7</a>).</td><td data-l="Picture">A seatbelt, and a driving test.</td></tr>
+  </tbody>
+</table>
+<p>Watch them work together. Below, one request travels through a coding agent: a rules file and skill names are loaded, you ask for something, a skill is pulled in, a tool is called through MCP, and the answer comes back.</p>
+
+<figure class="anim wide" data-anim="ag-1-flow"></figure>
+
+<p>Notice what <em>didn't</em> happen: the other two skills never loaded, and nobody pasted anything. The agent pulled in exactly what this task needed. That habit, putting the right text in the window at the right time, is called <strong>context engineering</strong>, and it is the subject of <a href="ag-2.html">AG.2</a>.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">In the animation, why did only the release-notes skill's full instructions enter the context window?</p>
+  <ol class="q-src">
+    <li>The other skills were broken</li>
+    <li>The rules file banned the other skills</li>
+    <li>The MCP server chose the skill</li>
+    <li>Its short description matched the request, so the agent loaded just that one; the rest stayed as one-line descriptions</li>
+  </ol>
+  <div class="q-explain">Skills load in stages: only names and descriptions are always present, and a skill's full instructions load when the task matches its description. That keeps the window free for the work itself.</div>
+</div></div>
+
+<h2>The map: where to use what</h2>
+<p>Here is the whole module on one page. Find the row that sounds like your problem, read across, and follow the link. The second half of the module (<a href="ag-8.html">AG.8</a>) ends with the same map.</p>
+<table class="kit-table">
+  <thead><tr><th>I want the agent to…</th><th>Use</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td>Know facts from our documents</td><td data-l="Use">Retrieval / RAG (<a href="sy-3.html">SY.3</a>). For a small, evolving body of knowledge you want summarised and cross-linked once: an LLM wiki (<a href="ag-6.html">AG.6</a>)</td><td data-l="Example">A support bot that needs your refund policy</td></tr>
+    <tr><td>Follow our project's conventions every single time</td><td data-l="Use">A rules file: AGENTS.md, CLAUDE.md and similar (<a href="ag-5.html">AG.5</a>)</td><td data-l="Example">A coding agent in a monorepo that must use <code>pnpm</code>, not <code>npm</code></td></tr>
+    <tr><td>Follow a repeatable procedure, or use specialist know-how, only sometimes</td><td data-l="Use">An Agent Skill (<a href="ag-4.html">AG.4</a>)</td><td data-l="Example">“Make a slide deck our way”, “review a contract with our checklist”</td></tr>
+    <tr><td>Read from or act on an outside system</td><td data-l="Use">A tool. Reusable across many apps and agents: an MCP server (<a href="ag-3.html">AG.3</a>). A one-off inside your own app: plain function calling (<a href="sy-4.html">SY.4</a>)</td><td data-l="Example">Look up an order in the database; post to Slack; book a meeting</td></tr>
+    <tr><td>Handle a big task with separable parts, or stop the context overflowing</td><td data-l="Use">Subagents (<a href="ag-7.html">AG.7</a>)</td><td data-l="Example">Research five competitors in parallel, one helper each</td></tr>
+    <tr><td>Cooperate with agents built by other teams or vendors</td><td data-l="Use">A2A (<a href="ag-7.html">AG.7</a>)</td><td data-l="Example">Your travel agent asks an airline's booking agent for seats</td></tr>
+    <tr><td>Make something happen no matter what the model decides</td><td data-l="Use">Deterministic code or hooks, not a prompt (<a href="ag-7.html">AG.7</a>)</td><td data-l="Example">Always run the formatter; block <code>rm -rf</code></td></tr>
+    <tr><td>Remember things across sessions</td><td data-l="Use">Memory files (<a href="ag-5.html">AG.5</a>) or a wiki (<a href="ag-6.html">AG.6</a>)</td><td data-l="Example">“Last time we decided to drop Python 3.9 support”</td></tr>
+    <tr><td>Change the model's built-in behaviour, style or cost at scale</td><td data-l="Use">Fine-tuning (<a href="sy-6.html">SY.6</a>, <a href="m3-7.html">M3.7</a>)</td><td data-l="Example">A small, cheap model that writes in your brand voice for millions of replies</td></tr>
+    <tr><td>Fit all of the above into one window</td><td data-l="Use">Context engineering (<a href="ag-2.html">AG.2</a>)</td><td data-l="Example">Everything above competes for the same limited space</td></tr>
+  </tbody>
+</table>
+<p>A useful shortcut: ask whether your need is <strong>knowledge</strong> (RAG, wiki), a <strong>convention</strong> (rules file), a <strong>procedure</strong> (skill), a <strong>connection</strong> (tool or MCP), a <strong>guarantee</strong> (hook), <strong>memory</strong> (memory files) or a <strong>new habit</strong> for the model itself (fine-tuning). Most real agents combine several.</p>
+
+<div class="playground" id="ag1-chooser">
+  <h3>Playground: what are you trying to do?</h3>
+  <p class="math-note" style="margin:0">Pick a goal. The building blocks that fit light up around the model.</p>
+  <div class="pg-buttons" role="group" aria-label="Pick a goal" style="margin-top:12px">
+    <button type="button" class="btn" data-goal="0" aria-pressed="false">Answer from our docs</button>
+    <button type="button" class="btn" data-goal="1" aria-pressed="false">Follow our rules, always</button>
+    <button type="button" class="btn" data-goal="2" aria-pressed="false">Do a task our way, sometimes</button>
+    <button type="button" class="btn" data-goal="3" aria-pressed="false">Use another app</button>
+    <button type="button" class="btn" data-goal="4" aria-pressed="false">Tackle a huge task</button>
+    <button type="button" class="btn" data-goal="5" aria-pressed="false">Guarantee a step</button>
+    <button type="button" class="btn" data-goal="6" aria-pressed="false">Remember next time</button>
+    <button type="button" class="btn" data-goal="7" aria-pressed="false">Change style or cost</button>
+  </div>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <p class="pg-hint" aria-live="polite"></p>
+</div>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ag-1.webp" alt="A child at an open toolbox with a hammer, a screwdriver, a measuring tape, a paintbrush and a flashlight, picking the right tool for each part of a birdhouse." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You are building a birdhouse, and you have a <strong>toolbox</strong>. The hammer is for nails. The screwdriver is for screws. The measuring tape tells you how long to cut the wood. The paintbrush makes it pretty. The flashlight helps you see inside.</p>
+      <p>Each tool is good at <strong>one job</strong>. If you try to hammer in a screw, it goes badly, even though a hammer is a great tool. Building with AI is the same: pick the tool that matches the job.</p>
+      <p class="math-note">Where it breaks: real tools don't share anything, but every AI building block shares one small workbench, the context window. Bring too many onto it at once and the work gets worse.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Every engineer on your team wants the coding agent to know: “run <code>make test</code> before committing, and never edit files in <code>generated/</code>.” What fits best?</p>
+  <ol class="q-src">
+    <li>An Agent Skill</li>
+    <li>A rules file such as AGENTS.md</li>
+    <li>An MCP server</li>
+    <li>Fine-tuning</li>
+  </ol>
+  <div class="q-explain">Conventions that apply to <em>every</em> task belong in the rules file, which is read at the start of every session. A skill is for know-how needed only sometimes. (To make the test run truly guaranteed, you could add a hook too.)</div>
+</div></div>
+
+<h2>Three common mistakes, and how to avoid them</h2>
+<p>Most early agent projects stumble in the same few places. All three come from using a good tool for the wrong job.</p>
+<p><strong>1. Stuffing everything into the system prompt.</strong> It starts small: a paragraph of instructions. Then the refund policy goes in, then the style guide, then 40 example answers, then every tool you might ever need. Soon the prompt is tens of thousands of tokens, each request costs more, and the model starts missing instructions buried in the middle (you will see why in <a href="ag-2.html">AG.2</a>). <em>Instead:</em> keep standing instructions short; fetch documents with retrieval when a question needs them; move occasional procedures into skills.</p>
+<p><strong>2. Building an MCP server for something a rules file would solve.</strong> A team wants the agent to “know our build commands”, so it builds a server with a <code>get_build_commands</code> tool. Now there is a program to host, secure and update, and the agent has to remember to call it. Three lines in AGENTS.md would do the same job, always present and free. <em>Rule of thumb:</em> MCP is for <em>live</em> systems the agent must read or change (databases, tickets, calendars), not for facts that fit on an index card.</p>
+<p><strong>3. Using a prompt where a hook is needed.</strong> “NEVER run <code>git push --force</code>” in a prompt works most of the time. Most of the time is not good enough for a destructive action, and text the agent reads (a web page, a tool result) can even trick it into ignoring instructions. <em>Instead:</em> enforce it in code, with a hook or a permission setting that blocks the command, and keep the prompt for things where “usually” is fine.</p>
+<p>A fourth, quieter one: <strong>fine-tuning to teach facts.</strong> Training is slow and costly, and models don't reliably memorise exact facts from a little extra data. Use retrieval for facts and fine-tuning for habits.</p>
+
+<div class="why"><strong>In real practice:</strong> this course is built partly with a coding agent, and its repository has a rules file, <code>CLAUDE.md</code>. One rule reads “no overlapping or clipped text, ever”. But the team doesn't trust the rule alone: a layout-checking script runs automatically on every change and fails the build if two labels collide. Rule for the agent, code for the guarantee. That pairing is the pattern to copy.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A team adds “NEVER delete the production database” to its agent's prompt. What is the main problem?</p>
+  <ol class="q-src">
+    <li>A prompt makes the right behaviour likely, not certain; a destructive action needs a block in code (a hook or permission rule)</li>
+    <li>The sentence is too short for the model to notice</li>
+    <li>Prompts cannot contain the word “never”</li>
+    <li>Nothing; a clear prompt is a guarantee</li>
+  </ol>
+  <div class="q-explain">Models follow instructions very often, not always, and injected text from tools or web pages can push them off course. For anything that must never (or must always) happen, use deterministic code.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">A friend is building a coding agent for their company. Explain the difference between a rules file, an Agent Skill and an MCP server, with one example of each.</p>
+  <div class="model-answer"><strong>Model answer:</strong> A <strong>rules file</strong> (AGENTS.md) holds conventions the agent needs on every task, like “use pnpm and run the linter”, and it is loaded every session. An <strong>Agent Skill</strong> holds a procedure needed only sometimes, like “write release notes in our format”, and only its short description is loaded until a task matches. An <strong>MCP server</strong> connects the agent to a live outside system, like GitHub or the bug tracker, so it can read and change things there.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Your company has 30 internal tools (tickets, CRM, wiki, deploys) and wants three different AI apps to use all of them. What should you build?</p>
+    <ol class="q-src">
+      <li>Separate function-calling code for each tool inside each app: 90 integrations</li>
+      <li>One giant system prompt describing the tools</li>
+      <li>MCP servers for the tools, so every MCP-aware app can use each one</li>
+      <li>A fine-tuned model that knows the tools</li>
+    </ol>
+    <div class="q-explain">Shared access to live systems across several apps is exactly what MCP is for: build each server once and every MCP-aware app can connect. (<a href="ag-3.html">AG.3</a> does the arithmetic: 3 × 30 = 90 integrations versus 3 + 30 = 33 pieces.)</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">The agent's context window keeps overflowing while it researches a large codebase. Which fix targets that directly?</p>
+    <ol class="q-src">
+      <li>Add more rules to AGENTS.md</li>
+      <li>Hand parts of the search to subagents, each with its own window, and keep their short summaries</li>
+      <li>Install more skills</li>
+      <li>Fine-tune the model on the codebase</li>
+    </ol>
+    <div class="q-explain">Subagents isolate the messy exploration in their own windows and return only the findings. Adding rules or skills adds text; fine-tuning on a changing codebase is slow and doesn't free any space.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Connect to M3.1 and M3.7: why is fine-tuning (for example with LoRA) a poor way to keep a bot up to date with this week's prices?</p>
+    <ol class="q-src">
+      <li>Fine-tuning can only change a model's tone</li>
+      <li>LoRA adapters cannot be trained on text</li>
+      <li>Fine-tuning deletes the model's previous knowledge</li>
+      <li>It changes weights through training on examples, which is slow to repeat and doesn't reliably store exact, changing facts; retrieval reads the current price at question time</li>
+    </ol>
+    <div class="q-explain">SFT and LoRA nudge weights with gradient updates on examples (<a href="m3-1.html">M3.1</a>, <a href="m3-7.html">M3.7</a>). That is great for habits, style and format, but every price change would need another training run. Retrieval looks up the current value at question time.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which pairing is wrong?</p>
+    <ol class="q-src">
+      <li>“Remember what we decided last week” → fine-tuning</li>
+      <li>“Answer from our product manuals” → RAG</li>
+      <li>“Always format code before committing” → a hook</li>
+      <li>“Review contracts with our checklist, when asked” → an Agent Skill</li>
+    </ol>
+    <div class="q-explain">Remembering decisions across sessions is a job for memory files or a wiki: plain notes the agent writes and reads back. Training the model for each decision would be slow and unreliable.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>In the moment it answers, a model knows only what is in its <strong>context window</strong>; most building blocks are ways to put the right text there at the right time.</li>
+    <li><strong>Knowledge</strong> → RAG or an LLM wiki. <strong>Conventions</strong> → a rules file. <strong>Occasional procedures</strong> → Agent Skills. <strong>Connections</strong> → tools, shared via MCP.</li>
+    <li><strong>Big or messy tasks</strong> → subagents. <strong>Guarantees</strong> → hooks and code, not prompts. <strong>Memory</strong> → notes the agent writes and reads back.</li>
+    <li><strong>Fine-tuning</strong> changes habits, style and cost at scale; it is the wrong tool for facts that change.</li>
+    <li>Real agents combine several blocks. The skill is matching each need to the right one.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ag-1-a","front":"Rules file vs Agent Skill: when do you use each?","back":"Rules file (AGENTS.md, CLAUDE.md): conventions needed on every task, loaded every session. Agent Skill: a procedure or know-how needed only sometimes; only its short description is loaded until a task matches."},
+  {"id":"ag-1-b","front":"When is an MCP server the right choice, and when is plain function calling enough?","back":"MCP: a tool for a live outside system that many apps or agents should share. Plain function calling: a one-off tool inside your own app."},
+  {"id":"ag-1-c","front":"Something must happen every time, whatever the model decides (run the formatter, block a dangerous command). What do you use?","back":"Deterministic code such as a hook or a permission rule. A prompt only makes the behaviour likely."},
+  {"id":"ag-1-d","front":"The agent must answer from your documents. Which building blocks fit?","back":"Retrieval (RAG): fetch relevant passages per question. For a small, evolving body of knowledge you want summarised and cross-linked once: an LLM wiki."},
+  {"id":"ag-1-e","front":"What is fine-tuning good for in agent work, and what is it bad for?","back":"Good: changing built-in behaviour, style or cost at scale (habits). Bad: keeping facts current, remembering decisions, following project rules."},
+  {"id":"ag-1-f","front":"Name three common mistakes when building agents.","back":"1) Stuffing everything into the system prompt. 2) Building an MCP server for what a rules file would solve. 3) Using a prompt where a hook (deterministic code) is needed."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ag-1-flow.js"></script>
+<script src="../assets/js/anims/ag-1-chooser.js"></script>
+</body>
+</html>

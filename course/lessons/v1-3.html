@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="v1-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Self-supervised vision (MAE, DINO) · LLMs, Animated</title>
+<meta name="description" content="How vision models learn from unlabelled images: contrastive SimCLR and MoCo, BYOL and DINO without negatives, masked autoencoders that hide 75% of an image, and DINOv2 and I-JEPA as general-purpose features.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Self-supervised vision (MAE, DINO)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Vision</span></div>
+<p class="lede">LLMs learn from raw text by predicting what's missing. Can vision models learn from raw images the same way, with no labels and no captions? Yes, and the two big recipes, <strong>comparing views</strong> and <strong>filling in the blanks</strong>, now produce the visual features that much of modern AI is built on.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how contrastive methods (SimCLR, MoCo) and negative-free methods (BYOL, DINO) learn from unlabelled images.</li>
+    <li>Walk through a masked autoencoder and compute how much work masking saves.</li>
+    <li>Say what DINOv2 and I-JEPA added, and when frozen self-supervised features are the right tool.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> everything here is built on the patch-token ViT from <a href="v1-1.html">Vision Transformers (V1.1)</a>. Helpful but optional: the InfoNCE loss from <a href="v1-2.html">CLIP (V1.2)</a>, which SimCLR reuses with two images instead of an image and a caption, and the encoder–decoder idea from <a href="p6-4.html">Autoencoders (P6.4)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the answer stick.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">BERT learns language by hiding about 15% of the words and predicting them. A masked autoencoder for images works best when it hides about…</p>
+    <ol class="q-src">
+      <li>5% of the patches</li>
+      <li>15% of the patches, like BERT</li>
+      <li>40% of the patches</li>
+      <li>75% of the patches</li>
+    </ol>
+    <div class="q-explain">Images are very redundant: a hidden patch can often be filled in from its neighbours without understanding anything. Hiding 75% forces the model to reason about the whole scene, and it also makes training much cheaper.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A model is trained so that two random crops of the same photo get similar vectors. What could go wrong if that's the <em>only</em> rule?</p>
+    <ol class="q-src">
+      <li>It can output the same vector for every image and score perfectly</li>
+      <li>It will memorise every photo</li>
+      <li>Nothing; that rule alone is enough</li>
+      <li>The vectors will grow without limit</li>
+    </ol>
+    <div class="q-explain">This is called <strong>collapse</strong>. Something must stop it: negatives that push other images away (SimCLR, MoCo), or architectural tricks like a momentum teacher, centering and sharpening (BYOL, DINO).</div>
+  </div>
+</section>
+
+<h2>Why learn without labels?</h2>
+<p>Supervised pretraining hit a wall of human effort. ImageNet's 1.28 million training images took years of crowd work; the original ViT needed Google's internal, labelled JFT-300M (<a href="v1-1.html">V1.1</a>). Unlabelled images, by contrast, are essentially free.</p>
+<p>Language had already shown the way. GPT-style models predict the next token and BERT (Devlin et al., 2018) predicts masked words, so the text itself is the label (<a href="m2-2.html">M2.2</a>). This is <strong>self-supervised learning (SSL)</strong>: invent a task whose answer comes from the data, and hope that solving it requires useful features.</p>
+<p>Early vision attempts used hand-designed "pretext tasks": predict how an image was rotated (Gidaris et al., 2018), solve a jigsaw of shuffled tiles (Noroozi &amp; Favaro, 2016), or colourise a grey photo (Zhang et al., 2016). They helped, but stayed well behind supervised pretraining. Two families finally closed the gap:</p>
+<ul>
+  <li><strong>Joint-embedding methods</strong> (2019–2021): show the model two views of the same image and make their embeddings agree.</li>
+  <li><strong>Masked image modelling</strong> (2021 onward): hide parts of the image and predict them, the vision version of BERT.</li>
+</ul>
+<p>How do you know the features are good without labels? Standard tests: a <strong>linear probe</strong> (freeze the network, train only a linear classifier on top), <strong>k-nearest-neighbour</strong> classification in feature space, and <strong>fine-tuning</strong> the whole network on a labelled task.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What does a "linear probe" measure?</p>
+  <ol class="q-src">
+    <li>How fast the network runs</li>
+    <li>How much task-relevant information is already linearly readable from frozen features</li>
+    <li>How many layers the network has</li>
+  </ol>
+  <div class="q-explain">Only a linear classifier is trained, so a high score means the self-supervised features already separate the classes. Fine-tuning tests something different: how good a starting point the weights are.</div>
+</div></div>
+
+<h2>Two views, one embedding: SimCLR, MoCo, BYOL, DINO</h2>
+<p><strong>SimCLR</strong> (Chen et al., 2020) borrows the matching game from <a href="v1-2.html">CLIP</a>, but both sides are images:</p>
+<ol class="steps">
+  <li>Take a batch of $N$ images and make <strong>two random augmentations</strong> of each: random crop and resize, colour jitter, blur, flips. That's $2N$ views.</li>
+  <li>Encode every view (a ResNet in the paper), then pass it through a small <strong>projection head</strong> MLP.</li>
+  <li>For each view, its partner is the <strong>positive</strong> and the other $2N - 2$ views are <strong>negatives</strong>. The loss is InfoNCE with a temperature, called NT-Xent in the paper.</li>
+</ol>
+<p>The augmentations are the whole game: they define what the model should ignore. SimCLR found that <strong>cropping plus colour distortion</strong> mattered most; without colour jitter, the network cheats by matching colour histograms. With a large batch (4,096), a 4×-wide ResNet-50 matched a supervised ResNet-50 under linear evaluation (76.5% top-1 on ImageNet). The projection head is thrown away after training: the layer before it holds more general features.</p>
+<p><strong>MoCo</strong> (He et al., 2020; first posted in 2019) attacked the big-batch requirement. It keeps a <strong>queue</strong> of 65,536 recent embeddings as negatives, produced by a <strong>momentum encoder</strong>: a copy of the network whose weights are a slow moving average of the main one, $\theta_k \leftarrow m\,\theta_k + (1-m)\,\theta_q$ with $m = 0.999$. The slow copy keeps the queued negatives consistent with each other, so you get many negatives on ordinary hardware.</p>
+
+<h3>No negatives needed: BYOL and DINO</h3>
+<p>Negatives cost compute and can push apart images that really are similar. Can two views simply be made to agree, without collapse? <strong>BYOL</strong> (Grill et al., 2020) showed yes. An <strong>online</strong> network, with an extra <strong>predictor</strong> MLP, learns to predict the output of a <strong>target</strong> network for the other view. The target gets no gradients; its weights are a moving average of the online network's, as in MoCo. That asymmetry (predictor plus slow target) turns out to be enough to avoid the trivial constant solution in practice.</p>
+<p><strong>DINO</strong> (Caron et al., 2021), "self-<strong>di</strong>stillation with <strong>no</strong> labels", applies the same idea to ViTs with a twist from knowledge distillation:</p>
+<ul>
+  <li>A <strong>student</strong> and a <strong>teacher</strong> ViT both output a softmax over $K$ dimensions (65,536 in the paper). The teacher is a moving average of the student.</li>
+  <li><strong>Multi-crop:</strong> the teacher sees two large "global" crops; the student also sees several small "local" crops and must match the teacher's output from them. Local-to-global matching teaches "this patch of fur belongs to a whole dog".</li>
+  <li>The loss is cross-entropy from teacher to student: $\;-\sum_{k} P_t(x)_k \log P_s(x')_k$, where $x$ and $x'$ are different crops.</li>
+  <li><strong>Collapse is avoided</strong> by <em>centering</em> the teacher's outputs (subtracting a running mean, so no single dimension always wins) and <em>sharpening</em> them with a low temperature (so the output isn't uniform).</li>
+</ul>
+<p>DINO's surprise: the [CLS] token's attention maps in the last layer outline the main objects in an image, a segmentation that nobody trained for. Its frozen features also made excellent k-NN classifiers.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In DINO, what do centering and sharpening the teacher's output prevent?</p>
+  <ol class="q-src">
+    <li>Collapse: centering stops one dimension from always winning, sharpening stops a flat uniform output</li>
+    <li>Overfitting to the labels</li>
+    <li>The teacher from being updated</li>
+  </ol>
+  <div class="q-explain">Each trick alone fails in a different way; together they balance each other. There are no labels in DINO, and the teacher is updated, just slowly, as a moving average.</div>
+</div></div>
+
+<h2>Masked autoencoders: hide 75%, rebuild it</h2>
+<p>BERT-style masking for images was tried early, but the breakthrough was <strong>MAE</strong> (He et al., 2021, "Masked Autoencoders Are Scalable Vision Learners"). Its design rests on one observation: images are far more redundant than text. Hide one word and the sentence may become ambiguous; hide one patch and you can usually interpolate it from its neighbours. So MAE hides most of the image.</p>
+
+<figure class="anim wide" data-anim="v1-3-mae"></figure>
+
+<p>Three choices make it work, and make it cheap:</p>
+<ul>
+  <li><strong>Very high mask ratio (75%)</strong>, chosen at random per image, so the task needs a global understanding of the scene.</li>
+  <li><strong>Asymmetric encoder–decoder.</strong> The big ViT encoder sees <em>only</em> the visible patches, no placeholders. A small decoder, used only during pretraining, receives the encoded patches plus a shared learned <strong>mask token</strong> in every gap.</li>
+  <li><strong>Pixel loss on masked patches only</strong>, using mean squared error against each patch's pixels (normalised per patch, which gave better features).</li>
+</ul>
+<p>Using only ImageNet-1k images, an MAE-pretrained ViT-Huge reached 87.8% top-1 after fine-tuning, the best result at the time among methods using only ImageNet-1k data. A caveat: MAE features are strong after <em>fine-tuning</em> but weaker than DINO-style features in a linear probe.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-v1-3.webp" alt="A child looks at a picture of a house and garden that is mostly covered by sticky notes, and sketches what is hidden underneath." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Someone covers a picture of a house and garden with <strong>sticky notes</strong>, so you can only see a few small bits: a corner of the roof, some grass, part of a window.</p>
+      <p>Your job is to <strong>draw what's hidden</strong>. To do it well, you have to know what houses and gardens usually look like: roofs sit on walls, grass is at the bottom. Practise this on thousands of pictures and you become an expert at seeing.</p>
+      <p>Where it breaks: the model doesn't keep its drawings. The drawing part is thrown away; what we keep is the "understanding" part that it built along the way.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example: what masking saves</h3>
+<p>ViT-L/16 at 224 × 224, mask ratio 75%.</p>
+<ol class="steps">
+  <li><strong>Patches:</strong> $14 \times 14 = 196$. <strong>Visible:</strong> $0.25 \times 196 = 49$; <strong>masked:</strong> 147.</li>
+  <li><strong>Per-token work</strong> in the encoder (projections and MLPs) scales with the token count: $49/196 = \tfrac14$ of the full cost.</li>
+  <li><strong>Attention pairs:</strong> $49^2 = 2{,}401$ instead of $196^2 = 38{,}416$, which is $\tfrac{1}{16}$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>ViT-H/14 at 224 × 224 (14-pixel patches), mask ratio 75%.</p>
+  <ol class="steps">
+    <li>Number of patches: <span class="blank" data-answer="256" data-tol="0.001" data-hint="224 / 14 = 16 per side."></span></li>
+    <li>Visible patches the encoder sees: <span class="blank" data-answer="64" data-tol="0.001" data-hint="25% of 256."></span></li>
+    <li>Attention pairs per head per encoder layer: <span class="blank" data-answer="4096" data-tol="0.001" data-hint="64 × 64."></span> (versus 65,536 without masking)</li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why does MAE compute its loss only on the masked patches?</p>
+  <ol class="q-src">
+    <li>The visible patches have no pixels</li>
+    <li>To save memory in the encoder</li>
+    <li>Reconstructing patches the model can already see is trivial and teaches little</li>
+  </ol>
+  <div class="q-explain">The learning signal comes from predicting what's hidden. The paper found that also scoring the visible patches lowered accuracy.</div>
+</div></div>
+
+<h2>General-purpose features: DINOv2 and I-JEPA</h2>
+<p>By 2023 the goal shifted from "match supervised pretraining" to "build one <strong>frozen</strong> backbone that works for everything", the vision equivalent of a foundation model.</p>
+<p><strong>DINOv2</strong> (Oquab et al., 2023) got there mostly with data and engineering. It built a curated dataset of 142 million images (LVD-142M) by retrieving web images similar to those in trusted datasets, combined the DINO loss with an iBOT-style masked-token loss (Zhou et al., 2021), and trained a 1.1-billion-parameter ViT-g, then distilled it into smaller ViTs. With the backbone frozen and only small heads trained, its features were strong at classification, segmentation, depth estimation and retrieval. Meta's <strong>DINOv3</strong> (2025) pushed the same recipe to a 7B-parameter model and a much larger image set.</p>
+<p><strong>I-JEPA</strong> (Assran et al., 2023) takes a middle road between the two families. Like MAE it masks, but it predicts the <strong>representations</strong> of hidden blocks, produced by a moving-average target encoder, not their pixels. Skipping pixels means the model needn't waste capacity on textures and noise, and it needs no hand-designed augmentations. The same idea underlies V-JEPA for video.</p>
+<p>A rough guide, as of 2026: use DINOv2/v3-style features when you want strong frozen features (retrieval, k-NN, dense prediction with a light head); MAE-style pretraining when you will fine-tune anyway or need a strong initialisation for a big encoder; CLIP-style features (<a href="v1-2.html">V1.2</a>) when you need a link to language.</p>
+
+<div class="why"><strong>Why this matters for multimodal AI:</strong> self-supervised encoders sit inside many systems you'll meet later. The image encoder of <strong>SAM</strong> is an MAE-pretrained ViT (<a href="v1-4.html">V1.4</a>). Some multimodal LLMs combine a CLIP/SigLIP encoder with DINOv2 features to get both language alignment and fine spatial detail (<a href="mm-1.html">MM.1</a>). And the masked-prediction idea, born in BERT, now runs through vision, video and audio: the same "hide and predict" objective, applied to whatever tokens you have.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What does I-JEPA predict for the hidden parts of an image?</p>
+  <ol class="q-src">
+    <li>Their raw pixels, like MAE</li>
+    <li>Their representations from a moving-average target encoder</li>
+    <li>A caption describing them</li>
+  </ol>
+  <div class="q-explain">Predicting in representation space lets the model focus on what things are rather than on exact textures. MAE predicts pixels; CLIP uses captions.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Contrast the two big self-supervised recipes: what task does each give the model, and what stops it from cheating?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Joint-embedding methods (SimCLR, MoCo, BYOL, DINO) make two augmented views of one image produce matching embeddings; collapse to a constant is prevented by negatives (SimCLR, MoCo) or by a momentum teacher with tricks like a predictor or centering and sharpening (BYOL, DINO). Masked image modelling (MAE) hides most patches and reconstructs them; masking 75% and scoring only the hidden patches stops it from simply copying what it can see.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In SimCLR, what decides which differences the learned features ignore?</p>
+    <ol class="q-src">
+      <li>The class labels</li>
+      <li>The data augmentations: whatever differs between two views of the same image is treated as irrelevant</li>
+      <li>The batch size</li>
+      <li>The projection head's width</li>
+    </ol>
+    <div class="q-explain">Two views of one image must match, so anything the augmentations change (crop position, colour, blur) becomes something the features learn to ignore. That's why colour jitter mattered so much.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In MAE, which part sees the mask tokens?</p>
+    <ol class="q-src">
+      <li>Both the encoder and the decoder</li>
+      <li>Only the encoder</li>
+      <li>Neither; masked patches are simply dropped</li>
+      <li>Only the small decoder; the encoder sees just the visible patches</li>
+    </ol>
+    <div class="q-explain">Keeping mask tokens out of the big encoder is what makes MAE cheap (a quarter of the tokens) and avoids a mismatch at fine-tuning time, when there are no masks.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">BERT masks about 15% of words (its next-token cousin is in <a href="m2-2.html">M2.2</a>); MAE masks 75% of patches. Why the difference?</p>
+    <ol class="q-src">
+      <li>Images are highly redundant, so low masking can be solved by local interpolation; words carry dense meaning, so even 15% is a hard task</li>
+      <li>Images have fewer tokens than sentences</li>
+      <li>Vision Transformers can't handle more than 25% of the tokens</li>
+      <li>It's an arbitrary choice with no effect</li>
+    </ol>
+    <div class="q-explain">The mask ratio sets the difficulty. In MAE's ablations, linear-probe accuracy kept rising as masking increased up to about 75%, and fine-tuning accuracy stayed high across a wide range.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You need frozen image features for a k-nearest-neighbour photo search, with no fine-tuning. Which is the most natural choice?</p>
+    <ol class="q-src">
+      <li>An MAE encoder, used without fine-tuning</li>
+      <li>A randomly initialised ViT</li>
+      <li>A DINOv2-style encoder</li>
+      <li>The MAE decoder</li>
+    </ol>
+    <div class="q-explain">DINO-family features are known for strong k-NN and linear-probe performance out of the box; MAE features shine after fine-tuning. The decoder is thrown away after pretraining.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Self-supervised</strong> learning makes labels from the data itself; quality is judged by linear probes, k-NN and fine-tuning.</li>
+    <li><strong>Contrastive</strong> methods (SimCLR, MoCo) match two augmented views and push other images away; augmentations define what's ignored.</li>
+    <li><strong>BYOL</strong> and <strong>DINO</strong> drop negatives and avoid collapse with a moving-average teacher (plus a predictor, or centering and sharpening).</li>
+    <li><strong>MAE</strong> hides 75% of patches, encodes only the visible quarter and reconstructs pixels with a light decoder: cheap and scalable.</li>
+    <li><strong>DINOv2</strong> gives strong frozen general-purpose features; <strong>I-JEPA</strong> predicts hidden parts in representation space.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"v1-3-a","front":"How does SimCLR learn without labels?","back":"Two random augmentations of each image are positives; all other views in the batch are negatives; an InfoNCE (NT-Xent) loss pulls positives together. Augmentations (crop + colour jitter) define what the features ignore (Chen et al., 2020)."},
+  {"id":"v1-3-b","front":"What are MoCo's two key components?","back":"A queue of many past embeddings used as negatives, and a momentum encoder (weights = slow moving average, $m = 0.999$) that keeps those queued negatives consistent (He et al., 2020)."},
+  {"id":"v1-3-c","front":"How do BYOL and DINO avoid collapse without negatives?","back":"A teacher/target network that is a moving average of the student. BYOL adds a predictor on the online side; DINO centers and sharpens the teacher's softmax output."},
+  {"id":"v1-3-d","front":"Describe MAE's design in three points.","back":"Mask 75% of patches at random; a big ViT encoder sees only the visible patches; a light decoder gets encoded patches + mask tokens and reconstructs pixels, with MSE only on masked patches (He et al., 2021)."},
+  {"id":"v1-3-e","front":"How much encoder attention does MAE save at 75% masking (196 patches)?","back":"49 visible tokens: per-token work ¼, attention pairs $49^2 = 2{,}401$ vs $196^2 = 38{,}416$, i.e. $1/16$."},
+  {"id":"v1-3-f","front":"What did DINOv2 and I-JEPA each contribute?","back":"DINOv2 (Oquab et al., 2023): curated 142M-image data + DINO/iBOT losses → strong frozen general-purpose features. I-JEPA (Assran et al., 2023): predict hidden blocks' representations, not pixels, without hand-made augmentations."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/v1-3-mae.js"></script>
+</body>
+</html>

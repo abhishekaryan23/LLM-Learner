@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p5-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bayes' rule &amp; latent variables · LLMs, Animated</title>
+<meta name="description" content="Bayes' rule with a worked base-rate example, prior, likelihood, evidence and posterior, latent-variable models and why their posterior is intractable, and the ELBO that trains VAEs and diffusion models.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Bayes' rule &amp; latent variables</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Math for generative models</span></div>
+<p class="lede">You see the evidence and want the cause: a positive test and want the diagnosis, a photo and want the hidden code that generated it. <strong>Bayes' rule</strong> turns "how likely is this evidence, given the cause?" into "how likely is the cause, given this evidence?". It's also the reason VAEs and diffusion models train on a strange-looking quantity called the <strong>ELBO</strong>.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Apply Bayes' rule to a base-rate problem and name the prior, likelihood, evidence and posterior.</li>
+    <li>Explain what a latent-variable model is, and why its posterior $p(z \mid x)$ is usually intractable.</li>
+    <li>State the ELBO in words and in one line of maths, and say why VAEs and diffusion models maximise it.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> conditional probability and the chain rule of probability from <a href="p1-5.html">Probability &amp; expectation (P1.5)</a>. Helpful but optional: KL divergence from <a href="p1-6.html">Entropy, cross-entropy &amp; KL (P1.6)</a> and Gaussians from <a href="p5-1.html">Gaussians &amp; noise (P5.1)</a>. This lesson feeds <a href="p6-4.html">Autoencoders (P6.4)</a>, <a href="g1-1.html">VAEs (G1.1)</a> and <a href="g1-3.html">Diffusion from scratch (G1.3)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">1% of people have a disease. A test catches 90% of sick people but also flags 9% of healthy people. You test positive. Roughly how likely is it that you have the disease?</p>
+    <ol class="q-src">
+      <li>About 90%</li>
+      <li>About 50%</li>
+      <li>About 9%</li>
+      <li>About 1%</li>
+    </ol>
+    <div class="q-explain">About 9%. Out of 1,000 people, 9 sick people test positive but so do about 89 healthy ones, so only 9 of the 98 positives are sick. Most people guess 90%; ignoring how rare the disease is has a name, <strong>base-rate neglect</strong>.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">An image generator draws a random code vector $z$ and decodes it into a picture. You're handed a photo $x$. Which code produced it?</p>
+    <ol class="q-src">
+      <li>You can read it off directly: each image has exactly one code</li>
+      <li>Many codes could have; you need the distribution $p(z \mid x)$, which is usually too hard to compute exactly</li>
+      <li>The code is always the zero vector</li>
+      <li>The question makes no sense, because codes are random</li>
+    </ol>
+    <div class="q-explain">Working back from data to hidden causes is <strong>inference</strong>, and for neural generators the exact answer is out of reach. Training them anyway is what the ELBO is for.</div>
+  </div>
+</section>
+
+<h2>Turning P(evidence | cause) around</h2>
+<p>Thomas Bayes, an English minister, worked out how to reason from effects back to causes. He never published it: his friend Richard Price found the essay among his papers and had it read to the Royal Society in 1763, two years after Bayes died. Pierre-Simon Laplace rediscovered the idea independently in 1774 and turned it into a working tool for astronomy and population statistics.</p>
+<p>It falls straight out of conditional probability (<a href="p1-5.html">P1.5</a>). The chance that a hypothesis $H$ and evidence $E$ both hold can be written two ways: $P(H \text{ and } E) = P(E \mid H)\,P(H) = P(H \mid E)\,P(E)$. Divide by $P(E)$:</p>
+$$\underbrace{P(H \mid E)}_{\text{posterior}} = \frac{\overbrace{P(E \mid H)}^{\text{likelihood}}\;\overbrace{P(H)}^{\text{prior}}}{\underbrace{P(E)}_{\text{evidence}}}$$
+<ul>
+  <li><strong>Prior</strong> $P(H)$: what you believed before seeing anything (1% of people have the disease).</li>
+  <li><strong>Likelihood</strong> $P(E \mid H)$: how well the hypothesis predicts the evidence (a sick person tests positive 90% of the time).</li>
+  <li><strong>Evidence</strong> $P(E)$: how likely the evidence is overall, under every hypothesis. It rescales the result so the posteriors sum to 1.</li>
+  <li><strong>Posterior</strong> $P(H \mid E)$: your updated belief after the evidence.</li>
+</ul>
+<p>The easiest way to see it work is to count people instead of multiplying percentages:</p>
+
+<figure class="anim wide" data-anim="p5-2-bayes"></figure>
+
+<p>The test is good, yet a positive result means only about 9%, because healthy people outnumber sick ones 99 to 1. Even a small false-positive rate applied to that huge group swamps the true positives. The likelihood alone (90%) is not the answer; it has to be weighed against the prior.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In the test example, which quantity is the <em>likelihood</em>?</p>
+  <ol class="q-src">
+    <li>$P(+ \mid \text{disease}) = 0.9$</li>
+    <li>$P(\text{disease}) = 0.01$</li>
+    <li>$P(\text{disease} \mid +) \approx 0.09$</li>
+    <li>$P(+) \approx 0.098$</li>
+  </ol>
+  <div class="q-explain">The likelihood is how probable the evidence is under the hypothesis, $P(E \mid H)$. 0.01 is the prior, 0.09 the posterior and 0.098 the evidence.</div>
+</div></div>
+
+<h2>The evidence term, and updating beliefs</h2>
+<p>The denominator is the step people skip. The evidence adds up every way the evidence could have happened, one term per hypothesis (the <strong>law of total probability</strong>):</p>
+$$P(+) = P(+ \mid D)\,P(D) + P(+ \mid \text{healthy})\,P(\text{healthy}) = 0.9 \times 0.01 + 0.09 \times 0.99 = 0.0981$$
+<p>so $P(D \mid +) = 0.009 / 0.0981 \approx 0.092$. Because the evidence is the same for every hypothesis, you'll often see Bayes' rule written as a proportion: <strong>posterior ∝ likelihood × prior</strong>. Compute likelihood × prior for each hypothesis, then divide by the total so they sum to 1.</p>
+<p>Bayes' rule also chains. After one positive test your belief is 9.2%; use that as the prior for a second, independent test, and the posterior becomes $\frac{0.0917 \times 0.9}{0.0917 \times 0.9 + 0.9083 \times 0.09} \approx 0.50$. Each piece of evidence moves the belief, and the order doesn't matter.</p>
+
+<h3>Worked example</h3>
+<p>A cookie jar is knocked over and there are muddy paw prints. In this neighbourhood 30% of the pets that wander in are dogs and 70% are cats. Prints this big come from a dog 80% of the time, but from a cat only 10% of the time.</p>
+<ol class="steps">
+  <li>Likelihood × prior, dog: $0.8 \times 0.3 = 0.24$. Cat: $0.1 \times 0.7 = 0.07$.</li>
+  <li>Evidence: $0.24 + 0.07 = 0.31$.</li>
+  <li>Posterior: $P(\text{dog} \mid \text{prints}) = 0.24 / 0.31 \approx 0.77$. The cat was the likelier visitor, but the prints point to the dog.</li>
+</ol>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-p5-2.webp" alt="A young detective studies muddy paw prints leading to a knocked-over cookie jar; thought bubbles show a dog and a cat as suspects, the dog bubble bigger." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A young detective finds the cookie jar knocked over and muddy paw prints leading to it. Two suspects: the dog and the cat.</p>
+      <p>Before looking closely, the detective thinks "cats sneak in here more often". That's the <strong>prior</strong>. Then they notice the prints are big, the kind a dog makes. That's the <strong>evidence</strong>. Putting both together, the dog's thought bubble grows bigger and the cat's shrinks. That new guess is the <strong>posterior</strong>.</p>
+      <p class="math-note">Where it breaks: a real detective might find a third suspect. Bayes' rule only shares belief among the hypotheses you wrote down, and it needs numbers for how likely each one is to leave those prints.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Your turn (faded example)</h3>
+<p>20% of emails are spam. The word "prize" appears in 40% of spam emails and 2% of normal ones. An email contains "prize".</p>
+<ol class="steps">
+  <li>Likelihood × prior for spam: <span class="blank" data-answer="0.08" data-tol="0.001" data-hint="P(prize | spam) × P(spam) = 0.4 × 0.2."></span></li>
+  <li>Evidence $P(\text{prize})$: <span class="blank" data-answer="0.096" data-tol="0.001" data-hint="Add the spam term to 0.02 × 0.8 for normal email."></span></li>
+  <li>Posterior $P(\text{spam} \mid \text{prize})$, to two decimals: <span class="blank" data-answer="0.83" data-tol="0.01" data-hint="Divide the spam term by the evidence."></span></li>
+</ol>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">A rare disease (prior 0.1%) and a test with 99% sensitivity and a 1% false-positive rate. Before computing anything, which is the best guess for $P(D \mid +)$?</p>
+  <ol class="q-src">
+    <li>About 99%, because the test is very accurate</li>
+    <li>About 50%</li>
+    <li>Under 10%, because false positives from the huge healthy group outnumber true positives</li>
+    <li>Exactly 0.1%, because a test can't change the prior</li>
+  </ol>
+  <div class="q-explain">Per 100,000 people: about 99 true positives versus about 999 false positives, so $P(D \mid +) \approx 99 / 1098 \approx 9\%$. Rare causes stay fairly unlikely even after good evidence.</div>
+</div></div>
+
+<h2>Latent variables: the hidden cause</h2>
+<p>Generative models for images, audio and video almost all assume the data comes from a hidden cause. A <strong>latent variable</strong> $z$ is a quantity the model uses but you never observe: which cluster a point came from, or a compact code that describes a whole image. The model is defined in the "generate" direction: first draw $z$ from a simple <strong>prior</strong> $p(z)$, then draw the data from $p(x \mid z)$. The probability of the data adds up every way it could have been made:</p>
+$$p(x) = \sum_z p(x \mid z)\,p(z) \qquad\text{or, for continuous } z,\qquad p(x) = \int p(x \mid z)\,p(z)\,dz$$
+<p>Reading backwards, from an observed $x$ to its likely causes, is Bayes' rule: $p(z \mid x) = p(x \mid z)\,p(z) / p(x)$. With two possible causes that's easy:</p>
+
+<figure class="anim wide" data-anim="p5-2-latent"></figure>
+
+<p>Now make it realistic. In a VAE, $z$ is a vector of, say, 128 numbers drawn from $\mathcal N(\mathbf 0, \mathbf I)$ (<a href="p5-1.html">P5.1</a>), and $p(x \mid z)$ is a neural-network decoder. The evidence $p(x)$ becomes an integral over all of 128-dimensional space, through a network, with no formula for the answer. You could try averaging $p(x \mid z)$ over random draws of $z$, but almost every random code decodes to an image nothing like your $x$, so the estimate needs astronomically many samples. And without $p(x)$ there's no posterior $p(z \mid x)$ either. This is what "the posterior is <strong>intractable</strong>" means: not unknowable, just impossible to compute exactly at any useful cost.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why is $p(z \mid x)$ intractable for a VAE with a neural-network decoder?</p>
+  <ol class="q-src">
+    <li>Because the prior $p(z)$ is unknown</li>
+    <li>Because the decoder can't compute $p(x \mid z)$</li>
+    <li>Because $z$ is always discrete</li>
+    <li>Because its denominator $p(x) = \int p(x \mid z)\,p(z)\,dz$ is an integral over a huge space with no closed form</li>
+  </ol>
+  <div class="q-explain">The prior is chosen (usually $\mathcal N(\mathbf 0, \mathbf I)$) and the decoder evaluates $p(x \mid z)$ for any one $z$ easily. The problem is summing over <em>all</em> $z$ to get the evidence.</div>
+</div></div>
+
+<h2>KL divergence and the ELBO</h2>
+<p>If the true posterior is out of reach, approximate it. In 2013, Kingma &amp; Welling (and, independently, Rezende, Mohamed &amp; Wierstra in 2014) trained a second network, an <strong>encoder</strong>, to output a simple distribution $q(z \mid x)$, usually a Gaussian with a predicted mean and standard deviation, as a stand-in for $p(z \mid x)$. To measure how wrong a stand-in is, use the <strong>KL divergence</strong> from <a href="p1-6.html">P1.6</a>: it is never negative, zero only when the two distributions match, and not symmetric.</p>
+<p>A few lines of algebra give an identity that holds for <em>any</em> $q$:</p>
+$$\log p(x) = \underbrace{\mathbb E_{z \sim q(z \mid x)}\big[\log p(x \mid z)\big] - D_{\mathrm{KL}}\big(q(z \mid x)\,\|\,p(z)\big)}_{\text{ELBO}} \;+\; D_{\mathrm{KL}}\big(q(z \mid x)\,\|\,p(z \mid x)\big)$$
+<p>The last term is a KL divergence, so it's at least 0. That makes the first part a lower bound on the log-likelihood: the <strong>evidence lower bound</strong>, or <strong>ELBO</strong>. In words, it rewards codes from the encoder that let the decoder <strong>reconstruct</strong> $x$ well, minus a penalty for codes that stray from the <strong>prior</strong>. Everything in it is computable: sample $z = \mu + \sigma\varepsilon$ from the encoder (the reparameterization trick from <a href="p5-1.html">P5.1</a>), decode, and use the closed-form KL between two Gaussians.</p>
+<p>Maximising the ELBO does two jobs at once. It pushes $\log p(x)$ up, so the model explains the data better, and it shrinks the gap, so the encoder's $q(z \mid x)$ moves closer to the true posterior. That is the whole training objective of a VAE (<a href="g1-1.html">G1.1</a>). Diffusion models use the same bound with a twist: their latents are the noisy images $x_1, \dots, x_T$, and the "encoder" is the fixed noising process from <a href="p5-1.html">P5.1</a>. Ho et al. (2020) showed that a simplified, reweighted version of this ELBO becomes "predict the noise that was added", the standard diffusion loss (<a href="g1-3.html">G1.3</a>).</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> an autoregressive LLM has no latent variable. The chain rule of probability (<a href="p1-5.html">P1.5</a>) gives its exact log-likelihood as a sum of next-token log-probabilities, so it can train on the real thing. VAEs and diffusion models trade that exactness for a hidden code or a noise process, and pay with a bound. Bayes' rule still shows up in LLM practice: reading a benchmark score, a classifier flag or a "this text is AI-written" detector always means weighing the likelihood against the base rate.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">For one image, $\log p(x) = -100$ nats and the ELBO is $-103$ nats. What does that tell you?</p>
+  <ol class="q-src">
+    <li>The ELBO is wrong, since a bound can't be below the true value</li>
+    <li>$D_{\mathrm{KL}}\big(q(z \mid x)\,\|\,p(z \mid x)\big) = 3$ nats: the encoder's approximation is imperfect</li>
+    <li>The prior should be changed to $\mathcal N(3, 1)$</li>
+    <li>The decoder reconstructs this image perfectly</li>
+  </ol>
+  <div class="q-explain">The gap between $\log p(x)$ and the ELBO is exactly the KL from $q(z \mid x)$ to the true posterior. A lower bound sitting below the true value is exactly what it should do.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why do VAEs maximise the ELBO instead of the log-likelihood $\log p(x)$ itself?</p>
+  <div class="model-answer"><strong>Model answer:</strong> $\log p(x)$ needs the integral $\int p(x \mid z)\,p(z)\,dz$ over all latent codes, which is intractable for a neural decoder. The ELBO replaces the true posterior with an encoder's approximation $q(z \mid x)$; it is computable, always below $\log p(x)$ by exactly $D_{\mathrm{KL}}(q\,\|\,p(z \mid x))$, so raising it improves the model and the approximation together.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Posterior ∝ likelihood × prior. Why can we drop the evidence $P(E)$ when comparing hypotheses?</p>
+    <ol class="q-src">
+      <li>Because it's always 1</li>
+      <li>Because it's always tiny</li>
+      <li>Because it's the same number for every hypothesis, so it only rescales them to sum to 1</li>
+      <li>Because it equals the prior</li>
+    </ol>
+    <div class="q-explain">$P(E)$ doesn't depend on which hypothesis you're scoring. Compute likelihood × prior for each, then normalise.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In the two-cluster animation, the prior was 30% A but after seeing $x = -0.5$ the posterior was 62% A. Why?</p>
+    <ol class="q-src">
+      <li>Cluster A explains $x = -0.5$ much better (higher $p(x \mid A)$), enough to outweigh its smaller prior</li>
+      <li>Observing data always moves the posterior towards 50/50</li>
+      <li>The prior was updated before seeing $x$</li>
+      <li>Cluster B has a larger variance, which always loses</li>
+    </ol>
+    <div class="q-explain">Posterior ∝ likelihood × prior. $p(x \mid A)$ at $-0.5$ is about 0.21 versus 0.054 for B, roughly four times higher, which beats a prior ratio of 3 to 7.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which statement about the ELBO is true?</p>
+    <ol class="q-src">
+      <li>It is always above $\log p(x)$</li>
+      <li>It equals $\log p(x)$ for any encoder</li>
+      <li>It needs the true posterior $p(z \mid x)$ to compute</li>
+      <li>It is reconstruction quality minus $D_{\mathrm{KL}}(q(z \mid x)\,\|\,p(z))$, and it is at most $\log p(x)$</li>
+    </ol>
+    <div class="q-explain">ELBO $= \mathbb E_q[\log p(x \mid z)] - D_{\mathrm{KL}}(q(z \mid x)\,\|\,p(z))$. It's a lower bound, tight only when $q$ equals the true posterior, and it never needs that posterior.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">(From P1.6) Suppose a lazy encoder outputs exactly the prior, $q(z \mid x) = p(z)$, for every image. What happens to the term $D_{\mathrm{KL}}(q(z \mid x)\,\|\,p(z))$, and what's the catch?</p>
+    <ol class="q-src">
+      <li>It becomes infinite, so training crashes</li>
+      <li>It becomes 0, but the code then carries no information about $x$, so reconstruction suffers</li>
+      <li>It becomes negative, which raises the ELBO</li>
+      <li>Nothing changes; the KL ignores the encoder</li>
+    </ol>
+    <div class="q-explain">KL is 0 exactly when the two distributions match. But a code that's the same for every image can't help the decoder, so the reconstruction term drops. The ELBO balances the two.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Bayes' rule</strong>: posterior $=$ likelihood × prior / evidence. Never read a likelihood as a posterior: weigh it against the base rate.</li>
+    <li>The <strong>evidence</strong> sums likelihood × prior over every hypothesis; posteriors can feed in as new priors.</li>
+    <li>A <strong>latent-variable model</strong> generates $z \sim p(z)$, then $x \sim p(x \mid z)$; $p(x) = \int p(x \mid z)\,p(z)\,dz$.</li>
+    <li>With a neural decoder that integral, and so the posterior $p(z \mid x)$, is <strong>intractable</strong>.</li>
+    <li>The <strong>ELBO</strong> (reconstruction minus KL to the prior) is a computable lower bound on $\log p(x)$; VAEs and diffusion models train on it.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p5-2-a","front":"Write Bayes' rule and name its four parts.","back":"$P(H \\mid E) = \\dfrac{P(E \\mid H)\\,P(H)}{P(E)}$: posterior = likelihood × prior / evidence."},
+  {"id":"p5-2-b","front":"Prior 1%, sensitivity 90%, false-positive rate 9%. What is $P(D \\mid +)$, and why so low?","back":"About 9%: $0.009 / (0.009 + 0.0891)$. Healthy people outnumber sick ones 99 to 1, so their false positives swamp the true positives (base-rate neglect)."},
+  {"id":"p5-2-c","front":"What is a latent-variable model? Write $p(x)$.","back":"A model that draws a hidden cause $z \\sim p(z)$, then data $x \\sim p(x \\mid z)$. $p(x) = \\int p(x \\mid z)\\,p(z)\\,dz$ (a sum for discrete $z$)."},
+  {"id":"p5-2-d","front":"Why is the posterior $p(z \\mid x)$ intractable for a VAE?","back":"Its denominator $p(x)$ integrates the neural decoder over all of a high-dimensional latent space. There's no closed form, and random sampling almost never hits codes that explain $x$."},
+  {"id":"p5-2-e","front":"Write the ELBO and its relation to $\\log p(x)$.","back":"ELBO $= \\mathbb E_{q(z \\mid x)}[\\log p(x \\mid z)] - D_{\\mathrm{KL}}(q(z \\mid x)\\,\\|\\,p(z))$, and $\\log p(x) = \\text{ELBO} + D_{\\mathrm{KL}}(q(z \\mid x)\\,\\|\\,p(z \\mid x)) \\ge \\text{ELBO}$."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p5-2-bayes.js"></script>
+<script src="../assets/js/anims/p5-2-latent.js"></script>
+</body>
+</html>

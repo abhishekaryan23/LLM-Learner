@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="h1-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>From perceptrons to backprop (1943–1986) · LLMs, Animated</title>
+<meta name="description" content="How AI began: the logic neuron, Rosenblatt's perceptron, the XOR problem, the first AI winter, expert systems and the arrival of backpropagation.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>From perceptrons to backprop (1943–1986)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of The story of AI</span></div>
+<p class="lede">Every model in this course, from a tiny classifier to a trillion-parameter LLM, descends from one idea from the 1940s: an artificial neuron that adds up its inputs. This lesson follows that idea through its first forty years: early hype, a famous failure, a long winter, and the algorithm that brought it back.</p>
+
+<div class="cover"><img src="../assets/img/cover-h1.webp" alt="Illustration: a winding timeline path leads from a single glowing node and a punch-card machine, past a room-sized vintage computer and layered network towers, to a modern glowing data center under a starry sky." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what a perceptron computes, and run its learning rule by hand.</li>
+    <li>Say why a single perceptron can't learn XOR, and how a hidden layer fixes it.</li>
+    <li>Place the key events from 1943 to 1986 in order, including both AI winters' causes.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> none. This is a good first lesson: it only needs school maths (adding and multiplying). Each idea links forward to the lesson that teaches it properly.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">The first mathematical model of a neuron (1943) could…</p>
+    <ol class="q-src">
+      <li>Learn from examples, like today's networks</li>
+      <li>Recognise handwritten digits</li>
+      <li>Compute simple logic, but only with connections set by hand</li>
+      <li>Hold a short conversation</li>
+    </ol>
+    <div class="q-explain">McCulloch and Pitts showed that on/off "neurons" with thresholds can compute logic like AND and OR. Learning the connections came later, with Hebb's idea (1949) and Rosenblatt's perceptron (1958).</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In 1969 a famous book showed a simple neural network couldn't learn one very basic function. Which?</p>
+    <ol class="q-src">
+      <li>AND: "both inputs on"</li>
+      <li>XOR: "exactly one input on"</li>
+      <li>OR: "at least one input on"</li>
+      <li>NOT: "flip the input"</li>
+    </ol>
+    <div class="q-explain">XOR. A single-layer perceptron draws one straight line, and no straight line separates XOR's two classes. You'll see why in a few minutes.</div>
+  </div>
+</section>
+
+<h2>A neuron made of logic (1943–1958)</h2>
+<p>In the 1940s, the first electronic computers were being built, and people wondered whether a machine could think the way a brain does. In <strong>1943</strong>, neurophysiologist Warren McCulloch and logician Walter Pitts published a simple model of a brain cell. Their neuron receives on/off signals, adds them up, and <strong>fires</strong> (outputs 1) if the total reaches a <strong>threshold</strong>. With the right wiring, networks of these units compute logic such as AND, OR and NOT.</p>
+<p>The catch: someone had to choose every connection and threshold by hand. Nothing was learned.</p>
+<p>In <strong>1949</strong>, psychologist Donald Hebb proposed how real brains might learn: when one cell repeatedly helps another to fire, the connection between them grows stronger. "Learning means changing connection strengths" is still the core idea. Today we call those strengths <strong>weights</strong>, and training a model means adjusting them.</p>
+<p>In <strong>1958</strong>, Frank Rosenblatt, a psychologist at the Cornell Aeronautical Laboratory, combined the two ideas in the <strong>perceptron</strong>: a neuron that learns its own weights from labelled examples. He first simulated it on an IBM 704 computer. The custom <strong>Mark I Perceptron</strong> hardware that followed had a 20×20 grid of light sensors (400 "pixels"), with weights stored in motor-driven dials, and learned to tell simple shapes apart. The press went wild. A 1958 <em>New York Times</em> report said the US Navy expected the machine to eventually "walk, talk, see, write, reproduce itself and be conscious of its existence". That was the first big wave of AI hype, and not the last.</p>
+
+<figure class="anim wide" data-anim="h1-1-timeline"></figure>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What did Rosenblatt's perceptron add to the McCulloch–Pitts neuron?</p>
+  <ol class="q-src">
+    <li>A threshold, so the neuron outputs 0 or 1</li>
+    <li>A rule for learning its own weights from labelled examples</li>
+    <li>Many hidden layers</li>
+    <li>The ability to process language</li>
+  </ol>
+  <div class="q-explain">McCulloch–Pitts units already had thresholds, but their connections were fixed by hand. The perceptron's big step was <em>learning</em> its weights from data, in the spirit of Hebb's idea.</div>
+</div></div>
+
+<h2>How the perceptron learns</h2>
+<p>Take a perceptron with two inputs $x_1$ and $x_2$ (each a number, here 0 or 1). It has a <strong>weight</strong> for each input, $w_1$ and $w_2$, and a <strong>bias</strong> $b$. It computes a score and turns it into a yes/no answer:</p>
+$$\text{score} = w_1 x_1 + w_2 x_2 + b, \qquad \text{output} = \begin{cases} 1 & \text{if score} > 0 \\ 0 & \text{otherwise} \end{cases}$$
+<p>Each weight says how much an input pushes toward "yes", and the bias sets how easy it is to say yes at all. Geometrically, the inputs where the score is exactly 0 form a <strong>straight line</strong>, the <strong>decision boundary</strong>: points on one side get 1, the rest get 0.</p>
+<p>Learning works one example at a time. Each example has a correct answer, the <strong>target</strong> $t$ (0 or 1). Compare it with the output $\hat y$ ("y-hat"). If they match, change nothing. If not, nudge every weight:</p>
+$$w_i \leftarrow w_i + \eta\,(t - \hat y)\,x_i, \qquad b \leftarrow b + \eta\,(t - \hat y)$$
+<p>Here $\eta$ (eta) is the <strong>learning rate</strong>, a small step size. $t - \hat y$ is $+1$ if the perceptron said 0 but should have said 1, and $-1$ the other way round. So a wrong "no" raises the weights of the inputs that were on, and a wrong "yes" lowers them. The <strong>perceptron convergence theorem</strong> (proved in the early 1960s) guarantees that if <em>any</em> straight line separates the two classes, this rule finds one after a finite number of mistakes.</p>
+
+<h3>Worked example</h3>
+<p>Learn AND ("output 1 only if both inputs are 1"), starting from $w_1 = w_2 = b = 0$ with $\eta = 1$.</p>
+<ol class="steps">
+  <li>Input $(1, 1)$, target 1. Score $= 0 + 0 + 0 = 0$, which is not $> 0$, so the output is 0. Wrong: $t - \hat y = +1$.</li>
+  <li>Update: $w_1 = 0 + 1 \cdot 1 \cdot 1 = 1$, $w_2 = 1$, $b = 0 + 1 = 1$.</li>
+  <li>Input $(0, 0)$, target 0. Score $= 0 + 0 + 1 = 1 > 0$, so the output is 1. Wrong: $t - \hat y = -1$.</li>
+  <li>Update: the inputs are 0, so $w_1, w_2$ stay at 1, and $b = 1 - 1 = 0$. Keep going until a full pass makes no mistakes.</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<p>Still learning AND with $\eta = 1$. The weights are now $w_1 = 1$, $w_2 = 1$, $b = 0$, and the next example is input $(0, 1)$ with target 0.</p>
+<ol class="steps">
+  <li>Score $w_1 x_1 + w_2 x_2 + b$: <span class="blank" data-answer="1" data-tol="0.001" data-hint="1·0 + 1·1 + 0."></span></li>
+  <li>The output is 1 (score &gt; 0), so the error $t - \hat y$ is: <span class="blank" data-answer="-1" data-tol="0.001" data-hint="Target 0 minus output 1."></span></li>
+  <li>New $w_2 = w_2 + \eta\,(t - \hat y)\,x_2$: <span class="blank" data-answer="0" data-tol="0.001" data-hint="1 + 1 · (−1) · 1."></span></li>
+  <li>New $b = b + \eta\,(t - \hat y)$: <span class="blank" data-answer="-1" data-tol="0.001" data-hint="0 + (−1)."></span></li>
+</ol>
+
+<div class="playground" id="h1-1-playground">
+  <h3>Playground: train a perceptron</h3>
+  <p class="math-note" style="margin:0">Pick a logic function and press <strong>Step</strong> to apply the rule to one point, or <strong>Train</strong> to run it. Then try XOR, and switch to the hidden-layer network.</p>
+  <div class="pg-stage"></div>
+  <div class="chips" role="group" aria-label="Logic function" style="margin-top:10px">
+    <button type="button" class="chip" data-ds="and" aria-pressed="true" style="min-height:44px">AND</button>
+    <button type="button" class="chip" data-ds="or" aria-pressed="false" style="min-height:44px">OR</button>
+    <button type="button" class="chip" data-ds="xor" aria-pressed="false" style="min-height:44px">XOR</button>
+  </div>
+  <div class="chips" role="group" aria-label="Model" style="margin-top:8px">
+    <button type="button" class="chip" data-model="perc" aria-pressed="true" style="min-height:44px">Perceptron (1958)</button>
+    <button type="button" class="chip" data-model="mlp" aria-pressed="false" style="min-height:44px">Hidden layer + backprop (1986)</button>
+  </div>
+  <div class="pg-buttons" style="margin-top:10px">
+    <button type="button" class="btn" data-act="step">Step</button>
+    <button type="button" class="btn btn-primary" data-act="train">Train</button>
+    <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p class="math-note">Rusty on what a learning rate does? You'll meet it properly in <a href="p2-2.html">P2.2 <em>Gradient descent</em></a>, where the same "nudge the weights" idea is driven by slopes instead of a yes/no error.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A perceptron outputs 1 for an example whose target is 0. What does the rule do to the weight of an input that was 0?</p>
+  <ol class="q-src">
+    <li>Nothing: the change is $\eta\,(t - \hat y)\,x_i$, and $x_i = 0$</li>
+    <li>Lowers it by $\eta$</li>
+    <li>Raises it by $\eta$</li>
+    <li>Resets it to 0</li>
+  </ol>
+  <div class="q-explain">The update multiplies by the input itself. An input that was off played no part in the mistake, so its weight is left alone. Only the bias (whose "input" is always 1) changes too.</div>
+</div></div>
+
+<h2>XOR: what one straight line can't do</h2>
+<p>The perceptron's decision boundary is always a <strong>straight line</strong> (with more inputs, a flat plane). So it can only learn problems where one line puts all the 1s on one side and all the 0s on the other. Such problems are <strong>linearly separable</strong>. AND and OR are. <strong>XOR</strong> ("exclusive or": 1 when exactly one input is on) is not. Its 1s sit on one diagonal of the square and its 0s on the other, and any line you draw leaves at least one point on the wrong side.</p>
+
+<figure class="anim wide" data-anim="h1-1-perceptron"></figure>
+
+<p>In <strong>1969</strong>, Marvin Minsky and Seymour Papert published <em>Perceptrons</em>, a careful mathematical study of what single-layer perceptrons can and can't compute. XOR is the simplest example of the limits they proved. They knew that adding a <strong>hidden layer</strong> fixes it, as the animation shows: two hidden units each draw a line, and the output combines them. But in 1969 nobody had a practical way to <em>train</em> hidden units. The perceptron rule needs to know each unit's correct answer, and hidden units don't have one.</p>
+<p>The book is often blamed for killing neural-network research for a decade. Historians argue about how much it really caused, since funding was already shifting. Either way, the field went quiet.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>You have red and blue marbles on a table, and you must split them with <strong>one long ruler</strong>. If the reds are all on the left and the blues on the right, easy: lay the ruler between them. That's what a perceptron does.</p>
+    <p>Now the marbles are like a checkerboard: red in two opposite corners, blue in the other two. However you lay one ruler, a red ends up with the blues. But with <strong>two rulers</strong> you can fence off the middle strip. A hidden layer gives the network more rulers.</p>
+    <p class="math-note">Where it breaks: real hidden units don't make hard ruler edges. They make soft, bendy boundaries, and with many of them a network can carve almost any shape.</p>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why can't a single perceptron learn XOR, however long it trains?</p>
+  <ol class="q-src">
+    <li>Its learning rate is too small</li>
+    <li>XOR needs more than four training examples</li>
+    <li>Its decision boundary is one straight line, and no line separates XOR's classes</li>
+    <li>The rule only works for AND</li>
+  </ol>
+  <div class="q-explain">The limit is in what the model can <em>represent</em>, not in how it's trained. No setting of $w_1, w_2, b$ gets all four XOR points right; the best is 3 of 4.</div>
+</div></div>
+
+<h2>Winter, and the rule-writers (1970s–1980s)</h2>
+<p>The early promises (machines that translate, see and reason within a decade or two) didn't come true. In <strong>1973</strong>, the mathematician Sir James Lighthill wrote a report for the UK's Science Research Council that judged AI to have failed its "grandiose objectives". The UK cut most of its AI funding. In the US, the defence research agency DARPA shifted around the same time to narrower, mission-focused projects. This funding drought, roughly the mid-1970s to around 1980, is called the first <strong>AI winter</strong>.</p>
+<p>When AI came back in the 1980s, it wasn't neural networks. It was <strong>symbolic AI</strong>: intelligence as logic and symbols, written down by people. The flagship was the <strong>expert system</strong>, a program built from hundreds or thousands of hand-written IF–THEN rules collected by interviewing human experts.</p>
+<ul>
+  <li><strong>MYCIN</strong> (Stanford, 1970s) suggested antibiotics for serious blood infections using several hundred rules, each with a "certainty factor". In a blinded comparison its advice was rated about as highly as infectious-disease experts', but it was never used on real patients.</li>
+  <li><strong>XCON</strong> (also called R1, from 1980) configured computer orders at Digital Equipment Corporation and was a genuine commercial success.</li>
+</ul>
+<p>Companies poured money in. But expert systems were <strong>brittle</strong>: they failed on anything their rules didn't cover, couldn't learn from data, and became very costly to maintain as the rules piled up. In 1987 the market for specialised AI hardware (Lisp machines) collapsed, and a <strong>second AI winter</strong> followed into the early 1990s.</p>
+<p>The lasting lesson: hand-writing knowledge doesn't scale. The approach that eventually won, and that powers every LLM, is to <strong>learn</strong> from huge amounts of data.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">What was the main weakness of 1980s expert systems?</p>
+  <ol class="q-src">
+    <li>They needed huge GPUs</li>
+    <li>They could only do arithmetic</li>
+    <li>They were neural networks, so nobody could explain them</li>
+    <li>Their knowledge was hand-written rules: brittle outside those rules and costly to maintain</li>
+  </ol>
+  <div class="q-explain">Expert systems didn't learn. Every piece of knowledge had to be written as a rule, so they broke on unexpected cases and grew expensive to keep up to date.</div>
+</div></div>
+
+<h2>Backprop: training the hidden layers (1970–1986)</h2>
+<p>Hidden layers were known to fix XOR. The open problem was <strong>credit assignment</strong>: when the network's final answer is wrong, how much is each hidden weight to blame? The answer is <strong>backpropagation</strong>. Make every unit smooth (an S-shaped curve instead of a hard 0/1 step) so that small weight changes cause small output changes. Then work backwards from the error, layer by layer, using the chain rule from calculus. You get, for every weight, how much the error would change if you nudged it: its <strong>gradient</strong>. Then nudge every weight a little downhill.</p>
+<p>The idea arrived in pieces:</p>
+<ul>
+  <li><strong>1970:</strong> Seppo Linnainmaa, in his master's thesis in Finland, described <strong>reverse-mode automatic differentiation</strong>: an efficient way to get the gradient of any chain of calculations. It wasn't about neural networks yet.</li>
+  <li><strong>1974:</strong> Paul Werbos's PhD thesis at Harvard proposed using it to train neural networks. Few people noticed.</li>
+  <li><strong>1986:</strong> David Rumelhart, Geoffrey Hinton and Ronald Williams published "Learning representations by back-propagating errors" in <em>Nature</em>. They showed that hidden units trained this way discover useful features on their own. This paper made backprop famous. (Others, including David Parker and Yann LeCun, found versions of it in the mid-1980s too.)</li>
+</ul>
+<p>Backprop revived neural networks in the late 1980s. But computers were slow and data was scarce, and for a while simpler methods often won (that's the next lesson). The algorithm itself, though, never went away. Hinton later shared the 2018 Turing Award (with Yann LeCun and Yoshua Bengio) and the 2024 Nobel Prize in Physics (with John Hopfield) for this line of work.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> training GPT-style models is backpropagation plus gradient descent, the same recipe as 1986, on billions of weights. PyTorch's <code>loss.backward()</code> is reverse-mode automatic differentiation, Linnainmaa's 1970 idea. You'll build backprop yourself in <a href="p2-3.html">P2.3 <em>Backpropagation</em></a>, stack neurons into networks in <a href="p3-1.html">P3.1 <em>MLPs</em></a>, and use autograd in <a href="p4-1.html">P4.1 <em>Tensors &amp; autograd</em></a>.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What problem did backpropagation solve?</p>
+  <ol class="q-src">
+    <li>Making computers fast enough for neural networks</li>
+    <li>Working out how much each hidden weight contributed to the error, so hidden layers could be trained</li>
+    <li>Collecting enough labelled data</li>
+    <li>Proving that perceptrons always converge</li>
+  </ol>
+  <div class="q-explain">Hidden units have no target of their own, so the perceptron rule can't train them. Backprop passes the error backwards with the chain rule and gives every weight its gradient: its share of the blame.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why did hidden layers alone not rescue neural networks in 1969, and what changed by 1986?</p>
+  <div class="model-answer"><strong>Model answer:</strong> A hidden layer can represent XOR, but the perceptron rule can't train hidden units because they have no target answer. Backpropagation (with smooth units) computes how much each hidden weight contributed to the output error, so whole multi-layer networks could finally be trained by gradient descent.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which order is right?</p>
+    <ol class="q-src">
+      <li>McCulloch–Pitts neuron → Hebb's learning idea → perceptron → <em>Perceptrons</em> book → Lighthill report → backprop paper</li>
+      <li>Perceptron → McCulloch–Pitts neuron → Hebb → backprop → <em>Perceptrons</em> book</li>
+      <li>Hebb → perceptron → backprop paper → <em>Perceptrons</em> book → Lighthill report</li>
+      <li>McCulloch–Pitts → perceptron → backprop paper → Hebb → expert systems</li>
+    </ol>
+    <div class="q-explain">1943, 1949, 1958, 1969, 1973, 1986. Backprop's maths existed from 1970 to 1974, but the 1986 paper is what made it famous.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A perceptron with $w_1 = 2$, $w_2 = -1$, $b = -0.5$ sees input $(1, 1)$. What does it output?</p>
+    <ol class="q-src">
+      <li>0, because $w_2$ is negative</li>
+      <li>0, because the score is $-0.5$</li>
+      <li>1, because the score $2 - 1 - 0.5 = 0.5$ is positive</li>
+      <li>It depends on the learning rate</li>
+    </ol>
+    <div class="q-explain">Score $= 2 \cdot 1 + (-1) \cdot 1 - 0.5 = 0.5 &gt; 0$, so the output is 1. The learning rate only matters when updating weights, not when predicting.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which of these could a single perceptron learn perfectly?</p>
+    <ol class="q-src">
+      <li>XOR of two inputs</li>
+      <li>"Exactly one of three inputs is on"</li>
+      <li>Points inside a circle versus outside it</li>
+      <li>OR of two inputs</li>
+    </ol>
+    <div class="q-explain">OR is linearly separable: one line splits $(0,0)$ from the other three points. The other three need a curved or multi-piece boundary, which takes a hidden layer.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">From the course's first lesson (M0.1): you got this lesson's warm-up questions wrong. What does the research say?</p>
+    <ol class="q-src">
+      <li>The guesses were wasted time; you should have read first</li>
+      <li>Guessing first, then getting feedback, makes the right answer stick better</li>
+      <li>Wrong guesses get stored as false memories, so avoid guessing</li>
+      <li>Pretests only help if you score above 50%</li>
+    </ol>
+    <div class="q-explain">This is the pretesting effect (Richland et al., 2009): an attempt before learning, even a wrong one, primes your attention for the answer. See <a href="m0-1.html">M0.1 <em>How memory works</em></a>.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>1943</strong> McCulloch–Pitts: a neuron as a threshold switch (no learning). <strong>1949</strong> Hebb: learning = changing connection strengths.</li>
+    <li><strong>1958</strong> Rosenblatt's perceptron learns weights: on a mistake, $w_i \leftarrow w_i + \eta\,(t - \hat y)\,x_i$.</li>
+    <li>One perceptron draws <strong>one straight line</strong>, so it can't learn XOR (<em>Perceptrons</em>, 1969). A hidden layer can.</li>
+    <li>Over-promising led to <strong>AI winters</strong> (mid-1970s; late 1980s). In between, hand-written <strong>expert systems</strong> boomed, then proved brittle.</li>
+    <li><strong>Backpropagation</strong> (Linnainmaa 1970, Werbos 1974, Rumelhart, Hinton &amp; Williams 1986) trains hidden layers. It still trains every LLM.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>In about 20 minutes: code Rosenblatt's rule in numpy, watch it separate two clusters, see it fail on XOR, then train a tiny two-layer network with backprop that solves it. Runs free in your browser; nothing to install.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="h1-1-perceptron.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"h1-1-a","front":"What did McCulloch & Pitts (1943) and Hebb (1949) each contribute?","back":"McCulloch & Pitts: a neuron as a threshold logic unit (fires if enough inputs are on), wired by hand. Hebb: learning as strengthening connections between cells that are active together."},
+  {"id":"h1-1-b","front":"Write the perceptron's output and its learning rule.","back":"Output 1 if $w_1x_1 + w_2x_2 + b > 0$, else 0. On each example: $w_i \\leftarrow w_i + \\eta\\,(t - \\hat y)\\,x_i$ and $b \\leftarrow b + \\eta\\,(t - \\hat y)$ (no change when correct)."},
+  {"id":"h1-1-c","front":"Why can't a single perceptron learn XOR?","back":"Its decision boundary is a single straight line, and XOR's classes sit on opposite diagonals: not linearly separable. A hidden layer (e.g. OR and NAND units combined by AND) fixes it."},
+  {"id":"h1-1-d","front":"What caused the first AI winter, and what boomed in the 1980s?","back":"Unmet promises; the UK Lighthill report (1973) and US DARPA cuts slashed funding (mid-1970s). The 1980s boom was symbolic AI: hand-written IF–THEN expert systems (MYCIN, XCON), which proved brittle."},
+  {"id":"h1-1-e","front":"Who are the key names and dates behind backpropagation, and what does it compute?","back":"Linnainmaa 1970 (reverse-mode autodiff), Werbos 1974 (applied to neural nets), Rumelhart, Hinton & Williams 1986 (made it famous). It computes every weight's gradient by passing the error backwards with the chain rule."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/h1-timeline-kit.js"></script>
+<script src="../assets/js/anims/h1-1-timeline.js"></script>
+<script src="../assets/js/anims/h1-1-perceptron.js"></script>
+<script src="../assets/js/anims/h1-1-perceptron-playground.js"></script>
+</body>
+</html>

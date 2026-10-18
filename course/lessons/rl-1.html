@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="rl-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agents, environments &amp; rewards · LLMs, Animated</title>
+<meta name="description" content="The reinforcement-learning loop from scratch: states, actions, rewards, episodes, discounted returns, the Markov property, and exploration vs exploitation with a hands-on bandit.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Agents, environments &amp; rewards</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Reinforcement learning</span></div>
+<p class="lede">Nobody hands a chess player the right move for every position. They play, win or lose, and slowly get better. <strong>Reinforcement learning</strong> (RL) is the maths of learning that way: from <em>rewards</em> instead of correct answers. It is also how today's LLMs are polished after pretraining.</p>
+
+<div class="cover"><img src="../assets/img/cover-rl.webp" alt="Illustration: a small robot exploring a grid-shaped maze garden, with star rewards in some cells, a treasure chest in the far corner and arrows hinting at the best direction." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe the agent–environment loop and name its parts: state, action, reward, policy, episode.</li>
+    <li>Compute a discounted return $G_t$ by hand and explain what the discount factor $\gamma$ does.</li>
+    <li>Explain the explore–exploit dilemma and how an $\varepsilon$-greedy agent handles it.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-5.html">Probability &amp; expectation</a> (P1.5): distributions, sampling, and the expected value as a probability-weighted average. RL's goal is literally an expectation: the average return over everything that could happen. No RL background needed.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What does a reinforcement-learning agent get to learn from?</p>
+    <ol class="q-src">
+      <li>A labelled dataset of the correct action for every situation</li>
+      <li>Nothing. It only follows hand-written rules.</li>
+      <li>A number (the reward) after each action, telling it how good the outcome was</li>
+      <li>A copy of an expert's brain</li>
+    </ol>
+    <div class="q-explain">That's the whole difference from supervised learning: no one says <em>which</em> action was right, only how well things went. The agent has to work out which of its choices earned the reward.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A slot-machine player has found a machine that pays out fairly often. Should they ever try the others?</p>
+    <ol class="q-src">
+      <li>Never: switching can only lose money</li>
+      <li>Sometimes: another machine might pay even more, and trying it is the only way to find out</li>
+      <li>Always switch after every pull</li>
+      <li>Only after losing ten times in a row</li>
+    </ol>
+    <div class="q-explain">This is the <strong>explore–exploit dilemma</strong>. Pure exploitation can lock you onto a mediocre choice forever; pure exploration never cashes in. You'll play this exact game below.</div>
+  </div>
+</section>
+
+<h2>Learning from rewards: the agent–environment loop</h2>
+<p>Supervised learning needs the right answer for every example. For many problems nobody has those answers. What is the "correct" move in a backgammon position, or the correct motor command for a robot arm at this exact millisecond? We only find out later whether things went well.</p>
+<p>Reinforcement learning grew up around exactly this problem. Its modern form was pulled together by Richard Sutton and Andrew Barto in the 1980s and their textbook <em>Reinforcement Learning: An Introduction</em> (1998; 2nd edition 2018), work that earned them the 2024 Turing Award. An early showpiece was <strong>TD-Gammon</strong> (Gerald Tesauro, IBM, 1992–95): a small neural network that learned backgammon purely by playing against itself, about 1.5 million games for version 2.1, and reached a level close to the best human players.</p>
+<p>Every RL problem has the same shape, a loop between two parties:</p>
+<ul>
+  <li>The <strong>agent</strong> is the learner and decision maker.</li>
+  <li>The <strong>environment</strong> is everything else: the board, the maze, the user.</li>
+  <li>At each step $t$ the agent sees a <strong>state</strong> $s_t$, picks an <strong>action</strong> $a_t$, and the environment replies with a <strong>reward</strong> $r_{t+1}$ (a number) and the next state $s_{t+1}$.</li>
+  <li>The agent's behaviour is its <strong>policy</strong> $\pi(a \mid s)$: the probability of taking action $a$ in state $s$.</li>
+  <li>A run from a start state to a terminal state is an <strong>episode</strong>.</li>
+</ul>
+<p>All six RL lessons use the same small <strong>gridworld</strong>, so you can carry your intuition from one to the next.</p>
+
+<figure class="anim wide" data-anim="rl-1-loop"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-rl-1.webp" alt="A puppy tries sitting, rolling over and chewing a shoe; sitting earns a treat from a smiling child, while chewing the shoe gets a gentle head shake." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A puppy doesn't understand words like "please sit". It just <strong>tries things</strong>: it sits, it rolls over, it chews a shoe.</p>
+      <p>When it sits, a smiling child gives it a <strong>treat</strong>. When it chews the shoe, it gets a gentle <strong>head shake</strong>. Nobody shows the puppy what to do; it works out which of its own tries lead to treats, and does those more often.</p>
+      <p>The puppy is the <strong>agent</strong>, the room and the child are the <strong>environment</strong>, and treats and head shakes are <strong>rewards</strong>.</p>
+      <p class="math-note">Where it breaks: a puppy gets its treat right away. RL agents often get their reward many steps later (only at the goal), and must figure out which earlier moves deserve the credit.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In the gridworld, which part of the loop decides to move up rather than right?</p>
+  <ol class="q-src">
+    <li>The agent's policy $\pi(a \mid s)$</li>
+    <li>The environment</li>
+    <li>The reward</li>
+    <li>The discount factor</li>
+  </ol>
+  <div class="q-explain">The policy maps a state to (probabilities over) actions. The environment only reacts: it returns the next state and the reward.</div>
+</div></div>
+
+<h2>Returns, discounting and the Markov property</h2>
+<p>The agent wants more than the next reward: it wants a high <strong>return</strong>, the total reward from now on. Later rewards are shrunk by a <strong>discount factor</strong> $\gamma$ (gamma) between 0 and 1:</p>
+$$G_t = r_{t+1} + \gamma\, r_{t+2} + \gamma^2 r_{t+3} + \dots = \sum_{k=0}^{\infty} \gamma^k\, r_{t+k+1}$$
+<p>$G_t$ is the return from time $t$, $r_{t+k+1}$ is the reward $k+1$ steps later, and $\gamma^k$ is its discount. In an episode the sum simply stops at the terminal state.</p>
+<h3>Worked example</h3>
+<p>The animation's goal run: six moves, rewards $0, 0, 0, 0, 0, +1$, with $\gamma = 0.9$.</p>
+<ol class="steps">
+  <li>Only the last reward is non-zero. It arrives $k = 5$ steps after the first one, so its weight is $0.9^5$.</li>
+  <li>$G_0 = 0.9^5 \times 1 = 0.59049 \approx 0.59$.</li>
+  <li>One move later the goal is one step closer: $G_1 = 0.9^4 = 0.6561$. Check the shortcut $G_t = r_{t+1} + \gamma\,G_{t+1}$: $G_0 = 0 + 0.9 \times 0.6561 = 0.59$ ✓</li>
+</ol>
+<p>That last line, the return now equals the next reward plus the discounted return from the next state, is the seed of the Bellman equation in the next lesson.</p>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>An episode gives rewards $r_1 = 1,\ r_2 = 0,\ r_3 = 2$ and then ends. Use $\gamma = 0.5$.</p>
+  <ol class="steps">
+    <li>Weight on $r_3$, which is $k = 2$ steps after $r_1$: <span class="blank" data-answer="0.25" data-tol="0.001" data-hint="γ to the power k: 0.5 × 0.5."></span></li>
+    <li>$G_0 = 1 + 0.5 \times 0 + 0.25 \times 2$ = <span class="blank" data-answer="1.5" data-tol="0.001" data-hint="1 + 0 + 0.5."></span></li>
+    <li>$G_1$ (from the second step on): <span class="blank" data-answer="1" data-tol="0.001" data-hint="r₂ + γ·r₃ = 0 + 0.5 × 2."></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">Check: $G_0 = r_1 + \gamma\,G_1 = 1 + 0.5 \times 1 = 1.5$ ✓</p>
+</section>
+
+<p><strong>What $\gamma$ does.</strong> With $\gamma = 0$ the agent is completely short-sighted: only the next reward counts. With $\gamma$ close to 1 it is far-sighted. A handy rule of thumb: the agent effectively looks about $1/(1-\gamma)$ steps ahead, so $\gamma = 0.9$ is roughly 10 steps and $\gamma = 0.99$ roughly 100. Discounting also keeps the sum finite in tasks that never end, and it rewards reaching the goal <em>sooner</em>: in the gridworld a 6-move path is worth $0.59$, an 8-move path only $0.9^7 \approx 0.48$.</p>
+<p><strong>The formal frame.</strong> Problems like this are modelled as a <strong>Markov decision process</strong> (MDP): a set of states, a set of actions, transition probabilities $P(s' \mid s, a)$, a reward for each transition, and $\gamma$. "Markov" means the <strong>Markov property</strong>: the next state and reward depend only on the current state and action, not on how you got there. The gridworld is Markov because your cell is all that matters. A poker hand is not, if the "state" is only your own cards: what others bet earlier matters too. Then you enlarge the state until it is.</p>
+<p>The agent's objective is the <strong>expected</strong> return, $\mathbb{E}_\pi[G_0]$: policies and environments can both be random, so we average over all the episodes that could happen (P1.5).</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">With $\gamma = 0.9$, an agent can reach the goal (+1) in 3 moves or in 5 moves. Which returns does it get?</p>
+  <ol class="q-src">
+    <li>Both give a return of 1</li>
+    <li>$0.9^3$ and $0.9^5$</li>
+    <li>$0.81$ and about $0.66$</li>
+    <li>$0.27$ and $0.45$</li>
+  </ol>
+  <div class="q-explain">The reward arrives on the last move, $k$ = moves − 1 steps after the first reward: $0.9^2 = 0.81$ and $0.9^4 \approx 0.66$. The shorter path is worth more, so discounting favours getting there sooner.</div>
+</div></div>
+
+<h2>Explore or exploit: the multi-armed bandit</h2>
+<p>Strip away states entirely and one hard problem remains. A <strong>multi-armed bandit</strong> is a row of slot machines ("one-armed bandits"), each paying out with its own unknown odds. Every pull is a one-step episode. Herbert Robbins posed it formally in 1952, and it remains the cleanest picture of RL's central tension:</p>
+<ul>
+  <li><strong>Exploit:</strong> pull the arm that looks best so far, to earn reward now.</li>
+  <li><strong>Explore:</strong> pull a different arm, to learn whether it is better.</li>
+</ul>
+<p>The agent keeps an estimate $Q(a)$ for each arm: the average payout it has seen. After a pull that pays $r$, the running average updates as</p>
+$$Q(a) \leftarrow Q(a) + \frac{1}{N(a)}\big(r - Q(a)\big)$$
+<p>where $N(a)$ is how many times arm $a$ has been pulled. This "old estimate plus a step toward the new evidence" shape will come back in every RL algorithm you meet.</p>
+<p>The simplest fix for the dilemma is <strong>$\varepsilon$-greedy</strong>: with probability $\varepsilon$ (say 0.1) pull a random arm, otherwise pull the arm with the highest $Q$. Smarter rules exist, such as UCB (upper confidence bound; Auer et al., 2002), which explores arms in proportion to how uncertain their estimates still are, but $\varepsilon$-greedy is still widely used.</p>
+
+<div class="playground" id="bandit-playground">
+  <h3>Playground: four slot machines</h3>
+  <p class="math-note" style="margin:0">Each arm pays 1 with a hidden probability, otherwise 0. Pull arms yourself first, then let an $\varepsilon$-greedy agent carry on from your estimates. Try $\varepsilon = 0$, then 0.1, then 1.</p>
+  <div role="group" aria-label="Pull an arm" style="margin-top:12px;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px">
+    <button type="button" class="btn" data-arm="0" style="padding:0 6px">Pull A</button>
+    <button type="button" class="btn" data-arm="1" style="padding:0 6px">Pull B</button>
+    <button type="button" class="btn" data-arm="2" style="padding:0 6px">Pull C</button>
+    <button type="button" class="btn" data-arm="3" style="padding:0 6px">Pull D</button>
+  </div>
+  <div class="pg-stage" style="margin-top:8px"></div>
+  <div class="pg-controls">
+    <label><span>Exploration ε = <output>0.10</output></span>
+      <input type="range" min="0" max="1" step="0.05" value="0.1" aria-describedby="bandit-hint">
+    </label>
+    <div class="pg-buttons">
+      <button type="button" class="btn btn-primary" data-act="run">Agent: 100 pulls</button>
+      <button type="button" class="btn" data-act="reveal" aria-pressed="false">Reveal true odds</button>
+      <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="bandit-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p>Run it a few times. A purely greedy agent ($\varepsilon = 0$) often locks onto whichever arm paid first and never finds the 0.70 arm; in simulation it averages about 0.54 per pull over 500 pulls. With $\varepsilon = 0.1$ it averages about 0.65, and a purely random agent gets about 0.475.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> an LLM is a <strong>policy over tokens</strong>. The state is the prompt plus the tokens written so far, an action is the next token (from a vocabulary of 100k or more), and an <strong>episode is one response</strong>. The reward usually arrives only at the end: a score from a <a href="m3-2.html">reward model</a> trained on human preferences, or a pass/fail from a <a href="m3-5.html">verifier</a> that checks a maths answer or runs unit tests. Because the whole response is scored at once, RLHF is often described as a <em>contextual bandit</em>: one prompt, one "pull", one reward. And exploration is sampling: drawing several different answers at a non-zero temperature, as GRPO does with its groups. <a href="m3-3.html">RLHF with PPO</a> and the reasoning lessons (<a href="rs-3.html">RS.3</a>) build directly on this loop.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">An $\varepsilon$-greedy agent with $\varepsilon = 0.2$ is playing a 4-armed bandit. On a given pull, what is the probability it pulls its current best-looking arm?</p>
+  <ol class="q-src">
+    <li>0.2</li>
+    <li>0.8</li>
+    <li>0.25</li>
+    <li>0.85</li>
+  </ol>
+  <div class="q-explain">It exploits with probability 0.8. When it explores (0.2) it picks uniformly among all 4 arms, which includes the best one with probability 1/4. Total: $0.8 + 0.2 \times 0.25 = 0.85$.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Describe one turn of the agent–environment loop, and say what the agent is trying to maximize.</p>
+  <div class="model-answer"><strong>Model answer:</strong> The agent observes the state, its policy picks an action, and the environment returns a reward and the next state; this repeats until the episode ends. The agent tries to maximize the <strong>expected return</strong>, the sum of future rewards with each one discounted by $\gamma^k$, not just the next reward.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Rewards $r_1 = 0,\ r_2 = 0,\ r_3 = 10$ with $\gamma = 0.9$. What is $G_0$?</p>
+    <ol class="q-src">
+      <li>10</li>
+      <li>8.1</li>
+      <li>9</li>
+      <li>7.29</li>
+    </ol>
+    <div class="q-explain">$G_0 = 0 + 0.9 \times 0 + 0.9^2 \times 10 = 8.1$. The third reward is two steps after the first, so it gets weight $\gamma^2$.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Connect to P1.5: a policy reaches the goal (return 0.59) with probability 0.8 and falls in the pit (return −0.66) with probability 0.2. What is its expected return?</p>
+    <ol class="q-src">
+      <li>−0.07</li>
+      <li>0.59</li>
+      <li>About 0.34</li>
+      <li>About 1.25</li>
+    </ol>
+    <div class="q-explain">Expectation is the probability-weighted average: $0.8 \times 0.59 + 0.2 \times (-0.66) = 0.472 - 0.132 = 0.34$. That number is what RL tries to push up.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which situation breaks the Markov property for the chosen state?</p>
+    <ol class="q-src">
+      <li>A robot's state is only its position, but how it will move next depends on its speed</li>
+      <li>A gridworld whose state is the agent's cell</li>
+      <li>A chess game whose state is the full board, plus whose turn it is and the castling rights</li>
+      <li>A bandit with a single state</li>
+    </ol>
+    <div class="q-explain">Position alone does not determine what happens next if speed matters, so history (where it was a moment ago) still carries information. Adding velocity to the state restores the Markov property.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why does a purely greedy bandit agent ($\varepsilon = 0$) often end up with a mediocre arm?</p>
+    <ol class="q-src">
+      <li>Greedy agents pull arms at random</li>
+      <li>Its estimates are always exactly right</li>
+      <li>The discount factor is too small</li>
+      <li>It never re-tests the other arms, so early bad luck on the best arm is never corrected</li>
+    </ol>
+    <div class="q-explain">If the best arm happens to pay 0 on its first pull, its estimate stays at 0 and a greedy agent never gives it another chance. Exploration is how wrong estimates get fixed.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>RL learns from <strong>rewards</strong>, not labelled answers, through a loop: state → action → reward and next state.</li>
+    <li>A <strong>policy</strong> $\pi(a \mid s)$ chooses actions; an <strong>episode</strong> runs from start to a terminal state.</li>
+    <li>The <strong>return</strong> $G_t = \sum_k \gamma^k r_{t+k+1}$ discounts later rewards; the goal is the highest <em>expected</em> return.</li>
+    <li>An <strong>MDP</strong> assumes the <strong>Markov property</strong>: the current state holds everything needed to predict what happens next.</li>
+    <li><strong>Explore vs exploit</strong>: $\varepsilon$-greedy mostly takes the best-looking action and sometimes a random one. For LLMs, the policy is over tokens and an episode is one response.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"rl-1-a","front":"Name the parts of the RL agent–environment loop.","back":"The agent observes state $s_t$, its policy picks action $a_t$, and the environment returns reward $r_{t+1}$ and next state $s_{t+1}$. Repeat until a terminal state ends the episode."},
+  {"id":"rl-1-b","front":"Write the discounted return and explain $\\gamma$.","back":"$G_t = \\sum_{k \\ge 0} \\gamma^k r_{t+k+1}$. $\\gamma \\in [0,1]$ shrinks later rewards: 0 = only the next reward counts, near 1 = far-sighted (horizon roughly $1/(1-\\gamma)$ steps)."},
+  {"id":"rl-1-c","front":"What is the recursive form of the return?","back":"$G_t = r_{t+1} + \\gamma\\,G_{t+1}$: the next reward plus the discounted return from the next step. It is the seed of the Bellman equation."},
+  {"id":"rl-1-d","front":"What is the Markov property?","back":"The next state and reward depend only on the current state and action, not on the earlier history. If they don't, the state is missing information."},
+  {"id":"rl-1-e","front":"How does an $\\varepsilon$-greedy agent choose, and why?","back":"With probability $\\varepsilon$ it takes a random action (explore), otherwise the action with the highest estimated value (exploit). Without exploration, bad early estimates are never corrected."},
+  {"id":"rl-1-f","front":"Map an LLM onto the RL loop.","back":"Policy = the LLM; state = prompt + tokens so far; action = next token; episode = one response; reward = a reward model's score or a verifier's pass/fail, usually given at the end."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/rl-gridworld.js"></script>
+<script src="../assets/js/anims/rl-1-loop.js"></script>
+<script src="../assets/js/anims/rl-1-bandit-playground.js"></script>
+</body>
+</html>
