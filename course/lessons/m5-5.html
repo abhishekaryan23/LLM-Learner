@@ -33,7 +33,7 @@
   </ul>
 </section>
 
-<div class="why"><strong>Before you start:</strong> you'll need <a href="m1-5.html">KV cache &amp; sampling</a> (generating one token per forward pass, sampling from a probability distribution) and the idea of a <strong>memory-bound</strong> operation from <a href="m5-4.html">FlashAttention &amp; paged attention</a>. Draft models are often small distilled models (<a href="m5-2.html">M5.2</a>).</div>
+<div class="why"><strong>Before you start:</strong> you'll need <a href="m1-5.html">KV cache &amp; sampling</a> (generating one token per forward pass, sampling from a probability distribution) and the idea of a <strong>memory-bound</strong> operation from <a href="m5-4.html">FlashAttention &amp; paged attention</a>. Draft models are often small distilled models (<a href="m5-2.html">M5.2</a>, optional).</div>
 
 <section class="card" data-pretest aria-labelledby="pt">
   <div class="card-label" id="pt">Warm-up · guess before you learn</div>
@@ -165,7 +165,7 @@ $$\text{speedup} \approx \frac{1 - \alpha^{k+1}}{(1 - \alpha)(1 + ck)}$$
 </ul>
 <p class="math-note">Reported speedups for these methods depend heavily on the model, task, hardware and batch size, so compare them on your own workload. Models trained with multi-token-prediction heads (for example DeepSeek-V3, 2024) can reuse those heads as drafters.</p>
 
-<div class="why"><strong>Why this matters in practice:</strong> speculative decoding is a standard option in serving engines such as vLLM, SGLang and TensorRT-LLM. It shines where latency matters and batches are small, as in interactive chat and coding assistants. Because the output distribution is unchanged, you can turn it on without re-running quality evaluations, but you pay in memory for the drafter and its KV cache, and the gain fades as batch size grows.</div>
+<div class="why"><strong>Why this matters in practice:</strong> speculative decoding is a standard option in serving engines such as vLLM, SGLang and TensorRT-LLM. It shines where latency matters and batches are small, as in interactive chat and coding assistants. With the standard accept/reject rule the output distribution is unchanged in exact arithmetic, so quality should not move. Still run your quality evals when you turn it on: implementations differ numerically, and some popular variants (such as typical or relaxed acceptance) trade exactness for speed. You also pay in memory for the drafter and its KV cache, and the gain fades as batch size grows.</div>
 
 <section class="card recall" data-id="explain" aria-labelledby="eb">
   <div class="card-label" id="eb">Explain it back · in two or three sentences</div>

@@ -79,7 +79,7 @@
 <p>The $n \times n$ matrices are huge. At $n = 8{,}192$ tokens in 16-bit, $S$ alone is $8192^2 \times 2$ bytes $= 128$ MiB <em>per head</em>. With 32 heads that's 4 GiB per layer for one sequence, written and read back twice. Memory use grows as $O(n^2)$, and so does the traffic.</p>
 
 <figure class="anim wide" data-anim="m5-4-flash"></figure>
-<p class="math-note">Traffic numbers from Dao et al., 2022, Fig. 2: GPT-2 medium attention (forward + backward) on an A100. The drawing is schematic; real tiles are e.g. 128 rows by the head dimension.</p>
+<p class="math-note">Traffic numbers from Dao et al., 2022, Fig. 1 (right): GPT-2 medium attention (forward + backward) on an A100. The drawing is schematic; real tiles are e.g. 128 rows by the head dimension.</p>
 
 <h2>The trick that makes tiling possible: online softmax</h2>
 <p>Tiling a matrix multiply is easy. The obstacle is the softmax in the middle: to normalise row $i$ you seem to need the <em>whole</em> row first, its max (for stability) and its sum. FlashAttention gets around this with an <strong>online softmax</strong> (Milakov &amp; Gimelshein, 2018; used for memory-efficient attention by Rabe &amp; Staats, 2021). It keeps three running quantities per query row:</p>
@@ -121,7 +121,7 @@ $$\ell' = e^{\,m - m'}\,\ell \;+\; \sum_{j \in B} e^{\,s_j - m'} \qquad a' = e^{
 <ol class="steps">
   <li>Split $Q$ into row blocks and $K$, $V$ into blocks small enough to fit in SRAM.</li>
   <li>For each $Q$ block: loop over the $K/V$ blocks. Score the tile in SRAM, apply the scale and causal mask, and update $m$, $\ell$ and the output accumulator with the online-softmax rule.</li>
-  <li>After the last $K/V$ block, divide by $\ell$ and write that block of $O$ to HBM, plus one number per row (the log-sum-exp $m + \log \ell$) for the backward pass.</li>
+  <li>After the last $K/V$ block, divide by $\ell$ and write that block of $O$ to HBM, plus the running max $m$ and sum $\ell$ of each row for the backward pass (FlashAttention-2 folds them into one log-sum-exp, $m + \log \ell$).</li>
 </ol>
 <p>Training also needs the backward pass, which normally reads $P$ from memory. FlashAttention doesn't store $P$. Instead it <strong>recomputes</strong> the tiles of $S$ and $P$ from $Q$, $K$ and the saved log-sum-exp. That is extra arithmetic, but arithmetic is cheap and memory traffic is not.</p>
 <p>The results, from the paper:</p>

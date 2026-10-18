@@ -15,7 +15,7 @@
       "In a normal transformer block, every token goes through the same <strong>MLP</strong> (feed-forward network), and every one of its parameters is used for every token.",
       "A <strong>mixture-of-experts</strong> (MoE) layer replaces that MLP with several smaller MLPs, the <strong>experts</strong>, plus a tiny <strong>router</strong>. Attention stays shared.",
       "The router is one linear layer plus a softmax: $p = \\mathrm{softmax}(W_r\\,x)$. It gives this token a score for each of the 8 experts.",
-      "Keep the <strong>top-k</strong> (here $k = 2$): E3 and E6. Their scores are renormalized into <strong>gates</strong>: $0.31/0.50 = 0.62$ and $0.19/0.50 = 0.38$.",
+      "Keep the <strong>top-k</strong> (here $k = 2$): E3 and E6. Their scores are renormalized into <strong>gates</strong>: <span style=\"white-space:nowrap\">$0.31/0.50 = 0.62$</span> and <span style=\"white-space:nowrap\">$0.19/0.50 = 0.38$.</span>",
       "Only those 2 experts run. The output is the gate-weighted sum $y = 0.62\\,E_3(x) + 0.38\\,E_6(x)$. The other 6 experts cost <strong>no compute</strong> for this token, but they still sit in memory.",
       "Now a batch of 12 tokens, each picking 2 experts: 24 slots. Routers love favourites: E3 and E6 get 7 and 6. Each expert has a <strong>capacity</strong> (dashed, here 4), and slots beyond it are <strong>dropped</strong> (orange).",
       "A <strong>load-balancing</strong> loss (or a bias tweak) teaches the router to spread tokens evenly: 3 slots each, nothing dropped, and every expert keeps getting trained."

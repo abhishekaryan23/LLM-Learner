@@ -2,7 +2,7 @@
    matrix S and the probability matrix P to slow HBM and reads them back;
    FlashAttention streams Q/K/V tiles through fast on-chip SRAM, keeps a running
    max m, sum ℓ and output accumulator, and only ever writes O.
-   Traffic numbers: Dao et al. 2022, Fig. 2 (GPT-2 medium, A100, fwd+bwd):
+   Traffic numbers: Dao et al. 2022, Fig. 1 (right) (GPT-2 medium, A100, fwd+bwd):
    standard 40.3 GB of HBM reads/writes, FlashAttention 4.4 GB. */
 (function () {
   var LC = window.LC;

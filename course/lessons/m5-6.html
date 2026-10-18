@@ -129,7 +129,7 @@ $$\text{intensity} \approx \frac{2N \cdot T}{2N} = T \ \text{FLOPs per byte}$$
 
 <div class="playground" id="batch-playground">
   <h3>Playground: how big should the batch be?</h3>
-  <p class="math-note" style="margin:0">Toy roofline model of decode only (no prefill, no queueing, perfect kernels): a 7B model in 16-bit (14 GB of weights) on an 80 GB GPU with 2 TB/s and 312 TFLOP/s, and 0.125 MB of KV cache per context token. Step time $=\max\big(\tfrac{14\,\text{GB} + B \cdot \text{KV}}{2\,\text{TB/s}},\ \tfrac{B \cdot 14\,\text{GFLOP}}{312\,\text{TFLOP/s}}\big)$.</p>
+  <p class="math-note" style="margin:0">Toy roofline model of decode only (no prefill, no queueing, perfect kernels): a 7B model in 16-bit (14 GB of weights) on an 80 GB GPU with 2 TB/s and 312 TFLOP/s, and 0.125 MB of KV cache per context token (a grouped-query-attention model such as Llama 3 8B; Llama 2 7B's cache is 4× larger). Step time $=\max\big(\tfrac{14\,\text{GB} + B \cdot \text{KV}}{2\,\text{TB/s}},\ \tfrac{B \cdot 14\,\text{GFLOP}}{312\,\text{TFLOP/s}}\big)$.</p>
   <div class="pg-stage" style="margin-top:10px"></div>
   <div class="pg-controls">
     <label><span>Batch size B = <output>32</output></span>

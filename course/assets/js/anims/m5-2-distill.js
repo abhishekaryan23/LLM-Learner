@@ -2,14 +2,14 @@
    Teacher logits [5, 3, 1.5, 1, -2] for cat, kitten, lion, dog, car.
    softmax(z/1) = [0.844 0.114 0.025 0.015 0.001]; softmax(z/4) = [0.390 0.236 0.163 0.143 0.068].
    Student (T = 4) before: [0.24 0.12 0.14 0.30 0.20], KL(teacher||student) = 0.19 nats;
-   after: [0.383 0.223 0.170 0.149 0.074], KL = 0.001. (Checked in Python.) */
+   after: [0.384 0.223 0.170 0.149 0.074] (sums to 1), KL = 0.0009 ≈ 0.001. (Checked in Python.) */
 (function () {
   var LC = window.LC;
   var CLS = ["cat", "kitten", "lion", "dog", "car"];
   var T1 = [0.844, 0.114, 0.025, 0.015, 0.001];
   var T4 = [0.390, 0.236, 0.163, 0.143, 0.068];
   var S0 = [0.24, 0.12, 0.14, 0.30, 0.20];
-  var S1 = [0.383, 0.223, 0.170, 0.149, 0.074];
+  var S1 = [0.384, 0.223, 0.170, 0.149, 0.074];
 
   LC.anims["m5-2-distill"] = {
     title: "Distillation: learning from soft targets",

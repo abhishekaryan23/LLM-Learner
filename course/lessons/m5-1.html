@@ -79,7 +79,7 @@
     <tr><td>int4</td><td>0.5</td><td>3.5 GB</td><td>35 GB</td></tr>
   </tbody>
 </table>
-<p class="math-note">GB here means $10^9$ bytes. Real 4-bit formats add a little for their scales (about 4.1 to 4.5 bits per weight), and serving also needs room for the KV cache and activations.</p>
+<p class="math-note">GB here means $10^9$ bytes. Real 4-bit formats add a little for their scales (about 4.1 to 4.9 bits per weight: NF4 ≈ 4.1, MXFP4 4.25, llama.cpp's Q4_0 4.5 and Q4_K_M ≈ 4.8 to 4.9), and serving also needs room for the KV cache and activations.</p>
 <p>So a 70B model in bf16 needs two 80 GB GPUs just to hold the weights, while in int4 it fits on one with room to spare. That's the <strong>memory</strong> win.</p>
 <p>The <strong>speed</strong> win is less obvious. When a model generates text for one user, each new token needs one pass through the network, and every weight must be read from GPU memory once. The arithmetic per weight is tiny, so the GPU spends most of its time <em>waiting for bytes</em>. An H100 SXM reads about 3.35 TB/s from its memory, which gives a ceiling of:</p>
 $$\text{tokens/s} \;\lesssim\; \frac{\text{memory bandwidth}}{\text{bytes of weights}} = \frac{3.35\ \text{TB/s}}{14\ \text{GB}} \approx 240 \quad(\text{7B in bf16})$$
