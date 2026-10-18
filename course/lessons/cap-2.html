@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="cap-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Build a tiny diffusion model · LLMs, Animated</title>
+<meta name="description" content="Capstone: build a class-conditional diffusion model from scratch in PyTorch on procedurally drawn 16×16 shapes: noise schedule, denoiser with time embedding, training, DDPM sampling, classifier-free guidance and a 20-step DDIM sampler.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Build a tiny diffusion model</h1>
+<div class="lesson-meta"><span data-mins></span><span>Capstone: image generation, end to end</span></div>
+<p class="lede">The image-generation lessons explained diffusion one piece at a time. Now you build the whole thing: a model that learns to draw shapes from pure static, follows a class label on request, and then does it 50 times faster. It runs on a laptop CPU in about two minutes. This page is the brief: the plan, the milestones with numbers to hit, the places people get stuck, and a rubric.</p>
+
+<div class="cover"><img src="../assets/img/cover-cx.webp" alt="Illustration: two workbenches. On one, a machine turns speckled noise into a picture of a flower; on the other, a robot carrying a backpack of books answers questions while a judge with a clipboard watches." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Implement a class-conditional DDPM from scratch: schedule, time embedding, noise-prediction loss with label dropout, and the sampling loop.</li>
+    <li>Add classifier-free guidance and a deterministic DDIM sampler, and measure what each one buys.</li>
+    <li>Judge a generative model with numbers you trust: validation loss, a classifier "judge" and a visual check.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> this capstone applies <a href="g1-3.html">G1.3 Diffusion from scratch</a> (the forward process, the noise-prediction loss, DDPM and DDIM sampling) and <a href="p4-2.html">P4.2 The training loop</a> (modules, optimizers, the five-line loop). Helpful but optional: <a href="g1-4.html">G1.4 Latent diffusion &amp; guidance</a> for classifier-free guidance, and <a href="g1-5.html">G1.5 Flow matching</a> for a stretch goal.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Two questions to see where you stand.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A brand-new noise predictor that always outputs zeros is scored with the usual loss, the mean squared error against the true noise $\varepsilon \sim \mathcal{N}(0, I)$. What loss does it get?</p>
+    <ol class="q-src">
+      <li>0, because zero is the average noise</li>
+      <li>About 1, the variance of the noise</li>
+      <li>About 0.5</li>
+      <li>It depends on the images</li>
+    </ol>
+    <div class="q-explain">The error is the noise itself, and its average square is its variance: 1. That's your sanity check on day one: an untrained model starts near 1, and a trained one ends well below it.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A DDPM sampler takes 1,000 steps and uses classifier-free guidance. How many denoiser evaluations does one image cost?</p>
+    <ol class="q-src">
+      <li>1</li>
+      <li>1,000</li>
+      <li>2,000: a conditional and an unconditional prediction at every step</li>
+      <li>1,000,000</li>
+    </ol>
+    <div class="q-explain">Guidance needs $\varepsilon_c$ and $\varepsilon_u$ at every step, so the cost doubles (the two are usually batched into one call). Cutting the step count, as DDIM does, is where the big savings are.</div>
+  </div>
+</section>
+
+<h2>The project in one paragraph</h2>
+<p>In 2020, Ho, Jain and Abbeel's "Denoising Diffusion Probabilistic Models" turned a 2015 idea (Sohl-Dickstein et al.) into a recipe anyone could train: noise an image, teach a network to predict the noise, and generate by removing noise step by step. Classifier-free guidance (Ho &amp; Salimans, 2022) and DDIM (Song, Meng &amp; Ermon, 2020) made it controllable and fast. As of 2026 the image and video generators you use are scaled-up descendants of this loop. Building it once, small, is the quickest way to make G1.3 and G1.4 stick.</p>
+<p>The plan: the notebook draws 5,000 images of four shapes (disk, square, triangle, plus) at 16×16 pixels, so there's nothing to download. You write the noise schedule, a time embedding, the training loss, the 1,000-step sampler with guidance, and a 20-step DDIM sampler. A small judge network, trained on clean shapes, tells you what fraction of your samples look like the class you asked for. Budget about 30 minutes to read this page and about an evening for the notebook.</p>
+
+<figure class="anim wide" data-anim="cap-2-pipeline"></figure>
+<p class="math-note">Every picture and number in the animation is real output of the notebook's default CPU run (brightness rounded to 9 levels). Your numbers will differ a little.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>A friend sprinkles sand over chalk drawings: a little sand, or a lot, until the drawing is gone. Your job is to look at a sandy drawing and say <strong>exactly which sand grains were added</strong>. You practise on thousands of drawings until you're good at it.</p>
+      <p>Then the magic trick: start with a board covered only in sand, and brush away a little of the sand you think was "added", over and over. A drawing appears that nobody ever drew. If your friend whispers "make it a triangle" while you brush (that's <strong>guidance</strong>), a triangle appears.</p>
+      <p>Where the analogy breaks: the "sand" is random numbers added to every pixel, and the model never sees a whole drawing appear at once; it only ever predicts the noise for one step.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why does the capstone draw its own 16×16 shapes instead of downloading a real image dataset?</p>
+  <ol class="q-src">
+    <li>It runs anywhere in minutes, and with known classes and clean ±1 pixels you can measure success with a judge network and a pixel check</li>
+    <li>Diffusion models can't learn from photographs</li>
+    <li>16×16 is the only size a U-Net accepts</li>
+    <li>Real datasets have no labels, so guidance is impossible</li>
+  </ol>
+  <div class="q-explain">Small and synthetic means fast iterations and objective checks. The recipe is identical for real photos; only the network and the compute grow.</div>
+</div></div>
+
+<h2>Milestones 1–2: the schedule and the denoiser</h2>
+<p>Each milestone ends with a <strong>checkpoint</strong>: a number or picture that tells you it works before you build on it. The notebook's <code>assert</code> cells check the same things.</p>
+<ol class="steps">
+  <li><strong>Data.</strong> 5,000 training shapes and 1,000 validation shapes, each a $1 \times 16 \times 16$ tensor with values exactly $-1$ or $+1$, and an integer label 0–3. <em>Done when:</em> a grid of 16 training images shows clean shapes of all four classes.</li>
+  <li><strong>Schedule and one-jump noising.</strong> $T = 1000$, $\beta_t$ linear from $10^{-4}$ to $0.02$, $\bar\alpha_t$ by cumulative product, and <code>q_sample(x0, t, eps)</code> returning $x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$ for a whole batch. <em>Done when:</em> $\bar\alpha_{250} \approx 0.524$, $\bar\alpha_{500} \approx 0.079$, $\bar\alpha_{1000} \approx 4 \times 10^{-5}$; the batch mean of $x_t$ shrinks by $\sqrt{\bar\alpha_t}$; and at the last step $x_t$ has standard deviation 1.00 ± 0.05.</li>
+  <li><strong>Time embedding.</strong> The sinusoidal encoding from <a href="m1-3.html">M1.3</a>: frequencies $f_i = 10000^{-i/(d/2)}$, output $[\sin(t f_i), \cos(t f_i)]$ with $d = 64$. <em>Done when:</em> $t = 0$ gives sines of 0 and cosines of 1, and steps 500 and 999 get clearly different vectors.</li>
+  <li><strong>Denoiser.</strong> The notebook gives you a residual MLP over the 256 pixels (1,615,104 parameters at width 512): the time embedding and a learned class embedding are added to its hidden state. Class index 4 means NULL, "no label". <em>Done when:</em> a batch of shape $(B, 1, 16, 16)$ goes in and the same shape comes out.</li>
+</ol>
+<p>Why an MLP and not the U-Net from G1.3? On a CPU, at this size, the MLP trains several times faster per step than even a small U-Net, and the shapes are simple enough for it. A U-Net's convolutions share weights across positions, which is what you want on real images; the notebook includes one to try on a GPU.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Your <code>q_sample</code> crashes with a shape error when <code>t</code> is a batch of 128 different steps. What's the usual fix?</p>
+  <ol class="q-src">
+    <li>Use the same $t$ for the whole batch</li>
+    <li>Flatten the images to vectors first</li>
+    <li>Transpose the image tensor</li>
+    <li>Index $\bar\alpha$ with <code>t</code> and reshape the result to $(B, 1, 1, 1)$ so it broadcasts over each image</li>
+  </ol>
+  <div class="q-explain"><code>alpha_bar[t]</code> has shape $(B,)$; images are $(B, 1, 16, 16)$. Reshaping to $(B, 1, 1, 1)$ gives each image its own coefficient (broadcasting, <a href="p4-1.html">P4.1</a>). Using one $t$ per batch would work but trains worse, because every batch then sees a single noise level.</div>
+</div></div>
+
+<h2>Milestone 3: train it</h2>
+<p>One training step is <a href="g1-3.html">G1.3</a>'s recipe plus one line from <a href="g1-4.html">G1.4</a>: draw a step $t$ and noise $\varepsilon$ for every image, make $x_t$ in one jump, <strong>replace each label by NULL with probability 0.15</strong>, and take the squared error between $\varepsilon$ and the prediction:</p>
+$$\mathcal{L} = \big\|\varepsilon - \varepsilon_\theta(x_t, t, c)\big\|^2, \qquad c = \begin{cases}\varnothing & \text{with probability } p_{\text{uncond}} = 0.15\\ \text{the true label} & \text{otherwise}\end{cases}$$
+<p>$\varepsilon_\theta$ is the network, $x_t$ the noisy image, $t$ the step and $c$ the class (or $\varnothing$, the NULL label). Label dropout is what makes classifier-free guidance possible later: the same network learns both the conditional prediction $\varepsilon_c$ and the unconditional one $\varepsilon_u$. The training loop itself is <a href="p4-2.html">P4.2</a>'s five lines; the notebook uses AdamW with a one-cycle learning-rate schedule (peak $10^{-3}$), batches of 128, and 3,000 steps.</p>
+<p><em>Done when:</em> the validation loss (fixed noise draws, so it's comparable between runs) is <strong>below 0.09</strong>. The reference run went 1.33 → 0.128 (step 500) → 0.101 (1,000) → 0.075 (2,000) → <strong>0.064</strong> (3,000), in about a minute and a half on a laptop CPU. Don't expect 0: at large $t$ the added noise is close to unpredictable, so the loss has a floor well above zero.</p>
+
+<h3>Worked example: what 3,000 steps buys</h3>
+<ol class="steps">
+  <li><strong>Noisy examples seen:</strong> $3{,}000 \times 128 = 384{,}000$.</li>
+  <li><strong>Passes over the data:</strong> $384{,}000 / 5{,}000 \approx 77$ epochs, but each time an image comes back it gets a fresh $t$ and fresh noise, so the network rarely sees the exact same input twice.</li>
+  <li><strong>Unconditional examples:</strong> $0.15 \times 384{,}000 = 57{,}600$, plenty for the NULL label to learn $\varepsilon_u$.</li>
+  <li><strong>Per noise level:</strong> $384{,}000 / 1{,}000 = 384$ examples per value of $t$ on average. That's why one network must share what it learns across neighbouring steps, and why the time embedding is smooth.</li>
+</ol>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">You forget label dropout ($p_{\text{uncond}} = 0$). Training loss looks fine. What breaks?</p>
+  <ol class="q-src">
+    <li>Nothing; dropout only speeds up training</li>
+    <li>Unguided ($w = 1$) samples stop following the label</li>
+    <li>Guidance: the NULL embedding was never trained, so $\varepsilon_u$ is meaningless and $\varepsilon_u + w(\varepsilon_c - \varepsilon_u)$ amplifies garbage</li>
+    <li>The validation loss becomes negative</li>
+  </ol>
+  <div class="q-explain">Plain conditional sampling ($w = 1$ uses only $\varepsilon_c$) still works. Guidance needs a trained unconditional prediction, and only label dropout provides it. The loss can't show this bug; only sampling with $w &gt; 1$ can.</div>
+</div></div>
+
+<h2>Milestones 4–5: sample, guide, then go fast</h2>
+<p><strong>Milestone 4: DDPM with guidance.</strong> Start from $x_T \sim \mathcal{N}(0, I)$ and walk $t$ from 999 down to 0:</p>
+$$x_{t-1} = \frac{1}{\sqrt{\alpha_t}}\left(x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\tilde\varepsilon\right) + \sqrt{\beta_t}\,z, \qquad \tilde\varepsilon = \varepsilon_u + w\,(\varepsilon_c - \varepsilon_u)$$
+<p>$\tilde\varepsilon$ is the guided noise estimate, $w$ the guidance scale, and $z \sim \mathcal{N}(0, I)$ fresh noise that you skip on the very last step. Run the network once on a doubled batch (images with labels, then the same images with NULL) to get $\varepsilon_c$ and $\varepsilon_u$ together.</p>
+<p><em>Done when</em>, on 128 samples (32 per class): with $w = 0$ (label ignored) the judge files about a quarter under the requested class (the reference run: 30%); with $w = 3$ <strong>at least 85%</strong> (reference: 92%); and you can name every shape in a grid by eye, even if edges are soft.</p>
+<p><strong>Milestone 5: DDIM in 20 steps.</strong> Same network, new sampler. Take 20 evenly spaced steps from 999 to 0; at each, form the clean-image guess and jump:</p>
+$$\hat x_0 = \frac{x_t - \sqrt{1-\bar\alpha_t}\,\tilde\varepsilon}{\sqrt{\bar\alpha_t}}, \qquad x_{t'} = \sqrt{\bar\alpha_{t'}}\,\hat x_0 + \sqrt{1-\bar\alpha_{t'}}\,\tilde\varepsilon$$
+<p>One practical addition: <strong>clip</strong> $\hat x_0$ to $[-1, 1]$ and recompute $\tilde\varepsilon$ from it. At $t = 999$, $\sqrt{\bar\alpha_t} \approx 0.006$, so dividing by it multiplies any error in $\tilde\varepsilon$ by about 160; clipping to the data range keeps the big jumps stable. (The original DDPM code clips $\hat x_0$ too.) <em>Done when:</em> the same seed gives the same images twice, and class accuracy at $w = 3$ is <strong>at least 80%</strong> (reference: 88%, in well under a second for 128 images, against several seconds for DDPM).</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Count denoiser evaluations per image, with classifier-free guidance (two predictions per step).</p>
+  <ol class="steps">
+    <li>DDPM, 1,000 steps: <span class="blank" data-answer="2000" data-tol="0" data-hint="1,000 steps × 2 predictions."></span></li>
+    <li>DDIM, 20 steps: <span class="blank" data-answer="40" data-tol="0" data-hint="20 × 2."></span></li>
+    <li>Speed-up factor of the 20-step DDIM over DDPM: <span class="blank" data-answer="50" data-tol="0" data-hint="2,000 / 40."></span></li>
+    <li>95% CI half-width, in points, for 92% on-label measured on 128 samples (<a href="m4-6.html">M4.6</a>): <span class="blank" data-answer="4.7" data-tol="0.2" data-hint="1.96 × √(0.92 × 0.08 / 128) ≈ 1.96 × 0.024, times 100."></span></li>
+  </ol>
+  <p class="math-note">So "92% vs 88%" between DDPM and DDIM is within the noise of a 128-sample judge. Measure on more samples, and on the same starting noise (paired), before claiming a difference.</p>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What makes DDIM sampling deterministic?</p>
+  <ol class="q-src">
+    <li>It uses a different trained network</li>
+    <li>It adds no fresh noise $z$: each jump reuses the predicted noise, so the same starting noise always gives the same image</li>
+    <li>It sets the guidance scale to 0</li>
+    <li>It clips $\hat x_0$ to $[-1, 1]$</li>
+  </ol>
+  <div class="q-explain">DDPM injects $\sqrt{\beta_t}\,z$ at each step; DDIM (with its noise parameter at 0) doesn't, so the whole trajectory is a deterministic function of $x_T$. Clipping is a stability fix, not the source of determinism.</div>
+</div></div>
+
+<h2>Where people get stuck</h2>
+<p>Most diffusion bugs don't crash. They produce grey mush, and the loss still looks fine. Check these first:</p>
+<ul>
+  <li><strong>Off-by-one in $t$.</strong> Tensors are indexed 0–999 while papers count 1–1000. Use one convention everywhere: the step fed to the network, the coefficients in training, and those in sampling must match.</li>
+  <li><strong>Broadcasting.</strong> Coefficients of shape $(B,)$ multiplied into $(B, 1, 16, 16)$ images either crash or, worse, silently broadcast the wrong way. Reshape to $(B, 1, 1, 1)$.</li>
+  <li><strong>Fresh noise on the last step.</strong> Adding $\sqrt{\beta_t}\,z$ at $t = 0$ leaves visible speckle on every sample.</li>
+  <li><strong>Sampling with gradients on.</strong> 1,000 steps without <code>torch.no_grad()</code> build a huge graph: slow, then out of memory. And call <code>model.eval()</code> (<a href="p4-2.html">P4.2</a>).</li>
+  <li><strong>Judging by loss alone.</strong> Loss can't see a broken sampler or missing label dropout. Always look at samples and run the judge.</li>
+  <li><strong>Too much guidance.</strong> In the reference run, 50-step DDIM peaks near $w = 3$ (86% on-label) and drops to 70% at $w = 8$, as images get over-saturated and off-distribution: G1.4's fidelity–diversity trade-off.</li>
+  <li><strong>Mode imbalance.</strong> Unconditional samples in the reference run were mostly disks and squares (the judge counted 52, 49, 24 and 3 of 128 for disk, square, triangle, plus). Small models drop hard modes first; guidance hides it, so check the unconditional mix too.</li>
+  <li><strong>Devices and generators.</strong> On a GPU, create noise with a CPU generator and then move it with <code>.to(device)</code>, or use a generator on the GPU; mixing them raises an error.</li>
+</ul>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Your samples are recognisable shapes covered in fine speckle, and the loss looks normal. What's the most likely bug?</p>
+  <ol class="q-src">
+    <li>Fresh noise is still being added on the final step</li>
+    <li>The learning rate is too low</li>
+    <li>The time embedding has too many dimensions</li>
+    <li>Label dropout is too high</li>
+  </ol>
+  <div class="q-explain">The last update should return the mean, with $z = 0$. Adding $\sqrt{\beta_1}\,z$ there leaves exactly this pixel-level noise; nothing later removes it.</div>
+</div></div>
+
+<h2>Stretch goals and the rubric</h2>
+<p>Pick one or two once the five milestones pass:</p>
+<ul>
+  <li><strong>A U-Net on a GPU.</strong> Set <code>LONG = True</code> or swap in the notebook's <code>TinyUNet</code> and compare judge accuracy and sharpness at equal training time.</li>
+  <li><strong>Bigger, harder data.</strong> 28×28 procedurally drawn digits or two-shape scenes ("a disk left of a square"), and see what guidance can and can't enforce.</li>
+  <li><strong>Better schedules and targets.</strong> The cosine schedule (Nichol &amp; Dhariwal, 2021) or $v$-prediction (Salimans &amp; Ho, 2022), compared at equal steps.</li>
+  <li><strong>Flow matching.</strong> Re-train with the straight-path velocity objective from <a href="g1-5.html">G1.5</a> and sample with a few Euler steps.</li>
+  <li><strong>Latent diffusion in miniature.</strong> Train a small autoencoder to 4×4×4 latents, then diffuse in the latent space (<a href="g1-4.html">G1.4</a>).</li>
+  <li><strong>Memorisation check.</strong> For each sample, find the nearest training image. A model that only copies its training set has a near-zero distance.</li>
+</ul>
+<p>Grade yourself, or swap with a friend:</p>
+<ul>
+  <li><strong>Must:</strong> all five milestones pass their checkpoints; validation loss reported on fixed noise; sample grids shown for $w = 0$ and $w = 3$.</li>
+  <li><strong>Must:</strong> class accuracy reported with the number of samples and a 95% CI; DDPM and DDIM compared on the same labels and starting noise.</li>
+  <li><strong>Should:</strong> a guidance sweep (accuracy and image quality against $w$), a step-count sweep for DDIM, the unconditional class mix, and one bug you hit and how you found it.</li>
+  <li><strong>Stretch:</strong> one of the goals above, with a before/after comparison on the same judge.</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> production image and video models add a VAE, a text encoder, a transformer backbone and a great deal of compute, but their training step and sampler are this loop. The day-to-day questions are the ones you just answered: is the loss healthy, do samples follow the condition, what guidance scale, how few steps. Teams answer them with automatic judges and fixed-seed sample grids, exactly as here, plus human preference studies at the end.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Which comparison is fair for "does the cosine schedule beat the linear one?"</p>
+  <ol class="q-src">
+    <li>Compare the final training losses</li>
+    <li>Pick the best-looking grid from each</li>
+    <li>Same steps, same sampler, same labels and starting noise, scored by the same judge, with CIs</li>
+    <li>Train the cosine model longer, since it's newer</li>
+  </ol>
+  <div class="q-explain">Losses under different schedules weight noise levels differently, so they aren't comparable. Hold everything else fixed and measure the samples, paired where possible.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain how your tiny model learns, how it generates a triangle on request, and why DDIM can use far fewer steps.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Training noises a real image to a random step in one jump and teaches the network to predict that noise (squared error), with the label randomly hidden 15% of the time so it also learns an unconditional prediction. To generate, start from pure noise and repeatedly remove predicted noise; at every step, push the prediction toward "triangle" by extrapolating from the unconditional to the conditional prediction, $\varepsilon_u + w(\varepsilon_c - \varepsilon_u)$. DDIM reuses the same network but takes deterministic jumps through the clean-image guess $\hat x_0$, adding no fresh noise, so 20 large steps can replace 1,000 small ones.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Review quiz · image generation and the training loop</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Your sampler gets slower every step and finally runs out of memory, although the model is tiny. What's missing? (P4.2)</p>
+    <ol class="q-src">
+      <li><code>opt.zero_grad()</code></li>
+      <li>A learning-rate schedule</li>
+      <li>Gradient clipping</li>
+      <li><code>torch.no_grad()</code> around the sampling loop, so autograd stops recording 1,000 steps of operations</li>
+    </ol>
+    <div class="q-explain">Without <code>no_grad</code>, every step's operations are kept for a backward pass that never comes. <code>model.eval()</code> alone doesn't turn autograd off.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">With the linear schedule, why can sampling start from plain $\mathcal{N}(0, I)$ noise? (G1.3)</p>
+    <ol class="q-src">
+      <li>Because the network was trained only on pure noise</li>
+      <li>Because $\bar\alpha_{1000} \approx 4 \times 10^{-5}$: by the last step, essentially nothing of the image is left, so $x_T$ is indistinguishable from standard noise</li>
+      <li>Because $\beta_{1000} = 1$</li>
+      <li>Because DDIM requires it</li>
+    </ol>
+    <div class="q-explain">The forward process ends at (almost exactly) the standard normal, so that's where the reverse process begins. $\beta_{1000}$ is only 0.02; it's the product of 1,000 factors that drives $\bar\alpha$ to nearly zero.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Raising the guidance scale from 3 to 8 lowered the judge's on-label accuracy from 86% to 70%. What's the best explanation? (G1.4)</p>
+    <ol class="q-src">
+      <li>Strong extrapolation pushes samples off the data distribution (over-saturated, distorted shapes), which even the judge can't classify</li>
+      <li>Higher $w$ makes samples more diverse</li>
+      <li>The judge is broken</li>
+      <li>Guidance has no effect above $w = 1$</li>
+    </ol>
+    <div class="q-explain">Guidance trades diversity for fidelity, up to a point; past it, samples become unnatural. That's why apps default to moderate values and each model has a recommended range.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You re-train with flow matching instead. What does the network regress now? (G1.5)</p>
+    <ol class="q-src">
+      <li>The added noise $\varepsilon$, exactly as before</li>
+      <li>The class label</li>
+      <li>The velocity along a straight path between a noise sample and a data sample, constant along that path</li>
+      <li>The score of the clean data only</li>
+    </ol>
+    <div class="q-explain">Flow matching interpolates linearly between noise and data and regresses the difference between the two end points. The rest of your capstone (embedding, label dropout, guidance, a few-step sampler) carries over.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A diffusion model is <strong>regression on noise</strong>: one-jump noising, a time-aware denoiser, squared error. Start near loss 1; healthy runs fall well below it but never to 0.</li>
+    <li><strong>Label dropout</strong> in training is what makes <strong>classifier-free guidance</strong> work at sampling time: $\varepsilon_u + w(\varepsilon_c - \varepsilon_u)$, two predictions per step.</li>
+    <li><strong>DDIM</strong> reuses the same network with deterministic jumps; clipping $\hat x_0$ keeps 20-step sampling stable.</li>
+    <li>Judge generators with <strong>samples</strong>, not just loss: fixed-seed grids, a classifier judge with CIs, and sweeps over $w$ and steps.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · the capstone notebook</div>
+    <p>Five exercises with checks: the schedule, the time embedding, the loss with label dropout, DDPM with guidance and DDIM, plus a guidance sweep and an optional U-Net. About two minutes on a CPU; set <code>LONG = True</code> on a GPU runtime for sharper samples.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="cap-2-tiny-diffusion.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add the capstone's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"cap-2-a","front":"One training step of a class-conditional diffusion model?","back":"Draw $t$ and $\\varepsilon$; $x_t = \\sqrt{\\bar\\alpha_t}x_0 + \\sqrt{1-\\bar\\alpha_t}\\varepsilon$; replace the label with NULL with probability ≈ 0.15; loss $\\|\\varepsilon - \\varepsilon_\\theta(x_t, t, c)\\|^2$."},
+  {"id":"cap-2-b","front":"What loss does an all-zeros noise predictor get, and why does it matter?","back":"About 1, the noise variance. It's the day-one sanity check: training should start near 1 and fall well below it (but never to 0)."},
+  {"id":"cap-2-c","front":"Why train with label dropout?","back":"So one network also learns the unconditional prediction $\\varepsilon_u$ (NULL label), which classifier-free guidance needs: $\\varepsilon_u + w(\\varepsilon_c - \\varepsilon_u)$."},
+  {"id":"cap-2-d","front":"Denoiser calls per image: DDPM 1,000 steps vs DDIM 20 steps, both with guidance?","back":"2,000 vs 40: a 50× saving, with the same trained network."},
+  {"id":"cap-2-e","front":"Why clip $\\hat x_0$ in a few-step DDIM sampler?","back":"At large $t$, $\\sqrt{\\bar\\alpha_t}$ is tiny (≈ 0.006 at $t = 1000$), so errors in $\\hat\\varepsilon$ explode in $\\hat x_0$. Clipping to the data range $[-1, 1]$ and recomputing $\\hat\\varepsilon$ keeps big jumps stable."},
+  {"id":"cap-2-f","front":"How do you evaluate a tiny generator without humans?","back":"Fixed-seed sample grids, a classifier judge for on-label accuracy (with a CI), a clean-pixel or similar quality check, the unconditional class mix, and sweeps over $w$ and step count."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/cap-2-pipeline.js"></script>
+</body>
+</html>

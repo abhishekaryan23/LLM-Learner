@@ -211,8 +211,8 @@ LC.course = {
       { id: "in-3", title: "Sparse autoencoders", mins: 10, pre: ["in-2", "p6-4"], ready: true, colab: "in-3-sparse-autoencoder.ipynb" }
     ]},
     cx: { code: "★", title: "More capstones", cover: "cover-cx.webp", tags: [], lessons: [
-      { id: "cap-2", title: "Build a tiny diffusion model", mins: 30, pre: ["g1-3", "p4-2"] },
-      { id: "cap-3", title: "Build a RAG agent with evals", mins: 30, pre: ["sy-5", "m4-7"] }
+      { id: "cap-2", title: "Build a tiny diffusion model", mins: 30, pre: ["g1-3", "p4-2"], ready: true, colab: "cap-2-tiny-diffusion.ipynb" },
+      { id: "cap-3", title: "Build a RAG agent with evals", mins: 30, pre: ["sy-5", "m4-7"], ready: true, colab: "cap-3-rag-agent.ipynb" }
     ]}
   }
 };
