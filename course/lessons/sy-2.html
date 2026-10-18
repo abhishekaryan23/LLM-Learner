@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="sy-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Embeddings &amp; vector search · LLMs, Animated</title>
+<meta name="description" content="How search by meaning works: embedding models, cosine similarity, chunking, approximate nearest-neighbour indexes (HNSW, IVF, product quantization), hybrid search with BM25 and reciprocal rank fusion, and reranking. With a vector-search playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<style>
+  #sy2-search .sy2-form { display: flex; gap: 8px; margin-top: 10px; }
+  #sy2-search .sy2-form input { flex: 1; min-width: 0; }
+  #sy2-search .pg-stage { margin-top: 12px; }
+  #sy2-search .sy2-toggle { display: flex; align-items: center; gap: 10px; min-height: 44px; cursor: pointer; }
+  #sy2-search .sy2-toggle input { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
+  #sy2-search .sy2-results { margin: 10px 0 0; padding-left: 1.6em; }
+  #sy2-search .sy2-results li { margin: 0 0 6px; }
+  #sy2-search .sy2-results small { display: block; font: 500 .82rem/1.35 var(--font-mono); color: var(--ink-2); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+</style>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Embeddings &amp; vector search</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Building with LLMs</span></div>
+<p class="lede">Keyword search can't tell that “get my money back” and “refund policy” mean the same thing. Embedding models can: they turn each text into a vector, and texts that mean similar things get vectors that point in similar directions. This lesson shows how that works, and how databases search millions of such vectors in milliseconds.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what an embedding model is, how it is trained, and compute cosine similarity to rank results.</li>
+    <li>Choose a chunking strategy, and explain how HNSW, IVF and product quantization trade recall for speed.</li>
+    <li>Combine keyword (BM25) and vector search with reciprocal rank fusion, and say when to add a reranker.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="p3-4.html">P3.4 Embeddings</a>, for what an embedding vector is and how cosine similarity compares two of them. Helpful but optional: <a href="p1-1.html">P1.1 Vectors &amp; dot products</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A help centre has an article titled “Refund policy”. A user searches “get my money back” and a keyword search returns nothing. Why?</p>
+    <ol class="q-src">
+      <li>The search index is broken</li>
+      <li>The article is too long</li>
+      <li>Keyword search matches words, and the query and the article share none</li>
+      <li>Keyword search only works in English</li>
+    </ol>
+    <div class="q-explain">Classic keyword search scores documents by the query words they contain. “Money” and “back” aren't in the title, so there is nothing to match. Search by meaning fixes exactly this.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A vector database holds 100 million vectors and answers a query in a few milliseconds. How?</p>
+    <ol class="q-src">
+      <li>It compares the query with all 100 million vectors on a very fast chip</li>
+      <li>It uses an index that checks only a small fraction of the vectors and accepts that it may occasionally miss the very best match</li>
+      <li>It caches the answer to every possible query in advance</li>
+      <li>It searches only the 1,000 newest vectors</li>
+    </ol>
+    <div class="q-explain"><strong>Approximate nearest-neighbour</strong> indexes such as HNSW or IVF look at a tiny, well-chosen part of the collection. They trade a little recall for a huge speed-up, and you can tune how much.</div>
+  </div>
+</section>
+
+<h2>From keywords to meaning: what an embedding model does</h2>
+<p>For decades, search meant matching words. The best-known scoring rule, <strong>BM25</strong>, came out of the Okapi system at City University London (Robertson et al., TREC-3, 1994) and still powers most search boxes. It is fast and precise, but it is blind to synonyms: “parcel” never matches “package”.</p>
+<p>Word vectors such as word2vec (2013) showed that meaning could live in geometry. But a sentence needs <em>one</em> vector, not one per word. In 2019, comparing sentences with BERT meant feeding every pair through the model together, and Reimers &amp; Gurevych calculated that finding the most similar pair among 10,000 sentences that way would take about 65 hours. Their <strong>Sentence-BERT</strong> (2019) instead encodes each sentence once into a fixed vector, so the same search takes about 5 seconds: just compare vectors.</p>
+<p>That is an <strong>embedding model</strong>: text in, one vector out (typically a few hundred to a few thousand numbers). Unlike the token embedding table inside an LLM (<a href="p3-4.html">P3.4</a>), it reads the whole passage with a transformer and pools the result into a single vector.</p>
+<p><strong>How it learns.</strong> Most modern embedding models are trained <strong>contrastively</strong> on huge numbers of matching pairs: a question and the passage that answers it, a title and its article, two paraphrases. For each pair in a batch, the loss pushes the two vectors together and pushes the query away from all the <em>other</em> passages in the batch (the “in-batch negatives”; Karpukhin et al., 2020, used this for the DPR retriever). After training, “get my money back” lands near “refund policy” because questions like it were paired with passages like that.</p>
+<p>Two practical rules follow. Use the <strong>same model</strong> for your documents and your queries; vectors from different models live in different spaces and can't be compared. And follow the model's instructions: some expect a prefix such as <code>query:</code> or a task description before the text.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-sy-2.webp" alt="A playground map where similar toys sit together; a child with a new ball walks straight to the ball corner to find its neighbours." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine a big playground where every toy has its own spot, and <strong>similar toys sit together</strong>: all the balls in one corner, the teddy bears in another, the toy cars by the gate.</p>
+      <p>A child arrives with a <strong>new ball</strong>. She doesn't check every toy one by one. She walks straight to the ball corner, and the toys there are its neighbours.</p>
+      <p>An embedding model gives every text its spot on the map, and search is walking to the right corner.</p>
+      <p class="math-note">Where it breaks: the real map has hundreds of directions, not two, and “similar” means whatever the model learned from its training pairs, which may not match what <em>your</em> users mean.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">You embedded 50,000 documents with model A. Can you search them with queries embedded by a newer model B?</p>
+  <ol class="q-src">
+    <li>No: vectors from different models live in different spaces, so you must re-embed the documents with B</li>
+    <li>Yes, as long as both vectors have the same length</li>
+    <li>Yes, if you normalize both vectors first</li>
+    <li>Only for English queries</li>
+  </ol>
+  <div class="q-explain">Each model learns its own coordinate system. Even with the same dimension, direction 17 in model A means nothing in model B. Changing models means re-embedding the collection.</div>
+</div></div>
+
+<h2>Cosine similarity and the top-k</h2>
+<p>To search, embed the query, then rank documents by how closely their vectors point the same way, using the <strong>cosine similarity</strong> from <a href="p3-4.html">P3.4</a>:</p>
+$$\cos(q, d) = \frac{q \cdot d}{\lVert q \rVert\,\lVert d \rVert}$$
+<p>$q$ is the query vector, $d$ a document vector, $q \cdot d$ their dot product and $\lVert q \rVert$ the length of $q$. It ranges from $-1$ to $1$; higher means more similar. The $k$ best documents are the <strong>top-k</strong>. A common shortcut: normalize every vector to length 1 when you store it, and cosine becomes a plain dot product, which is what most vector databases compute fastest.</p>
+
+<h3>Worked example</h3>
+<p>Toy 3-d embeddings. Query $q = (1, 2, 2)$, with length $\sqrt{1+4+4} = 3$. Three documents: $A = (2, 1, 2)$, $B = (0, 3, 4)$ and $C = (4, 0, 3)$.</p>
+<ol class="steps">
+  <li>$\cos(q, A) = \dfrac{2 + 2 + 4}{3 \times 3} = \dfrac{8}{9} \approx 0.89$</li>
+  <li>$\cos(q, B) = \dfrac{0 + 6 + 8}{3 \times 5} = \dfrac{14}{15} \approx 0.93$</li>
+  <li>$\cos(q, C) = \dfrac{4 + 0 + 6}{3 \times 5} = \dfrac{10}{15} \approx 0.67$</li>
+  <li>Top-2: $B$, then $A$. $B$ is longer than $A$, but length is divided out; only direction counts.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>Same query $q = (1, 2, 2)$. Two more documents: $D = (0, 0, 3)$ and $E = (2, -1, 2)$. Round to two decimals.</p>
+  <ol class="steps">
+    <li>$\cos(q, D) =$ <span class="blank" data-answer="0.67" data-tol="0.006" data-hint="Dot product 6; lengths 3 and 3."></span></li>
+    <li>$\cos(q, E) =$ <span class="blank" data-answer="0.44" data-tol="0.006" data-hint="Dot product 2 − 2 + 4 = 4; both lengths are 3."></span></li>
+    <li>The best score among $A$ to $E$: <span class="blank" data-answer="0.93" data-tol="0.006" data-hint="Compare with the worked example."></span></li>
+  </ol>
+</section>
+
+<p>Now try it on a small help centre. The ranking uses cosine similarity; the keyword switch adds BM25 matching, which you'll meet properly two sections down.</p>
+
+<div class="playground" id="sy2-search">
+  <h3>Playground: search 20 help-centre snippets</h3>
+  <p class="math-note" style="margin:0">Toy embeddings: 6 hand-made topic directions plus hashed words, so only about 80 words carry meaning. The map is a 2-D sketch of the clusters; the ranking uses the full vectors. Pick a query or type your own.</p>
+  <div class="chips" role="group" aria-label="Example queries" style="margin-top:12px">
+    <button type="button" class="chip" data-q="get my money back" aria-pressed="true">get my money back</button>
+    <button type="button" class="chip" data-q="can't log in" aria-pressed="false">can't log in</button>
+    <button type="button" class="chip" data-q="error E1042" aria-pressed="false">error E1042</button>
+    <button type="button" class="chip" data-q="where is my parcel?" aria-pressed="false">where is my parcel?</button>
+    <button type="button" class="chip" data-q="delete my data" aria-pressed="false">delete my data</button>
+  </div>
+  <form class="sy2-form" role="search">
+    <label class="sr-only" for="sy2-q">Your own query</label>
+    <input type="search" id="sy2-q" placeholder="Type a query…" autocomplete="off" maxlength="80">
+    <button type="submit" class="btn btn-primary">Search</button>
+  </form>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Top k = <output>3</output></span>
+      <input type="range" min="1" max="8" step="1" value="3">
+    </label>
+    <label class="sy2-toggle"><input type="checkbox"> Add keyword matching (BM25), fused with RRF</label>
+  </div>
+  <ol class="sy2-results" aria-live="polite"></ol>
+  <p class="pg-readout"></p>
+</div>
+
+<p>Try <em>error E1042</em> with keywords off: the meaning search returns app problems, because “error” sounds like a crash and the code itself carries no meaning for the model. Switch keywords on and the exact match jumps to the top (shown in orange when keywords alone brought it into the top-k).</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">All your stored vectors are normalized to length 1. Which is then the same as their cosine similarity with a unit-length query?</p>
+  <ol class="q-src">
+    <li>Their Euclidean distance</li>
+    <li>The number of shared words</li>
+    <li>Their length</li>
+    <li>Their dot product with the query</li>
+  </ol>
+  <div class="q-explain">With $\lVert q \rVert = \lVert d \rVert = 1$, the denominator is 1, so cosine equals $q \cdot d$. (Euclidean distance then gives the same <em>ranking</em>, since $\lVert q - d \rVert^2 = 2 - 2\,q \cdot d$.)</div>
+</div></div>
+
+<h2>Chunking: what goes into each vector</h2>
+<p>An embedding squeezes a whole passage into one vector, so a 40-page manual as a single vector would blur everything together, and many models can only read a limited number of tokens anyway. So documents are split into <strong>chunks</strong>, and each chunk gets its own vector. Chunking choices often matter as much as the choice of model.</p>
+<ul>
+  <li><strong>Fixed size:</strong> every 300 to 1,000 tokens, say. Simple and predictable, but it can cut a sentence or a table in half.</li>
+  <li><strong>Overlap:</strong> repeat the last 10 to 20% of each chunk at the start of the next, so an idea that straddles a boundary appears whole in at least one chunk.</li>
+  <li><strong>Structure-aware:</strong> split at headings, paragraphs, list items or code functions. Usually the best default for documents that have structure.</li>
+  <li><strong>Add context:</strong> a chunk saying “It rose 3% last quarter” is useless alone. Prepend the document title and section heading, or a one-sentence summary of where the chunk sits. Anthropic reported in September 2024 (“Contextual Retrieval”) that adding a short generated context to each chunk cut failed retrievals by 49% on its test sets, and by 67% together with reranking.</li>
+</ul>
+<p>Smaller chunks give sharper matches but less context per hit; larger chunks carry more context but blur the vector. Store metadata with every chunk (source, title, date, access rights) so you can filter and cite later.</p>
+
+<h3>Worked example</h3>
+<p>A 2,000-token document, chunks of 500 tokens with 100 tokens of overlap.</p>
+<ol class="steps">
+  <li>Each new chunk starts $500 - 100 = 400$ tokens after the last (the <strong>stride</strong>).</li>
+  <li>Chunks start at 0, 400, 800, 1,200 and 1,600; the last one runs to the end. Number of chunks $= \lceil (2000 - 100) / 400 \rceil = \lceil 4.75 \rceil = 5$.</li>
+  <li>Storage: one million such chunks with 1,024-dimensional float32 vectors take $10^6 \times 1024 \times 4$ bytes $\approx 4.1$ GB, before any index overhead.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>A 10,000-token report, chunks of 800 tokens with 200 tokens of overlap.</p>
+  <ol class="steps">
+    <li>Stride: <span class="blank" data-answer="600" data-tol="0.01" data-hint="Chunk size minus overlap."></span> tokens</li>
+    <li>Number of chunks: <span class="blank" data-answer="17" data-tol="0.01" data-hint="⌈(10,000 − 200) / 600⌉ = ⌈16.33⌉."></span></li>
+    <li>200,000 chunks with 768-dimensional float32 vectors, in MB (1 MB = $10^6$ bytes): <span class="blank" data-answer="614.4" data-tol="0.5" data-hint="200,000 × 768 × 4 bytes."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Users ask about one clause in long contracts, but retrieval keeps returning chunks that mention the topic without the actual clause. Which change is most likely to help?</p>
+  <ol class="q-src">
+    <li>Make chunks much larger, so each contract is one vector</li>
+    <li>Remove the overlap between chunks</li>
+    <li>Split at clause and heading boundaries, and prepend the contract title and section heading to each chunk</li>
+    <li>Use fewer dimensions per vector</li>
+  </ol>
+  <div class="q-explain">Structure-aware chunks keep each clause whole, and the added context tells the embedding (and later the LLM) where the chunk comes from. Huge chunks blur the vector even more.</div>
+</div></div>
+
+<h2>Approximate nearest neighbours: HNSW, IVF and PQ</h2>
+<p>Exact search compares the query with every vector. With 10 million 768-dimensional vectors that is $10^7 \times 768 \approx 7.7$ billion multiply-adds <em>per query</em>. Fine for a few thousand vectors (just use a matrix multiply), far too slow for a busy service. <strong>Approximate nearest-neighbour (ANN)</strong> indexes look at a small, well-chosen fraction instead.</p>
+
+<figure class="anim wide" data-anim="sy-2-hnsw"></figure>
+
+<ul>
+  <li><strong>HNSW</strong> (Hierarchical Navigable Small World; Malkov &amp; Yashunin, arXiv 2016, journal version 2018) is a layered graph, as in the animation. It is fast and accurate and the default in many vector databases, but the graph lives in memory and adds to the size of the vectors.</li>
+  <li><strong>IVF</strong> (inverted file) clusters the vectors with k-means into, say, 4,096 lists. A query is compared with the 4,096 cluster centres, then only the vectors in the nearest few lists are scanned. Probing 16 lists scans about $16 / 4096 \approx 0.4\%$ of the data (if lists are similar in size). More lists probed means higher recall and slower queries.</li>
+  <li><strong>Product quantization (PQ)</strong> (Jégou, Douze &amp; Schmid, 2011) compresses the vectors themselves. Split a 768-d vector into 96 pieces of 8 numbers and replace each piece with the 1-byte ID of its nearest “typical piece” from a learned codebook. 3,072 bytes of float32 become 96 bytes, 32 times smaller, at some cost in accuracy. IVF and PQ are often combined, as in the FAISS library.</li>
+</ul>
+<p><strong>The trade-off.</strong> ANN quality is measured as <strong>recall@k</strong>: of the true top-k (from exact search), what fraction did the index return? Every index has knobs (<code>efSearch</code> for HNSW, the number of probed lists for IVF) that buy recall with latency. Measure it on your own queries: compute exact top-10 for a few hundred queries, compare with the index, and tune the knob until recall is good enough, often 0.9 to 0.99, at a speed you can afford.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Your HNSW index returns 9 of the true top-10 neighbours on average. You raise <code>efSearch</code>. What do you expect?</p>
+  <ol class="q-src">
+    <li>Lower recall, faster queries</li>
+    <li>Higher recall, slower queries</li>
+    <li>The index needs rebuilding</li>
+    <li>No change, since efSearch only affects memory</li>
+  </ol>
+  <div class="q-explain">A longer candidate list explores more of the graph, so it misses the true neighbours less often (recall@10 rises toward 1) but computes more distances per query.</div>
+</div></div>
+
+<h2>Hybrid search and reranking</h2>
+<p>Vector search is strong on meaning and weak on exact strings: product codes, error numbers, names, rare jargon. Keyword search is the opposite. <strong>Hybrid search</strong> runs both and merges the results.</p>
+<p><strong>BM25 in words:</strong> a document scores higher when it contains the query's words, more so for <em>rare</em> words (like “E1042”) than common ones, with diminishing returns for repeats and a correction so long documents don't win just by being long.</p>
+<p>The two scores aren't on the same scale, so the simplest robust way to merge is by <em>rank</em>. <strong>Reciprocal rank fusion</strong> (RRF; Cormack, Clarke &amp; Büttcher, 2009) gives each document</p>
+$$\text{RRF}(d) = \sum_{\text{lists}} \frac{1}{k + \text{rank}(d)}$$
+<p>where $\text{rank}(d)$ is its position in each list (1 = top), the sum runs over the lists it appears in, and $k$ is a constant that softens the advantage of the very top ranks; $k = 60$ is the value from the paper and the usual default.</p>
+
+<h3>Worked example</h3>
+<p>Vector search ranks D3, D1, D7, D2. BM25 ranks D7, D3, D5. With $k = 60$:</p>
+<ol class="steps">
+  <li>D3: $\frac{1}{61} + \frac{1}{62} = 0.01639 + 0.01613 = 0.03252$</li>
+  <li>D7: $\frac{1}{63} + \frac{1}{61} = 0.01587 + 0.01639 = 0.03227$</li>
+  <li>D1: $\frac{1}{62} = 0.01613$; D5: $\frac{1}{63} = 0.01587$; D2: $\frac{1}{64} = 0.01563$</li>
+  <li>Fused order: D3, D7, D1, D5, D2. Documents both lists like rise to the top.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft3">
+  <div class="card-label" id="ft3">Your turn · faded example</div>
+  <p>Vector search ranks A, B, C. BM25 ranks C, A, D. Use $k = 60$ and give scores to four decimals.</p>
+  <ol class="steps">
+    <li>RRF(A) $=$ <span class="blank" data-answer="0.0325" data-tol="0.00006" data-hint="1/61 + 1/62."></span></li>
+    <li>RRF(C) $=$ <span class="blank" data-answer="0.0323" data-tol="0.00006" data-hint="1/63 + 1/61."></span></li>
+    <li>D's position in the fused list (1 = top): <span class="blank" data-answer="4" data-tol="0" data-hint="D appears once, at rank 3: 1/63. B appears once, at rank 2: 1/62."></span></li>
+  </ol>
+</section>
+
+<p><strong>Reranking.</strong> An embedding model encodes query and document <em>separately</em>, which is what makes it fast. A <strong>cross-encoder</strong> reads the query and one document <em>together</em> and outputs a relevance score, which is more accurate but far too slow to run over a whole collection (Nogueira &amp; Cho, 2019, showed BERT doing this well). So production systems retrieve a few dozen to a hundred candidates with fast hybrid search, rerank them with a cross-encoder (or a small LLM), and keep the best 5 to 10.</p>
+<p><strong>Choosing a model.</strong> Public benchmarks such as <strong>MTEB</strong> (Massive Text Embedding Benchmark; Muennighoff et al., 2022) and <strong>BEIR</strong> (Thakur et al., 2021) compare embedding models across many tasks and languages. Use them to shortlist, then test the shortlist on a few hundred of <em>your</em> queries with known good answers. Your documents and your users' phrasing matter more than a leaderboard rank.</p>
+
+<div class="why"><strong>In real practice:</strong> a typical 2026 setup is structure-aware chunks with titles prepended, an off-the-shelf embedding model, an HNSW index in a vector database (or a vector extension of a database you already run, such as PostgreSQL's pgvector), BM25 alongside it, RRF to merge, and a reranker on the top 50. Most quality gains come from chunking, hybrid search and reranking, and from measuring retrieval on real queries (<a href="sy-3.html">SY.3</a>), rather than from swapping embedding models.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why don't systems run the cross-encoder reranker over every document?</p>
+  <ol class="q-src">
+    <li>It must read the query and each document together, so the cost grows with every document; vectors can be precomputed once</li>
+    <li>Cross-encoders can only read one sentence</li>
+    <li>It would always return the same documents as BM25</li>
+    <li>Rerankers don't work with hybrid search</li>
+  </ol>
+  <div class="q-explain">Document embeddings are computed once at indexing time, so a query costs one embedding plus a fast index lookup. A cross-encoder needs a full forward pass per (query, document) pair at query time, so it is used only on a short candidate list.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">A colleague asks why your search pipeline has both a vector index and BM25, plus a reranker. Explain what each part contributes.</p>
+  <div class="model-answer"><strong>Model answer:</strong> The embedding index finds passages that mean the same as the query even with different words, and an ANN index like HNSW makes that fast at scale. BM25 catches exact matches the embeddings miss, like error codes, product names and rare terms; reciprocal rank fusion merges the two ranked lists. The cross-encoder reranker then reads the query and each of the top few dozen candidates together to order them more accurately than either first-stage method can.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Connect to P3.4: how does a sentence embedding model differ from an LLM's token embedding table?</p>
+    <ol class="q-src">
+      <li>They are the same thing: the table row for the first token</li>
+      <li>The table gives one fixed vector per token; an embedding model reads the whole passage with a transformer and outputs one vector for all of it, trained so similar passages land close</li>
+      <li>The embedding model has no parameters</li>
+      <li>The table is trained contrastively; embedding models are not trained</li>
+    </ol>
+    <div class="q-explain">A token embedding is a context-free lookup (<a href="p3-4.html">P3.4</a>). A sentence or passage embedding is the output of a whole encoder, trained (usually contrastively) on matching pairs.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Users search a parts catalogue by part numbers such as “XR-2290B”. Vector search alone often misses. Best fix?</p>
+    <ol class="q-src">
+      <li>A bigger embedding model</li>
+      <li>Larger chunks</li>
+      <li>A higher efSearch</li>
+      <li>Add BM25 keyword search and fuse the rankings (hybrid search)</li>
+    </ol>
+    <div class="q-explain">Rare exact strings are where keyword search shines and embeddings struggle. A higher efSearch only makes the ANN search closer to exact <em>vector</em> search, which already misses here.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Product quantization stores a 768-dimensional float32 vector as 96 one-byte codes. By what factor does that shrink it?</p>
+    <ol class="q-src">
+      <li>8×</li>
+      <li>4×</li>
+      <li>32×</li>
+      <li>768×</li>
+    </ol>
+    <div class="q-explain">$768 \times 4 = 3{,}072$ bytes become 96 bytes: $3072 / 96 = 32$. The price is approximate distances, so systems often re-check the best candidates with full vectors.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">An index returns 8 of the true top-10 neighbours for a query. What is its recall@10 for that query?</p>
+    <ol class="q-src">
+      <li>0.8</li>
+      <li>0.08</li>
+      <li>0.2</li>
+      <li>8</li>
+    </ol>
+    <div class="q-explain">Recall@10 = true neighbours found ÷ 10 = 8 / 10. Averaged over many queries, this is the number you tune ANN knobs against.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>An <strong>embedding model</strong> maps a passage to one vector; contrastive training on matching pairs puts similar meanings close together.</li>
+    <li>Rank by <strong>cosine similarity</strong>; with unit-length vectors it's a dot product. Use the same model for documents and queries.</li>
+    <li><strong>Chunking</strong> (size, overlap, structure, added context) shapes what can be found at all.</li>
+    <li><strong>ANN indexes</strong> (HNSW, IVF, PQ) check a fraction of the vectors; tune their knobs for recall@k against latency.</li>
+    <li><strong>Hybrid search</strong> (BM25 + vectors, merged with RRF) plus a <strong>cross-encoder reranker</strong> is the robust default.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 20 minutes, NumPy only, nothing to download: build a tiny embedding, write cosine top-k, a mini BM25 and reciprocal rank fusion, and measure an approximate index's recall@k against brute force.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="sy-2-vector-search.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"sy-2-a","front":"What does an embedding model do, and how is it usually trained?","back":"It maps a whole passage to one vector. It is usually trained contrastively: matching pairs (question, answer passage) are pulled together and other passages in the batch pushed away."},
+  {"id":"sy-2-b","front":"Cosine similarity formula, and the shortcut vector databases use.","back":"$\\cos(q,d) = \\frac{q\\cdot d}{\\lVert q\\rVert\\,\\lVert d\\rVert}$. Normalize all vectors to length 1, and cosine becomes the dot product."},
+  {"id":"sy-2-c","front":"Number of chunks for an N-token document with chunk size s and overlap o?","back":"Stride = s − o; chunks = ⌈(N − o) / (s − o)⌉. E.g. 2,000 tokens, 500/100 → ⌈1900/400⌉ = 5."},
+  {"id":"sy-2-d","front":"HNSW, IVF, PQ: one line each.","back":"HNSW: layered graph searched greedily from a sparse top layer down. IVF: k-means clusters, scan only the nearest few lists. PQ: compress vectors into short codes (e.g. 3,072 → 96 bytes)."},
+  {"id":"sy-2-e","front":"Reciprocal rank fusion formula and default k.","back":"$\\text{RRF}(d) = \\sum_{\\text{lists}} \\frac{1}{k + \\text{rank}(d)}$ with $k = 60$ (Cormack et al., 2009). Merges BM25 and vector rankings without comparing their scores."},
+  {"id":"sy-2-f","front":"Bi-encoder (embedding) vs cross-encoder (reranker)?","back":"Bi-encoder: query and document encoded separately, so document vectors are precomputed and search is fast. Cross-encoder: reads query + document together, more accurate but one forward pass per pair, so only used on the top few dozen candidates."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/sy-2-hnsw.js"></script>
+<script src="../assets/js/anims/sy-2-search-playground.js"></script>
+</body>
+</html>

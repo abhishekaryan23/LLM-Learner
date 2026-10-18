@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="sy-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Agents: loops, memory &amp; planning · LLMs, Animated</title>
+<meta name="description" content="What makes an LLM app an agent: the ReAct loop (reason, act, observe), workflows vs agents, planning, reflection, memory and compaction, stopping rules and budgets, why errors compound (p to the n), common failure modes, and how to evaluate agents.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<style>
+  .file { margin: 16px 0 20px; }
+  .file figcaption { font: 600 .8rem/1.2 var(--font-mono); color: var(--ink-2); margin: 0 0 6px; }
+  .file pre { margin: 0; }
+  .kit-table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: .97rem; }
+  .kit-table th, .kit-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .kit-table th { font: 600 .82rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+  .kit-table td:first-child { font-weight: 650; }
+  @media (max-width: 600px) {
+    .kit-table thead { display: none; }
+    .kit-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .kit-table td { display: block; border: 0; padding: 2px 0; }
+    .kit-table td[data-l]::before { content: attr(data-l) " · "; font-weight: 600; color: var(--ink-2); }
+  }
+</style>
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Agents: loops, memory &amp; planning</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Building with LLMs</span></div>
+<p class="lede">A chatbot answers once. An <strong>agent</strong> keeps going: it decides what to do, uses a tool, looks at what happened and decides again, until the job is done or it runs out of budget. This lesson builds that loop from the ground up, then shows why long loops fail more often than you'd expect, and how to stop, budget and test them.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what makes a system an agent, trace a <strong>ReAct</strong> loop (reason, act, observe) and tell a <strong>workflow</strong> from an agent.</li>
+    <li>Choose between plan-then-execute and interleaved planning, and say where reflection, compaction and long-term memory fit.</li>
+    <li>Compute how per-step reliability compounds ($p^n$), set stopping rules and budgets, and evaluate an agent on task success and trajectories.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="sy-4.html">SY.4 Tool use &amp; function calling</a> (each action in the loop is a tool call) and <a href="sy-3.html">SY.3 Retrieval-augmented generation</a> (search is the most common tool, and long-term memory is often retrieval). Helpful but optional: <a href="m4-8.html">M4.8 Safety &amp; agent evals</a> for pass^k.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">An agent's task takes 20 steps. Each step is right 95% of the time, independently, and any wrong step ruins the task. Roughly how often does the whole task succeed?</p>
+    <ol class="q-src">
+      <li>About 95%</li>
+      <li>About 36%</li>
+      <li>About 75%</li>
+      <li>About 5%</li>
+    </ol>
+    <div class="q-explain">All 20 steps must go right: $0.95^{20} \approx 0.36$. Small per-step error rates compound fast over long tasks, which is one of the central facts about agents.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which of these is an <em>agent</em> rather than a fixed workflow?</p>
+    <ol class="q-src">
+      <li>Code that asks a model to label each support ticket, then sends it to one of three fixed prompts</li>
+      <li>A single prompt with three retrieved documents pasted in</li>
+      <li>A model that picks which tool to call next, reads the result and repeats until it decides it's done</li>
+      <li>A nightly job that summarises yesterday's emails with one model call each</li>
+    </ol>
+    <div class="q-explain">In the first, second and fourth, <em>your code</em> fixes the path. In the third, the <em>model</em> decides the next step and when to stop. That is the line Anthropic draws between workflows and agents.</div>
+  </div>
+</section>
+
+<h2>From chatbot to agent: a model in a loop</h2>
+<p>In 2022 a language model could reason in text (chain of thought, <a href="rs-1.html">RS.1</a>) but couldn't check anything. Ask it for a date and it answered from memory, sometimes wrongly. Separately, people had wired models to tools, such as a search engine or a calculator. In October 2022, <strong>ReAct</strong> (Yao et al., 2022, "Synergizing Reasoning and Acting in Language Models") joined the two. The model wrote a thought, then an action, read the result, and wrote its next thought. With just one or two examples in the prompt, it beat imitation-learning and reinforcement-learning baselines on two interactive benchmarks, a text adventure game (ALFWorld) and an online shopping site (WebShop).</p>
+<p>Then the idea went viral. In early 2023, open-source projects such as AutoGPT looped GPT-4 on open-ended goals ("grow my business") with little structure. They drew huge attention, and just as quickly a reputation for getting stuck in loops and burning tokens. By 2025 the pattern had settled into products that work: coding agents, research assistants, support agents that look up orders and issue refunds.</p>
+<p>Strip away the branding and an agent is three things:</p>
+<ul>
+  <li><strong>A model that chooses actions.</strong> On every turn it reads the context and writes either a tool call or a final answer.</li>
+  <li><strong>An environment that answers.</strong> Tools (<a href="sy-4.html">SY.4</a>) run in your code and return <em>observations</em>: search results, file contents, error messages.</li>
+  <li><strong>A loop with a stop condition.</strong> Your code feeds each observation back and repeats until the model says it's finished or a limit is hit.</li>
+</ul>
+<p>So an <strong>agent</strong> is a model choosing actions in a loop until it reaches a goal or a stop condition. This is the same loop as reinforcement learning's agent–environment loop (<a href="rl-1.html">RL.1</a>), with a language model as the policy and text as the state.</p>
+
+<h3>Workflows vs agents</h3>
+<p>Anthropic's guide "Building effective agents" (December 2024) draws a useful line. <strong>Workflows</strong> are "systems where LLMs and tools are orchestrated through predefined code paths". <strong>Agents</strong> are systems where "LLMs dynamically direct their own processes and tool usage". The guide names five common workflow patterns: prompt chaining, routing, parallelization, orchestrator–workers and evaluator–optimizer.</p>
+<table class="kit-table">
+  <thead><tr><th></th><th>Workflow</th><th>Agent</th></tr></thead>
+  <tbody>
+    <tr><td>Who picks the next step</td><td data-l="Workflow">Your code</td><td data-l="Agent">The model</td></tr>
+    <tr><td>Number of steps</td><td data-l="Workflow">Known in advance</td><td data-l="Agent">Unknown; depends on what it finds</td></tr>
+    <tr><td>Strengths</td><td data-l="Workflow">Predictable, cheaper, easy to test</td><td data-l="Agent">Flexible on open-ended tasks</td></tr>
+    <tr><td>Costs</td><td data-l="Workflow">Breaks on cases you didn't plan for</td><td data-l="Agent">Higher cost and latency; errors can compound</td></tr>
+  </tbody>
+</table>
+<p>The guide's advice is to find "the simplest solution possible" and add complexity only when it pays. Often one well-built model call with retrieval is enough. Use an agent when you can't predict the steps in advance: debugging code, open research, a customer problem that could go ten different ways.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">A team's app always runs the same three model calls in order: extract fields, check them against a policy, draft a reply. What is it?</p>
+  <ol class="q-src">
+    <li>A workflow (prompt chaining): the code fixes the path</li>
+    <li>An agent, because it calls the model more than once</li>
+    <li>An agent, because it uses a policy document</li>
+    <li>Neither, because no tools are involved</li>
+  </ol>
+  <div class="q-explain">Calling the model several times doesn't make something an agent. The question is who chooses the next step. Here the code does, every time, so it is a workflow, and that predictability is a strength.</div>
+</div></div>
+
+<h2>ReAct: reason, act, observe</h2>
+<p>ReAct's trick is to make the model write two kinds of text, turn by turn. A <strong>thought</strong> is free text that plans or interprets ("I need both dates"). An <strong>action</strong> is a structured tool call. After each action, your code runs the tool and appends an <strong>observation</strong>. Then the model writes its next thought, which can react to what it just saw. The original paper gave the model a Wikipedia API with three actions: <code>search</code>, <code>lookup</code> and <code>finish</code>. Here is a short trace in that style:</p>
+
+<figure class="anim wide" data-anim="sy-5-react"></figure>
+
+<p>The loop itself is a few lines of ordinary code. The model only ever produces text; everything else is yours:</p>
+<figure class="file">
+  <figcaption>agent_loop.py · the whole idea, minus error handling</figcaption>
+<pre><code>messages = [system_prompt, user_goal]
+for step in range(MAX_STEPS):                # budget: never loop forever
+    reply = model(messages, tools=TOOLS)     # thought + tool call, or a final answer
+    messages.append(reply)
+    if reply.is_final:                       # stop condition 1: the model says it's done
+        return reply.text
+    result = run_tool(reply.tool_call)       # YOUR code runs the tool
+    messages.append(observation(result))     # the model reads it next turn
+return "Stopped: step budget used up"        # stop condition 2: the budget</code></pre>
+</figure>
+<p>Modern APIs make the "action" part native: instead of parsing <code>search[…]</code> out of text, the model returns a structured tool call (<a href="sy-4.html">SY.4</a>), and reasoning models (<a href="rs-3.html">RS.3</a>) often think between tool calls on their own. The shape is unchanged: think, act, observe, repeat.</p>
+<p>Why write the thoughts at all? The paper's ablations found that acting without reasoning did worse: the thoughts let the model keep track of its goal, notice when a search failed and change course. Thoughts also make the run <strong>debuggable</strong>, because you can read why each action was taken. They are not a faithful window into the model's computation, though (<a href="rs-1.html">RS.1</a>), so judge an agent by what it did, not only by what it said.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-sy-5.webp" alt="An explorer robot loops around three stepping stones in a garden maze, marked with a thought bubble (think), a hand (act) and an eye (look), getting closer to a treasure chest each lap." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A little explorer robot wants the treasure chest in the middle of a garden maze. It can't see the whole maze, so it hops across three stepping stones, again and again.</p>
+      <p>On the <strong>think</strong> stone it decides: "Let's try the path on the left." On the <strong>act</strong> stone it walks a bit down that path. On the <strong>look</strong> stone it checks what it found: a dead end, or a step closer. Then it's back to the think stone with that new clue. Every lap brings it closer, and when it reaches the chest, it stops.</p>
+      <p class="math-note">Where it breaks: the robot remembers the maze by itself, but a model remembers only what is written in its context. And a real agent needs someone to say "you've had 50 laps, stop", or it might go round forever.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">In a ReAct loop, who actually runs <code>search[Eiffel Tower]</code>?</p>
+  <ol class="q-src">
+    <li>The model, inside its own forward pass</li>
+    <li>The search engine decides on its own to run it</li>
+    <li>Nobody; the model imagines the result</li>
+    <li>The application's code, which then appends the result as an observation</li>
+  </ol>
+  <div class="q-explain">The model only writes text describing the call. Your code parses it, runs the tool, counts it against the budget and pastes the result back. That is also where you enforce permissions (<a href="sy-7.html">SY.7</a>).</div>
+</div></div>
+
+<h2>Planning and reflection</h2>
+<p>ReAct plans one step at a time. For longer tasks, two other habits help: planning further ahead, and learning from mistakes within the run.</p>
+<p><strong>Plan-then-execute.</strong> First ask the model for a whole plan ("1. find the failing test, 2. read the function, 3. fix it, 4. run the tests"), then carry out the steps. Plan-and-Solve prompting (Wang et al., 2023) showed that asking for a plan first helps on maths word problems, and ReWOO (Xu et al., 2023) planned all tool calls up front so the model didn't have to re-read the growing transcript at every step, saving tokens. A plan is also easy to show to a user for approval before anything happens.</p>
+<p><strong>Interleaved (ReAct-style).</strong> Decide one step at a time from the latest observation. It adapts to surprises, such as a search that returns nothing, but it can wander and lose the big picture.</p>
+<p>Most practical agents mix the two: write a short plan or to-do list, work through it step by step, and <strong>re-plan</strong> when an observation breaks the plan. Coding agents often keep the to-do list as a visible checklist, which also helps the user follow along.</p>
+
+<h3>Reflection: critique, then retry</h3>
+<p>Models can often spot a mistake in an answer more easily than they avoid it the first time. <strong>Self-Refine</strong> (Madaan et al., 2023) had a model draft, critique its own draft and revise, in a loop. <strong>Reflexion</strong> (Shinn et al., 2023) went further for agents: after a failed attempt, the model writes a short verbal lesson ("I searched for the city, but the question asked about the river; search for the river next time"), stores it in a memory buffer, and reads it on the next attempt. No weights change; the "learning" is text. With unit tests as the feedback signal, Reflexion reported 91% pass@1 on the HumanEval coding benchmark, against 80% for GPT-4 alone at the time.</p>
+<p>The catch: reflection works best when the feedback is <strong>real</strong> (a failing test, an error message, a checker). When a model judges its own work with nothing external to go on, it may confidently "fix" a correct answer or wave through a wrong one. Huang et al. (2024, "Large Language Models Cannot Self-Correct Reasoning Yet") found exactly this on reasoning tasks without external feedback. Ground the critique in something you can check.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In Reflexion, what carries the lesson from a failed attempt to the next one?</p>
+  <ol class="q-src">
+    <li>A gradient update to the model's weights</li>
+    <li>A short written reflection stored in memory and read on the next try</li>
+    <li>A bigger model for the second attempt</li>
+    <li>A higher sampling temperature</li>
+  </ol>
+  <div class="q-explain">Reflexion is "verbal reinforcement": the feedback becomes text in the context, not a weight change. It works best when that feedback comes from something real, like unit tests.</div>
+</div></div>
+
+<h2>Memory: what the agent carries forward</h2>
+<p>A model has no memory between calls. Everything an agent "remembers" is text that your code chooses to put back into the context window. There are three layers, from short-term to long-term:</p>
+<ol class="steps">
+  <li><strong>In-context history.</strong> The running transcript: goal, thoughts, tool calls, observations. It is perfect recall, but it grows with every step, costs tokens on every turn and eventually overflows the window. Long, cluttered contexts also make models less reliable well before the limit (<a href="ag-2.html">AG.2</a>).</li>
+  <li><strong>Summaries and compaction.</strong> When the window fills up, replace the old transcript with a summary: decisions made, current state, open problems, next steps. Old tool results are the cheapest thing to drop, since a file read 30 steps ago rarely needs to stay word for word. Many coding agents compact automatically.</li>
+  <li><strong>Long-term stores.</strong> Notes saved outside the window and read back when relevant: a to-do or notes file, a vector store searched like RAG (<a href="sy-3.html">SY.3</a>), or memory files the agent loads at the start of the next session (<a href="ag-5.html">AG.5</a>). <strong>MemGPT</strong> (Packer et al., 2023) framed this like an operating system, with the model paging facts between a small "main memory" (the window) and a large external store. <strong>Generative Agents</strong> (Park et al., 2023) kept a "memory stream" of observations and retrieved by recency, importance and relevance.</li>
+</ol>
+<p>The design question is always the same: what does the model need to see <em>at this step</em>? That is context engineering (<a href="ag-2.html">AG.2</a>). Two practical rules:</p>
+<ul>
+  <li><strong>Write state down early.</strong> An agent that keeps a short progress note can recover after compaction, or a crash, without redoing work.</li>
+  <li><strong>Treat memory as untrusted input.</strong> Anything written to long-term memory, including text copied from a web page, will be read back later as if it were trusted. An injected instruction that lands in memory can affect every later session (<a href="sy-7.html">SY.7</a>).</li>
+</ul>
+<p>When one window isn't enough even with compaction, hand messy subtasks to <strong>subagents</strong>, each with a clean window, and keep only their summaries. That is the subject of <a href="ag-7.html">AG.7</a>.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">An agent's window is 90% full after 80 steps of debugging. Which move keeps the important information and frees the most space?</p>
+  <ol class="q-src">
+    <li>Delete the system prompt</li>
+    <li>Start a new session with only the original goal</li>
+    <li>Compact: summarise decisions, current state and next steps, and drop old tool results</li>
+    <li>Fine-tune the model on the transcript</li>
+  </ol>
+  <div class="q-explain">Compaction swaps a long transcript for a short, high-signal summary. A fresh session loses everything learned so far; fine-tuning is slow and is not memory.</div>
+</div></div>
+
+<h2>Why long tasks fail: reliability compounds</h2>
+<p>Suppose each step of a task succeeds with probability $p$, steps fail independently, and any failed step ruins the task. Then the chance the whole task succeeds is</p>
+$$P(\text{task}) = p^{\,n}$$
+<p>where $p$ is the per-step success rate and $n$ is the number of steps. Every extra step multiplies in another factor below 1, so success decays exponentially with task length. Anthropic's guide lists "the potential for compounding errors" as a core cost of agents; this formula is why.</p>
+
+<h3>Worked example</h3>
+<ol class="steps">
+  <li><strong>10 steps at 95%:</strong> $0.95^{10} \approx 0.599$. A step that's right 19 times in 20 sinks 4 tasks in 10.</li>
+  <li><strong>20 steps at 95%:</strong> $0.95^{20} \approx 0.358$. Doubling the length roughly squares the success rate: $0.599^2 \approx 0.358$.</li>
+  <li><strong>20 steps at 99%:</strong> $0.99^{20} \approx 0.818$. Cutting the per-step error from 5% to 1% more than doubles task success.</li>
+</ol>
+<p>The model is pessimistic in one way: real agents can <strong>recover</strong>. They see an error message, notice a failing test and try again, which is why observations matter so much. It is optimistic in another: one unnoticed bad step (a wrong assumption early on) can quietly poison every later step. Either way, the lesson holds: long tasks need high per-step reliability, or checks that catch errors.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>A 30-step task at $p = 0.98$ per step: $0.98^{30} =$ <span class="blank" data-answer="0.5455" data-tol="0.003" data-hint="0.98^10 ≈ 0.817; cube it."></span></li>
+    <li>What per-step success $p$ do you need for 90% success over 20 steps? $p = 0.9^{1/20} =$ <span class="blank" data-answer="0.9947" data-tol="0.0005" data-hint="Take the 20th root of 0.9: about 1 − 0.105/20."></span></li>
+    <li>Add a check that catches every failed step, and retry it once (independently). At $p = 0.95$, a step now fails only if both tries fail: per-step success $1 - 0.05^2 =$ <span class="blank" data-answer="0.9975" data-tol="0.0002" data-hint="0.05 × 0.05 = 0.0025."></span></li>
+    <li>The 20-step task with that check: $0.9975^{20} =$ <span class="blank" data-answer="0.951" data-tol="0.003" data-hint="About 1 − 20 × 0.0025, a little more."></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="sy5-reliability">
+  <h3>Playground: how far can an agent get?</h3>
+  <p class="math-note" style="margin:0">The orange curve is $p^n$. Slide the per-step success and the task length, then switch on a check-and-retry at every step (a perfect check, one independent retry).</p>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr">
+    <label><span>per-step success p = <output data-op>0.950</output></span><input data-p type="range" min="0.8" max="0.999" step="0.001" value="0.95"></label>
+    <label><span>steps n = <output data-on>20</output></span><input data-n type="range" min="1" max="50" step="1" value="20"></label>
+  </div>
+  <div class="chips" role="group" aria-label="Options" style="margin-top:8px">
+    <button type="button" class="chip" data-act="retry" aria-pressed="false" style="min-height:44px">Check and retry each step: off</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<p>The same arithmetic is why <strong>pass^k</strong> (all $k$ attempts succeed) falls so fast for agents (<a href="m4-8.html">M4.8</a>): reliability has to be very high before it looks good over many runs or many steps.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Your agent's tasks get twice as long (from 10 to 20 steps) with the same per-step success $p$. What happens to the task success rate?</p>
+  <ol class="q-src">
+    <li>It is squared: $p^{20} = (p^{10})^2$</li>
+    <li>It halves</li>
+    <li>It stays the same, because $p$ didn't change</li>
+    <li>It doubles</li>
+  </ol>
+  <div class="q-explain">With independent steps, success is $p^n$, so doubling $n$ squares it. At $p = 0.95$: 0.60 becomes 0.36.</div>
+</div></div>
+
+<h2>Stopping, budgets and failure modes</h2>
+<p>Every agent needs explicit rules for when to stop, because the model's own "I'm done" is not enough. Common <strong>stopping criteria</strong>, usually combined:</p>
+<ul>
+  <li><strong>Goal reached:</strong> the model calls <code>finish</code>, or better, a check confirms it (the tests pass, the order is updated).</li>
+  <li><strong>Step budget:</strong> a maximum number of tool calls or turns. Anthropic's guide calls stopping conditions "such as a maximum number of iterations" common practice.</li>
+  <li><strong>Token, money and time budgets:</strong> hard caps per task, enforced in your code.</li>
+  <li><strong>No progress:</strong> the same tool call with the same arguments three times, or no new information for several steps.</li>
+  <li><strong>Hand-off:</strong> the agent is stuck or unsure, so it asks the user instead of guessing.</li>
+</ul>
+<h3>Why cost grows faster than steps</h3>
+<p>Each turn re-sends the whole context. If the fixed part (system prompt, tool definitions, goal) is $B$ tokens and each step adds about $c$ tokens of thought, call and observation, then turn $k$ reads $B + (k-1)\,c$ tokens, and $n$ turns read</p>
+$$\text{input tokens} \approx nB + c\,\frac{n(n-1)}{2}$$
+<p>The second term grows with $n^2$. Example: $B = 5{,}000$, $c = 2{,}000$, $n = 20$ gives $100{,}000 + 380{,}000 = 480{,}000$ input tokens for one task. At an illustrative $\$3$ per million input tokens, that is about $\$1.44$, before output tokens. Prompt caching (<a href="ag-2.html">AG.2</a>) makes the repeated prefix much cheaper, and compaction keeps $c\,n$ from growing without limit.</p>
+<h3>Common failure modes</h3>
+<ul>
+  <li><strong>Loops:</strong> repeating the same failing action, or bouncing between two states. Detect repeats in code and stop or re-plan.</li>
+  <li><strong>Tool misuse:</strong> wrong arguments, the wrong tool, or inventing a tool that doesn't exist. Clear tool names and descriptions, validated arguments and useful error messages help a lot (<a href="sy-4.html">SY.4</a>).</li>
+  <li><strong>Compounding errors:</strong> an early wrong assumption that every later step builds on. Verify key facts early; checkpoints and tests catch drift.</li>
+  <li><strong>Premature "done":</strong> declaring success without checking. Make the stop condition a real check where you can.</li>
+  <li><strong>Losing the goal:</strong> after many steps the original instruction is buried mid-context. Restate the goal, keep a to-do list, compact.</li>
+  <li><strong>Being hijacked:</strong> a web page or document the agent reads contains instructions. That is prompt injection, the subject of <a href="sy-7.html">SY.7</a>.</li>
+</ul>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">An agent calls <code>search["refund policy"]</code> with identical arguments five times in a row. What is the best fix?</p>
+  <ol class="q-src">
+    <li>Raise the step budget so it has more chances</li>
+    <li>Add "don't repeat yourself" to the prompt and nothing else</li>
+    <li>Detect repeated identical calls in code, then stop or force a re-plan, and return a clearer result or error from the tool</li>
+    <li>Switch to a higher temperature</li>
+  </ol>
+  <div class="q-explain">Loops are best caught deterministically, in the loop code. A clearer tool result ("no results; try a different query") often removes the cause. A bigger budget just makes the loop more expensive.</div>
+</div></div>
+
+<h2>Evaluating agents: outcomes and trajectories</h2>
+<p>You can't evaluate an agent by reading one nice-looking answer. Agent evals (<a href="m4-8.html">M4.8</a>) score <strong>tasks</strong> in an environment you can reset:</p>
+<ul>
+  <li><strong>Task success on the final state.</strong> Did the hidden tests pass? Does the database match the goal? Was the right email sent? <strong>SWE-bench</strong> (Jimenez et al., 2024) checks real GitHub issues by running the repository's tests; <strong>τ-bench</strong> (Yao et al., 2024) checks a simulated retail or airline database after a conversation with a simulated user, and introduced pass^k to measure consistency.</li>
+  <li><strong>Trajectory checks.</strong> How it got there matters too: did it ask for confirmation before cancelling? Did it call a forbidden tool? How many steps, tokens and seconds did it take? Some teams also grade the trajectory with rubrics or an LLM judge (<a href="m4-4.html">M4.4</a>).</li>
+  <li><strong>Repeat runs.</strong> Agents are stochastic. Run each task several times and report the success rate with error bars (<a href="m4-6.html">M4.6</a>), plus pass^k when users need it to work every time.</li>
+  <li><strong>Cost next to quality.</strong> Report tokens, dollars and wall-clock time per task. An agent that's 2 points better at 10 times the cost is not simply better.</li>
+</ul>
+<p>Build your own small task set from real failures (<a href="m4-7.html">M4.7</a>), and <strong>read transcripts</strong>. Agents find shortcuts, such as editing the test instead of the code, and a broken environment can look like a capability problem.</p>
+
+<div class="why"><strong>In real practice:</strong> production agents in 2026 are mostly simple loops with strong tools and strict limits: a good system prompt, a handful of well-described tools, a step and cost budget, compaction for long runs, permission checks before risky actions, and an eval set run on every change. The fancy parts (multi-agent teams, elaborate planners) come later, if measurements show they help. Building a RAG agent with evals end to end is the capstone <a href="cap-3.html">Build a RAG agent with evals</a>.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why does τ-bench check the database at the end, rather than the agent's final message?</p>
+  <ol class="q-src">
+    <li>Final messages are too long to read</li>
+    <li>Success means the right change happened in the world; a confident message can hide a wrong or missing action</li>
+    <li>Databases are cheaper to store than transcripts</li>
+    <li>The agent never writes a final message</li>
+  </ol>
+  <div class="q-explain">Agents act. "Your flight is changed" means nothing if the booking wasn't updated, or the wrong one was. Checking the final state measures the outcome that matters.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">A colleague wants to turn a reliable three-call workflow into a fully autonomous agent "to make it smarter". What would you tell them about agents, reliability and cost?</p>
+  <div class="model-answer"><strong>Model answer:</strong> An agent lets the model choose its own steps in a loop, which helps when you can't predict the steps, but it costs more (each turn re-reads a growing context) and errors compound: with per-step success $p$, an $n$-step task succeeds about $p^n$ of the time. If the steps are known, a workflow is cheaper, faster and easier to test. If they do build an agent, it needs stop conditions and budgets, checks that catch errors, and an eval set that measures task success, cost and trajectories over repeated runs.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What are the three kinds of text in a ReAct trace?</p>
+    <ol class="q-src">
+      <li>Prompt, completion, reward</li>
+      <li>Plan, code, test</li>
+      <li>Thought (free-text reasoning), action (a tool call) and observation (the tool's result)</li>
+      <li>Query, key, value</li>
+    </ol>
+    <div class="q-explain">The model writes thoughts and actions; your code runs each action and appends the observation. Interleaving them lets the model react to what it finds.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Connect to M4.8: an agent succeeds on a task 80% of the time. A customer will use it 5 times this week. What's the chance all 5 work (pass^5, independent runs)?</p>
+    <ol class="q-src">
+      <li>About 33%</li>
+      <li>About 80%</li>
+      <li>About 99.97%</li>
+      <li>About 64%</li>
+    </ol>
+    <div class="q-explain">$0.8^5 \approx 0.328$. The same compounding as steps within a task. 99.97% is pass@5, $1 - 0.2^5$: at least one success in five tries.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">An agent with a 20-step budget keeps re-reading a 5,000-token system prompt plus everything that happened so far. Why does its input-token bill grow faster than the number of steps?</p>
+    <ol class="q-src">
+      <li>Tools charge per call</li>
+      <li>The system prompt gets longer each turn</li>
+      <li>Models slow down on later steps</li>
+      <li>Each turn re-sends the growing history, so the total is about $nB + c\,n(n-1)/2$, which grows with $n^2$</li>
+    </ol>
+    <div class="q-explain">Turn $k$ reads everything from turns $1$ to $k - 1$. Summing over turns gives a quadratic term. Prompt caching cuts the price of the repeated prefix; compaction keeps the history short.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">When is self-critique (reflection) most likely to help?</p>
+    <ol class="q-src">
+      <li>When the model judges its own answer with nothing external to check</li>
+      <li>When the critique is grounded in real feedback such as failing tests or error messages</li>
+      <li>Always, by the same amount</li>
+      <li>Never; models can't critique their own work</li>
+    </ol>
+    <div class="q-explain">Reflexion's biggest gains used unit tests as feedback. Without an external signal, models often fail to fix wrong answers and sometimes break right ones (Huang et al., 2024).</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>An <strong>agent</strong> is a model choosing actions in a loop until a goal or a stop condition. <strong>Workflows</strong> fix the path in code; start with the simplest thing that works.</li>
+    <li><strong>ReAct</strong> interleaves thought, action and observation. The model writes text; your code runs tools, counts the budget and decides when to stop.</li>
+    <li>Plan ahead and re-plan on surprises. <strong>Reflection</strong> helps most when grounded in real feedback. <strong>Memory</strong> is text: history, compacted summaries and long-term stores.</li>
+    <li>Reliability compounds: $p^n$. Long tasks need very reliable steps or checks that catch errors, plus step, token and time <strong>budgets</strong>.</li>
+    <li>Evaluate on <strong>final-state task success</strong> over repeated runs, check trajectories and report cost (SWE-bench, τ-bench, your own task set).</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Build a tiny ReAct-style agent loop in pure Python: a toy shop with two tools (plus <code>finish</code>), a rule-based stand-in "model" so it runs offline, a step budget, stopping rules and a trajectory log. Measure its success rate on a small task set, then run the $p^n$ experiment. An optional cell swaps in a real LLM if you have an API key. About 20 minutes.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="sy-5-agent-loop.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"sy-5-a","front":"What makes a system an agent, and how is it different from a workflow?","back":"An agent is a model choosing actions (tool calls) in a loop until it reaches a goal or a stop condition. In a workflow, your code fixes the path (prompt chaining, routing…); in an agent, the model decides the next step (Anthropic, 'Building effective agents', Dec 2024)."},
+  {"id":"sy-5-b","front":"Describe the ReAct loop (Yao et al., 2022).","back":"The model writes a thought (free-text reasoning), then an action (a tool call); your code runs the tool and appends the observation; repeat until finish or the budget runs out."},
+  {"id":"sy-5-c","front":"Per-step success p, n independent steps, any error ruins the task: task success? Example at p = 0.95, n = 20?","back":"$p^n$. $0.95^{20} \\approx 0.36$. Doubling the length squares the success rate."},
+  {"id":"sy-5-d","front":"Name three layers of agent memory.","back":"In-context history (the transcript); summaries/compaction when the window fills; long-term stores outside the window (notes files, vector store, memory files), read back when relevant."},
+  {"id":"sy-5-e","front":"What is Reflexion, and when does self-critique help most?","back":"Shinn et al., 2023: after a failed attempt the model writes a verbal lesson, stores it in memory and reads it next try; no weight updates. It helps most with real feedback (tests, errors), not self-judgement alone."},
+  {"id":"sy-5-f","front":"Five stopping rules for an agent loop.","back":"Goal reached (ideally verified), step budget, token/money/time budget, no-progress detection (repeated identical calls), hand-off to a human when stuck."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/sy-5-react.js"></script>
+<script src="../assets/js/anims/sy-5-reliability-playground.js"></script>
+</body>
+</html>

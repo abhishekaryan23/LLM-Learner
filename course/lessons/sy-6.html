@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="sy-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Prompt, RAG or fine-tune? · LLMs, Animated</title>
+<meta name="description" content="Choosing between prompting, retrieval-augmented generation and fine-tuning: what each changes, costs and update cycles, when each wins, how to combine them, distillation, and a per-query cost comparison of a long prompt vs a small fine-tuned model.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<style>
+  .kit-table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: .97rem; }
+  .kit-table th, .kit-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .kit-table th { font: 600 .82rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+  .kit-table td:first-child { font-weight: 650; }
+  @media (max-width: 600px) {
+    .kit-table thead { display: none; }
+    .kit-table tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+    .kit-table td { display: block; border: 0; padding: 2px 0; }
+    .kit-table td[data-l]::before { content: attr(data-l) " · "; font-weight: 600; color: var(--ink-2); }
+  }
+  #sy6-decide .dq { margin: 14px 0 0; }
+  #sy6-decide .dq > p { margin: 0 0 6px; font-weight: 600; font-size: .95rem; }
+  #sy6-decide .chip { min-height: 44px; }
+  #sy6-decide .pg-hint { margin: 12px 0 0; min-height: 3em; }
+  #sy6-decide .pg-hint ul { margin: 6px 0 0; padding-left: 1.2em; }
+  #sy6-decide .pg-hint li { margin: 4px 0; }
+</style>
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Prompt, RAG or fine-tune?</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of Building with LLMs</span></div>
+<p class="lede">Your model doesn't do what you need. You can tell it more (prompting), let it look things up (RAG), or train it (fine-tuning). Picking the wrong one can cost a team months. This lesson gives you the one distinction that settles most cases, a decision guide you can click through, and the cost arithmetic behind "fine-tune a smaller model".</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Say what prompting, RAG and fine-tuning each change, and compare their cost and update cycle.</li>
+    <li>Decide which to use (or how to combine them) from five questions: knowledge or behaviour, freshness, format, latency and cost, and data.</li>
+    <li>Compare the per-query cost of a long prompt on a big model with a small fine-tuned model, and explain distillation.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="sy-3.html">SY.3 Retrieval-augmented generation</a> (what RAG does and costs) and <a href="m3-7.html">M3.7 LoRA &amp; QLoRA</a> (how fine-tuning is done cheaply). Helpful but optional: <a href="ag-1.html">AG.1 Where to use what</a>, the wider map this lesson zooms into, and <a href="m5-2.html">M5.2 Distillation &amp; pruning</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A bot must answer from your product catalogue, which changes every day. What fits best?</p>
+    <ol class="q-src">
+      <li>Retrieve the relevant catalogue entries for each question (RAG)</li>
+      <li>Fine-tune the model on the catalogue every night</li>
+      <li>A longer system prompt saying "be accurate"</li>
+      <li>A bigger model</li>
+    </ol>
+    <div class="q-explain">Fresh, specific facts are RAG's home ground: update the index and the next question sees the change. Nightly fine-tuning is slow and costly, and models don't reliably memorise exact facts from fine-tuning.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You need a model to write every reply in a precise house style, millions of times a day, as cheaply as possible. You have 5,000 example replies. What fits best?</p>
+    <ol class="q-src">
+      <li>RAG over the 5,000 replies</li>
+      <li>A big model with all 5,000 examples in the prompt</li>
+      <li>Fine-tune a smaller model on the examples</li>
+      <li>Nothing can enforce a style</li>
+    </ol>
+    <div class="q-explain">Style is behaviour, not knowledge, and at that volume the per-query cost of a long prompt adds up. A small fine-tuned model learns the style from examples and needs only a short prompt.</div>
+  </div>
+</section>
+
+<h2>Three levers, and what each one changes</h2>
+<p>When GPT-3 arrived in 2020, Brown et al. showed that a large model could do a new task from a few examples in the prompt, with no training: <strong>in-context learning</strong>. Before that, adapting a model meant fine-tuning it, as everyone did with BERT. The same year, Lewis et al. introduced <strong>retrieval-augmented generation</strong>, which fetched documents and fed them to the model as it answered. Then LoRA (Hu et al., 2021) and QLoRA (2023) made fine-tuning cheap enough for almost anyone (<a href="m3-7.html">M3.7</a>). By 2023 every team building on LLMs faced the same question: which lever do we pull?</p>
+<p>The one distinction that settles most cases: <strong>prompting and RAG change what the model reads; fine-tuning changes what the model is.</strong> Step through it:</p>
+
+<figure class="anim wide" data-anim="sy-6-levers"></figure>
+
+<table class="kit-table">
+  <thead><tr><th></th><th>Prompting</th><th>RAG</th><th>Fine-tuning</th></tr></thead>
+  <tbody>
+    <tr><td>Changes</td><td data-l="Prompting">What the model reads: instructions, examples</td><td data-l="RAG">What the model reads: passages fetched per question</td><td data-l="Fine-tuning">The weights (often a LoRA adapter)</td></tr>
+    <tr><td>Good for</td><td data-l="Prompting">Task description, tone, a few examples</td><td data-l="RAG">Fresh, private or large knowledge; citations</td><td data-l="Fine-tuning">Behaviour: format, style, narrow tasks; smaller, faster models</td></tr>
+    <tr><td>Setup cost</td><td data-l="Prompting">Minutes</td><td data-l="RAG">Days: chunking, embeddings, an index, retrieval evals</td><td data-l="Fine-tuning">Days to weeks: data, training, evals, serving</td></tr>
+    <tr><td>Cost per query</td><td data-l="Prompting">Grows with prompt length</td><td data-l="RAG">Retrieved tokens plus a search</td><td data-l="Fine-tuning">Can be lower: shorter prompts, smaller model</td></tr>
+    <tr><td>Update cycle</td><td data-l="Prompting">Edit and redeploy, instantly</td><td data-l="RAG">Re-index changed docs, in minutes</td><td data-l="Fine-tuning">Retrain and re-evaluate, in hours to days</td></tr>
+  </tbody>
+</table>
+<p>Always start with the cheapest lever. Write a clear prompt (<a href="sy-1.html">SY.1</a>), build a small eval set (<a href="m4-7.html">M4.7</a>) and measure. Pull the next lever only for the failures the prompt can't fix, and keep measuring with the same evals.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Which of these changes the model's weights?</p>
+  <ol class="q-src">
+    <li>Adding five worked examples to the system prompt</li>
+    <li>Training a LoRA adapter on 2,000 example replies</li>
+    <li>Retrieving three help articles per question</li>
+    <li>Putting the most important instruction at the end of the prompt</li>
+  </ol>
+  <div class="q-explain">Only training changes weights. Examples, retrieved articles and instruction order are all text in the context window: remove them and the model is unchanged.</div>
+</div></div>
+
+<h2>When RAG wins, when fine-tuning wins</h2>
+<p>Ask first: is the gap <strong>knowledge</strong> (facts the model doesn't have) or <strong>behaviour</strong> (how it answers)?</p>
+<p><strong>Knowledge → RAG.</strong> The evidence is consistent. Ovadia et al. (2023, "Fine-Tuning or Retrieval?") injected new facts into models both ways and found that RAG beat unsupervised fine-tuning, for facts the model had seen before and for entirely new ones. Gekhman et al. (2024) found that fine-tuning examples with <em>new</em> facts were learned slowly, and once learned they made the model more prone to hallucinate. Their reading: models get most of their facts in pretraining, and fine-tuning mostly teaches them how to use what they know. RAG also gives you what fine-tuning can't:</p>
+<ul>
+  <li><strong>Freshness:</strong> change a document, re-index it, and the next answer uses it.</li>
+  <li><strong>Citations:</strong> the answer can point to its source, so users and reviewers can check it.</li>
+  <li><strong>Access control:</strong> retrieve only documents this user may see. Facts baked into weights are visible to everyone who uses the model.</li>
+</ul>
+<p><strong>Behaviour → fine-tuning,</strong> once prompting runs out. Fine-tuning wins when:</p>
+<ul>
+  <li><strong>Format or style must hold every time</strong>, and prompting gets it right only most of the time: a house voice, a strict report layout, a domain's jargon.</li>
+  <li><strong>The task is narrow and high-volume:</strong> classify tickets, extract fields, route requests. A small fine-tuned model often matches a big general one there.</li>
+  <li><strong>Latency or cost matters:</strong> a smaller model with a short prompt answers faster and cheaper than a big model with pages of instructions (the next bytes do the arithmetic).</li>
+  <li><strong>The prompt is huge:</strong> dozens of examples needed in every request can often be trained in instead.</li>
+</ul>
+<p><strong>Combining them</strong> is common and natural, because they fix different things. A fine-tuned model can still read retrieved passages. RAFT (Zhang et al., 2024) went further: it fine-tuned models on questions paired with retrieved documents, including irrelevant "distractor" ones, so they learned to answer from the useful passage and ignore the rest.</p>
+<p>One more option often beats fine-tuning for format: many APIs now offer <strong>structured outputs</strong>, which force the reply to match a JSON schema by constraining decoding (<a href="sy-4.html">SY.4</a>). If the "format" you need is machine-readable, try that first.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>A new helper starts at a toy shop. There are three ways to help them do well.</p>
+      <p>You can give them a <strong>note</strong>: "Smile, say hello, and keep it short." That's prompting. You can give them the <strong>shop's big binder</strong> to look up prices whenever someone asks. That's RAG, and when a price changes you just swap the page. Or you can send them on a <strong>training course</strong>, so being friendly and quick becomes a habit. That's fine-tuning.</p>
+      <p>The binder is best for prices, because prices change. The course is best for habits, because a habit doesn't need a note every time. Good shops use all three.</p>
+      <p class="math-note">Where it breaks: a person who takes a course also remembers the facts they learned there. A model fine-tuned on facts learns them slowly and patchily, and can start making up facts that sound similar.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">A legal-research assistant must quote the exact wording of the newest regulations and show where each quote came from. What is the core of the solution?</p>
+  <ol class="q-src">
+    <li>Fine-tune on all regulations each quarter</li>
+    <li>A system prompt asking for exact quotes</li>
+    <li>A larger model, which knows more law</li>
+    <li>RAG over the current regulations, with citations</li>
+  </ol>
+  <div class="q-explain">Exact, current, citable text is knowledge, which is RAG's strength. Fine-tuning doesn't reliably memorise exact wording, can't cite and goes stale between training runs. A larger model still has a training cutoff.</div>
+</div></div>
+
+<h2>The decision guide</h2>
+<p>Five questions settle most cases. Click through them with your own project in mind; the picture shows which levers to pull, and the reasons appear below it.</p>
+
+<div class="playground" id="sy6-decide">
+  <h3>Playground: prompt, RAG or fine-tune?</h3>
+  <p class="math-note" style="margin:0">Solid orange: recommended. Dashed: worth considering, or later. The rules are a rule of thumb; your evals have the final word.</p>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="dq" data-q="0" role="group" aria-label="Question 1: what is missing?">
+    <p>1. What is the model missing?</p>
+    <div class="chips">
+      <button type="button" class="chip" data-v="0" aria-pressed="false">Knowledge (facts, documents)</button>
+      <button type="button" class="chip" data-v="1" aria-pressed="false">Behaviour (format, style, a skill)</button>
+      <button type="button" class="chip" data-v="2" aria-pressed="false">Both</button>
+    </div>
+  </div>
+  <div class="dq" data-q="1" role="group" aria-label="Question 2: how often does the knowledge change?">
+    <p>2. How often does the knowledge change?</p>
+    <div class="chips">
+      <button type="button" class="chip" data-v="0" aria-pressed="false">Rarely</button>
+      <button type="button" class="chip" data-v="1" aria-pressed="false">Monthly</button>
+      <button type="button" class="chip" data-v="2" aria-pressed="false">Daily or faster</button>
+    </div>
+  </div>
+  <div class="dq" data-q="2" role="group" aria-label="Question 3: do you need a strict format or style?">
+    <p>3. Do you need a strict format or style?</p>
+    <div class="chips">
+      <button type="button" class="chip" data-v="0" aria-pressed="false">No</button>
+      <button type="button" class="chip" data-v="1" aria-pressed="false">Some</button>
+      <button type="button" class="chip" data-v="2" aria-pressed="false">Yes, every time</button>
+    </div>
+  </div>
+  <div class="dq" data-q="3" role="group" aria-label="Question 4: latency and cost constraints?">
+    <p>4. Latency and cost?</p>
+    <div class="chips">
+      <button type="button" class="chip" data-v="0" aria-pressed="false">Relaxed</button>
+      <button type="button" class="chip" data-v="1" aria-pressed="false">Tight: high volume or real time</button>
+    </div>
+  </div>
+  <div class="dq" data-q="4" role="group" aria-label="Question 5: how much labelled data?">
+    <p>5. How many good input → output examples do you have?</p>
+    <div class="chips">
+      <button type="button" class="chip" data-v="0" aria-pressed="false">None or a handful</button>
+      <button type="button" class="chip" data-v="1" aria-pressed="false">Hundreds</button>
+      <button type="button" class="chip" data-v="2" aria-pressed="false">Thousands or more</button>
+    </div>
+  </div>
+  <div class="pg-hint" aria-live="polite"></div>
+  <div class="chips" style="margin-top:10px"><button type="button" class="chip" data-act="reset">Start again</button></div>
+</div>
+
+<p>The guide encodes a few rules worth remembering:</p>
+<ul>
+  <li><strong>Prompting first, always</strong>, with an eval set to measure everything else against.</li>
+  <li><strong>Knowledge → RAG.</strong> If it's small and stable enough to fit in a few thousand tokens, just put it in the prompt and cache it. For a small, evolving body of knowledge you want summarised and cross-linked once: an <strong>LLM wiki</strong> (<a href="ag-6.html">AG.6</a>).</li>
+  <li><strong>Behaviour that prompting can't hold, with hundreds of examples or more → fine-tuning.</strong> Typical fine-tuning sets run from a few hundred to tens of thousands of examples; quality matters more than quantity.</li>
+  <li><strong>Behaviour with little data</strong> → few-shot prompting now. If it is a procedure needed only sometimes, an <strong>Agent Skill</strong> (<a href="ag-4.html">AG.4</a>); if it is a convention for every task in a coding agent, a <strong>rules file</strong> (<a href="ag-5.html">AG.5</a>).</li>
+  <li><strong>Tight latency or cost</strong> → a smaller model. Fine-tuning (often by distillation) is what makes a small model good enough.</li>
+</ul>
+<p>The map in <a href="ag-1.html">AG.1</a> puts it in one line: "Change the model's built-in behaviour, style or cost at scale" is the row for fine-tuning; everything about facts goes elsewhere.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">You need strict JSON output and have only 20 examples. What should you try before fine-tuning?</p>
+  <ol class="q-src">
+    <li>Structured outputs (schema-constrained decoding) if the API offers them, plus a few examples in the prompt</li>
+    <li>RAG over the 20 examples</li>
+    <li>An LLM wiki</li>
+    <li>Nothing; 20 examples is plenty for fine-tuning</li>
+  </ol>
+  <div class="q-explain">A schema constraint makes valid JSON a guarantee rather than a habit, and a few examples show what good content looks like. Twenty examples is thin for fine-tuning; save them as eval cases.</div>
+</div></div>
+
+<h2>The cost arithmetic: long prompt vs small fine-tuned model</h2>
+<p>Per-query cost is tokens times price, for input and output separately:</p>
+$$\text{cost per query} = \frac{T_{\text{in}} \, P_{\text{in}} + T_{\text{out}} \, P_{\text{out}}}{10^6}$$
+<p>Here $T_{\text{in}}$ and $T_{\text{out}}$ are the input and output tokens, and $P_{\text{in}}$ and $P_{\text{out}}$ are the prices per million tokens. Prices vary by provider and fall over time, so the numbers below are <strong>illustrative</strong>, not quotes.</p>
+
+<h3>Worked example</h3>
+<p>A support bot. <strong>Option A:</strong> a big model at $\$2.50$ per million input tokens and $\$10$ per million output tokens, with a 10,000-token prompt (instructions plus many examples) and 200-token replies. <strong>Option B:</strong> a small fine-tuned model at $\$0.30$ in and $\$1.20$ out, which needs only a 400-token prompt for the same replies.</p>
+<ol class="steps">
+  <li><strong>A per query:</strong> $(10{,}000 \times 2.50 + 200 \times 10) / 10^6 = (25{,}000 + 2{,}000)/10^6 = \$0.027$</li>
+  <li><strong>B per query:</strong> $(400 \times 0.30 + 200 \times 1.20) / 10^6 = (120 + 240)/10^6 = \$0.00036$, 75 times cheaper.</li>
+  <li><strong>At 1 million queries a month:</strong> about $\$27{,}000$ for A against $\$360$ for B.</li>
+  <li><strong>Break-even:</strong> if building B costs $\$2{,}000$ once (data, training runs, evals), it pays for itself after $2{,}000 / (0.027 - 0.00036) \approx 75{,}000$ queries.</li>
+</ol>
+<p>Two honest caveats. First, <strong>prompt caching</strong> (<a href="ag-2.html">AG.2</a>) cuts A's bill: if 9,600 of its tokens are a cached prefix billed at a tenth of the price, A costs about $\$0.0054$, so B's advantage drops from 75× to about 15×. Second, B has costs A doesn't: someone must maintain the training set, retrain when the base model is updated and re-run the evals. At low volume, the big model with a good prompt is usually the right answer.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same prices. Option A now uses a 6,000-token prompt and 300-token replies; option B uses a 500-token prompt and 300-token replies.</p>
+  <ol class="steps">
+    <li>A per query, in dollars: <span class="blank" data-answer="0.018" data-tol="0.0005" data-hint="(6,000 × 2.50 + 300 × 10) / 1,000,000"></span></li>
+    <li>B per query, in dollars: <span class="blank" data-answer="0.00051" data-tol="0.00002" data-hint="(500 × 0.30 + 300 × 1.20) / 1,000,000"></span></li>
+    <li>With a one-off cost of $\$1{,}500$ for B, the break-even point in queries: <span class="blank" data-answer="85763" data-tol="400" data-hint="1,500 divided by the saving per query, 0.018 − 0.00051."></span></li>
+  </ol>
+</section>
+
+<h3>Distillation: how the small model gets good</h3>
+<p>Where do you get thousands of perfect replies for option B? Often from option A. <strong>Distillation</strong> (Hinton et al., 2015; <a href="m5-2.html">M5.2</a>) trains a small "student" model to imitate a large "teacher". For LLM products the usual recipe is simple: run the big model with your best prompt on thousands of real inputs, filter its outputs with your evals (and humans where it matters), and fine-tune the small model on what's left. The student learns the teacher's behaviour on <em>your</em> task, without the long prompt. Check the teacher model's terms of use first: some providers restrict using outputs to train other models.</p>
+
+<div class="why"><strong>In real practice:</strong> most production systems in 2026 are prompting plus retrieval, and a minority add fine-tuning, usually for one of three reasons: a strict output format or voice, a narrow high-volume task, or moving to a smaller, cheaper model by distillation. Teams that fine-tune "to teach the model our documents" tend to switch to RAG. And whichever lever you pull, the same eval set decides whether it worked.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">In the worked example, prompt caching makes option A about 5 times cheaper. What happens to the case for fine-tuning a small model?</p>
+  <ol class="q-src">
+    <li>It disappears entirely; caching makes every prompt free</li>
+    <li>Nothing changes; caching doesn't affect cost</li>
+    <li>It weakens (B is now about 15× cheaper, not 75×), so break-even needs more volume</li>
+    <li>It gets stronger, because cached prompts are slower</li>
+  </ol>
+  <div class="q-explain">Caching discounts the repeated prefix, so the long prompt costs much less, though not zero. The gap narrows, the break-even volume rises, and at moderate volume the simpler option A may win.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">A manager says: "Let's fine-tune the model on our wiki so it knows everything about our company." What do you tell them, and when would you fine-tune?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Fine-tuning changes the model's habits, not a reliable store of facts: new facts are learned slowly, can increase hallucination, go stale as the wiki changes and can't be cited. For company knowledge, use RAG (or, for a small, evolving set, an LLM wiki), which reads the current text at question time and can cite it. Fine-tune when the problem is behaviour, such as a strict format, a house style or a narrow high-volume task, or to make a smaller, cheaper model good enough, ideally with hundreds to thousands of examples and an eval set to prove it helped.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What did Gekhman et al. (2024) find about fine-tuning on facts the model didn't already know?</p>
+    <ol class="q-src">
+      <li>New facts were learned faster than known ones</li>
+      <li>They were learned slowly, and once learned they increased the model's tendency to hallucinate</li>
+      <li>They had no effect at all</li>
+      <li>They erased all of the model's other knowledge</li>
+    </ol>
+    <div class="q-explain">Their conclusion: models get most factual knowledge in pretraining, and fine-tuning mainly teaches them to use it. That is why facts belong in retrieval.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Connect to M3.7: why does LoRA make "fine-tune a small model per task" practical?</p>
+    <ol class="q-src">
+      <li>LoRA adapters store the task's documents</li>
+      <li>LoRA removes the need for training data</li>
+      <li>LoRA makes the base model smaller</li>
+      <li>It trains only small low-rank matrices, so training is cheap and many task adapters can share one base model</li>
+    </ol>
+    <div class="q-explain">With the base frozen, training needs far less memory, and each adapter is megabytes rather than a full model copy. Serving systems can switch adapters per request.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which situation is the strongest case for combining RAG with fine-tuning?</p>
+    <ol class="q-src">
+      <li>High-volume answers from changing documents in a strict house style, where a small model must be fast</li>
+      <li>A prototype used by five people</li>
+      <li>A question-answering bot over ten static FAQ entries</li>
+      <li>A one-off summary of a single report</li>
+    </ol>
+    <div class="q-explain">Changing documents call for retrieval; strict style at high volume on a small model calls for fine-tuning. The other cases are served by a good prompt (with the FAQ pasted in and cached).</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Option A costs $\$0.02$ per query and option B $\$0.001$. B needs a one-off $\$3{,}800$. After how many queries does B pay off?</p>
+    <ol class="q-src">
+      <li>3,800</li>
+      <li>19,000</li>
+      <li>200,000</li>
+      <li>3.8 million</li>
+    </ol>
+    <div class="q-explain">The saving is $0.02 - 0.001 = 0.019$ dollars per query, and $3{,}800 / 0.019 = 200{,}000$ queries.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Prompting and RAG change what the model reads; fine-tuning changes what it is.</strong></li>
+    <li>Start with a prompt and an eval set. <strong>Knowledge</strong> (fresh, private, citable) → RAG. <strong>Behaviour</strong> (format, style, narrow tasks) that prompting can't hold → fine-tuning.</li>
+    <li>Fine-tuning is a poor way to teach facts: they're learned slowly, can raise hallucination and go stale.</li>
+    <li>Cost per query is $(T_{\text{in}}P_{\text{in}} + T_{\text{out}}P_{\text{out}})/10^6$. A small fine-tuned model with a short prompt can be far cheaper at high volume; caching narrows the gap.</li>
+    <li><strong>Distillation</strong>: generate and filter outputs from a big model, then fine-tune a small one. Combine levers freely; they fix different things.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"sy-6-a","front":"What does each lever change: prompting, RAG, fine-tuning?","back":"Prompting and RAG change what the model reads (instructions, examples, retrieved passages). Fine-tuning changes the weights (often a LoRA adapter)."},
+  {"id":"sy-6-b","front":"When does RAG beat fine-tuning?","back":"For knowledge: fresh, private or large document sets, exact wording, citations and per-user access control. Ovadia et al. (2023) found RAG beat unsupervised fine-tuning for injecting knowledge."},
+  {"id":"sy-6-c","front":"When does fine-tuning win?","back":"For behaviour that prompting can't hold: strict format or house style, narrow high-volume tasks, very long prompts that can be trained in, and making a smaller, faster model good enough."},
+  {"id":"sy-6-d","front":"Per-query cost formula, and the worked example's result?","back":"$(T_{in}P_{in} + T_{out}P_{out})/10^6$. Big model, 10k-token prompt, 200 out at 2.50/10 per M: 0.027 dollars. Small fine-tuned, 400 in, 200 out at 0.30/1.20: 0.00036 dollars (75× cheaper; ~15× with caching)."},
+  {"id":"sy-6-e","front":"What is distillation in LLM product work?","back":"Run a big 'teacher' model (with your best prompt) on many real inputs, filter its outputs with evals, and fine-tune a small 'student' on them, so the student copies the behaviour without the long prompt (Hinton et al., 2015). Check the teacher's terms of use."},
+  {"id":"sy-6-f","front":"Why is fine-tuning a poor way to keep facts?","back":"New facts are learned slowly and can increase hallucination (Gekhman et al., 2024); they go stale until retraining, can't be cited and can't be access-controlled per user."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/sy-6-levers.js"></script>
+<script src="../assets/js/anims/sy-6-decide-playground.js"></script>
+</body>
+</html>

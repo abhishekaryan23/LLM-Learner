@@ -187,13 +187,13 @@ LC.course = {
       { id: "rs-4", title: "Process vs outcome rewards & verifiers", mins: 10, pre: ["rs-3"], ready: true }
     ]},
     sy: { code: "SY", title: "Building with LLMs", cover: "cover-sy.webp", tags: ["retrieval-augmented", "rag", "agent", "tool use", "function calling", "prompt engineering", "vector search", "guardrail"], lessons: [
-      { id: "sy-1", title: "Prompting that works", mins: 8, pre: ["m3-1"] },
-      { id: "sy-2", title: "Embeddings & vector search", mins: 10, pre: ["p3-4"] },
-      { id: "sy-3", title: "Retrieval-augmented generation", mins: 12, pre: ["sy-2", "sy-1"] },
-      { id: "sy-4", title: "Tool use & function calling", mins: 10, pre: ["sy-1"] },
-      { id: "sy-5", title: "Agents: loops, memory & planning", mins: 12, pre: ["sy-4", "sy-3"] },
-      { id: "sy-6", title: "Prompt, RAG or fine-tune?", mins: 8, pre: ["sy-3", "m3-7"] },
-      { id: "sy-7", title: "Guardrails & safety in products", mins: 10, pre: ["sy-5", "m4-8"] }
+      { id: "sy-1", title: "Prompting that works", mins: 8, pre: ["m3-1"], ready: true },
+      { id: "sy-2", title: "Embeddings & vector search", mins: 10, pre: ["p3-4"], ready: true, colab: "sy-2-vector-search.ipynb" },
+      { id: "sy-3", title: "Retrieval-augmented generation", mins: 12, pre: ["sy-2", "sy-1"], ready: true, colab: "sy-3-rag-eval.ipynb" },
+      { id: "sy-4", title: "Tool use & function calling", mins: 10, pre: ["sy-1"], ready: true },
+      { id: "sy-5", title: "Agents: loops, memory & planning", mins: 12, pre: ["sy-4", "sy-3"], ready: true, colab: "sy-5-agent-loop.ipynb" },
+      { id: "sy-6", title: "Prompt, RAG or fine-tune?", mins: 8, pre: ["sy-3", "m3-7"], ready: true },
+      { id: "sy-7", title: "Guardrails & safety in products", mins: 10, pre: ["sy-5", "m4-8"], ready: true }
     ]},
     ag: { code: "AG", title: "The agent toolkit: MCP, skills & more", cover: "cover-ag.webp", tags: ["model context protocol", "mcp", "agent skills", "agents.md", "context engineering", "multi-agent", "agent2agent", "a2a", "llm wiki", "computer use", "coding agent", "subagent"], lessons: [
       { id: "ag-1", title: "Where to use what: the agent toolkit on one page", mins: 8, pre: [], ready: true },
