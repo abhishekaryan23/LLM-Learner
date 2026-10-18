@@ -23,18 +23,18 @@
     build: function (svg, ctx) {
       var S = LC.svg, compact = ctx.layout === "compact", W = ctx.w;
       var gx0 = compact ? 64 : 150, gx1 = compact ? 356 : 560, gw = (gx1 - gx0) / 4;
-      var base = 200, maxH = 120, bw = compact ? 24 : 32;
+      var base = 200, maxH = 120, bw = compact ? 24 : 32, gp = compact ? 4 : 2;   // gp: half-gap between a token's p and q bars
       var rowLx = compact ? 4 : 30;
       var mx0 = gx0, bitPx = compact ? 128 : 170, my = 284;
       var tl = gsap.timeline();
       function cx(i) { return gx0 + gw * (i + 0.5); }
       function rect(i, side, v, cls) {
-        var x = side < 0 ? cx(i) - 2 - bw : cx(i) + 2;
+        var x = side < 0 ? cx(i) - gp - bw : cx(i) + gp;
         return S("rect", { x: x, y: base - v * maxH, width: bw, height: v * maxH, class: cls }, svg);
       }
       function lbls(side, vals, cls, prob) {
         return vals.map(function (t, i) {
-          var x = side < 0 ? cx(i) - 2 - bw / 2 : cx(i) + 2 + bw / 2;
+          var x = side < 0 ? cx(i) - gp - bw / 2 : cx(i) + gp + bw / 2;
           return S("text", { x: x, y: base - prob[i] * maxH - 6, class: "t t-sm t-mono t-mid " + cls, text: t }, svg);
         });
       }
@@ -67,7 +67,7 @@
 
       // s1: surprise row
       var r1L = S("text", { x: rowLx, y: 244, class: "t t-sm t-blue", text: "−log₂p" }, svg);
-      var sp = [1, 2, 3, 3].map(function (v, i) { return S("text", { x: cx(i) - 2 - bw / 2, y: 244, class: "t t-sm t-mono t-blue t-mid", text: v }, svg); });
+      var sp = [1, 2, 3, 3].map(function (v, i) { return S("text", { x: cx(i) - gp - bw / 2, y: 244, class: "t t-sm t-mono t-blue t-mid", text: v }, svg); });
       LC.popIn(tl, [r1L].concat(sp), { duration: 0.35, stagger: 0.08 });
       next(1);
       tl.addLabel("s1");
@@ -101,7 +101,7 @@
 
       // s4: cross-entropy row + meter grows
       var r2L = S("text", { x: rowLx, y: 264, class: "t t-sm t-orange", text: "−log₂q" }, svg);
-      var sq = Q.map(function (v, i) { return S("text", { x: cx(i) + 2 + bw / 2, y: 264, class: "t t-sm t-mono t-orange t-mid", text: "2" }, svg); });
+      var sq = Q.map(function (v, i) { return S("text", { x: cx(i) + gp + bw / 2, y: 264, class: "t t-sm t-mono t-orange t-mid", text: "2" }, svg); });
       LC.popIn(tl, [r2L].concat(sq), { duration: 0.35, stagger: 0.06 });
       LC.popIn(tl, [segO], { duration: 0.01 });
       tl.to(st, { ce: 2, duration: 0.7, ease: "power2.out", onUpdate: meter });
@@ -114,9 +114,9 @@
       tl.addLabel("s5");
 
       // s6: one-hot target
-      var pl1 = P1L.map(function (t, i) { return S("text", { x: cx(i) - 2 - bw / 2, y: base - P1[i] * maxH - 6, class: "t t-sm t-mono t-mid t-blue", text: t }, svg); });
+      var pl1 = P1L.map(function (t, i) { return S("text", { x: cx(i) - gp - bw / 2, y: base - P1[i] * maxH - 6, class: "t t-sm t-mono t-mid t-blue", text: t }, svg); });
       pl1.forEach(function (e) { e.style.opacity = 0; });
-      var sp1 = S("text", { x: cx(0) - 2 - bw / 2, y: 244, class: "t t-sm t-mono t-blue t-mid", text: "0" }, svg);
+      var sp1 = S("text", { x: cx(0) - gp - bw / 2, y: 244, class: "t t-sm t-mono t-blue t-mid", text: "0" }, svg);
       sp1.style.opacity = 0;
       tl.to(pl.concat(sp, [hL]), { opacity: 0, duration: 0.25 });
       P1.forEach(function (v, i) { tl.to(pb[i], { attr: { y: base - v * maxH, height: v * maxH }, duration: 0.7, ease: "power2.inOut" }, i ? "<" : undefined); });

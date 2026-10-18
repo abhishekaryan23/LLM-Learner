@@ -12,8 +12,8 @@
       "Next day you recall it and tap <strong>Good</strong>. It climbs one rung: back in <strong>3 days</strong>.",
       "Good again. Now it waits <strong>a week</strong>. Each success buys a longer gap.",
       "This time it was effortless, so you tap <strong>Easy</strong>. It skips a rung: see you in about <strong>5 weeks</strong>.",
-      "Weeks later… blank. You tap <strong>Again</strong>. The card drops to the bottom and comes back <strong>in a few minutes</strong>. Forgetting is part of the process, not a failure.",
-      "You get it right, and it starts climbing again. Over time, cards you know well rarely appear, and your daily review stays <strong>short</strong>."
+      "Weeks later… blank. You tap <strong>Again</strong>. The card drops to the bottom rung and comes back <strong>in about 10 minutes</strong>, later in the same session. Forgetting is part of the process, not a failure.",
+      "You get it right, and it starts climbing again: next review in <strong>1 day</strong>. Over time, cards you know well rarely appear, and your daily review stays <strong>short</strong>."
     ],
     size: function (layout) { return layout === "compact" ? { w: 360, h: 330 } : { w: 640, h: 230 }; },
     build: function (svg, ctx) {
@@ -22,7 +22,7 @@
       var n = RUNGS.length, pos;
       if (compact) {
         // a staircase rising to the right, two rows high so labels have room
-        var x0 = 34, x1 = W - 30, yb = H - 60, yt = 70;
+        var x0 = 34, x1 = W - 30, yb = H - 60, yt = 78;
         pos = RUNGS.map(function (_, i) { return { x: x0 + (i / (n - 1)) * (x1 - x0), y: yb - (i / (n - 1)) * (yb - yt) }; });
       } else {
         var xa = 50, xb = W - 50, yb2 = H - 50, yt2 = 70;
@@ -50,17 +50,17 @@
       }
 
       tl.addLabel("s0", 0);
-      var cur = 1, prevBadge = null;
+      var cur = 1, prevBadge = null, by = compact ? 38 : 34;   // badge height above its rung (compact: clear of the next rung up)
       MOVES.slice(1).forEach(function (mv, k) {
         if (prevBadge) tl.to(prevBadge, { opacity: 0, duration: 0.2 });
         var to = mv[0], from = pos[cur], dest = pos[to];
         var badge = makeBadge(mv[1]);
         var bx = Math.min(Math.max(from.x, 40), W - 40);
-        tl.fromTo(badge, { opacity: 0, x: bx, y: from.y - 40 }, { opacity: 1, y: from.y - 34, duration: 0.3, immediateRender: false });
+        tl.fromTo(badge, { opacity: 0, x: bx, y: from.y - by - 6 }, { opacity: 1, y: from.y - by, duration: 0.3, immediateRender: false });
         var midY = Math.min(from.y, dest.y) - 50;
         tl.to(card, { keyframes: [{ x: (from.x + dest.x) / 2, y: midY, duration: 0.45, ease: "power1.out" }, { x: dest.x, y: dest.y - 2, duration: 0.45, ease: "power1.in" }] });
         // the grade stays pinned above the card's new rung until the next step
-        tl.to(badge, { x: Math.min(Math.max(dest.x, 40), W - 40), y: dest.y - 34, duration: 0.9, ease: "power1.inOut" }, "<");
+        tl.to(badge, { x: Math.min(Math.max(dest.x, 40), W - 40), y: dest.y - by, duration: 0.9, ease: "power1.inOut" }, "<");
         tl.addLabel("s" + (k + 1));
         prevBadge = badge;
         cur = to;

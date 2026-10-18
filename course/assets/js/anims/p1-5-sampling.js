@@ -69,7 +69,7 @@
       sumT.style.opacity = 0;
       tl.addLabel("s1");
 
-      // s2: one sample r = 0.58
+      // s2: one sample r = 0.63
       var rx = stripL + R * stripW;
       var mark = S("path", { d: "M" + rx + " " + (stripY - 4) + "V" + (stripY + stripH + 4), class: "s-orange", style: "stroke-width:3" }, svg);
       var rLbl = S("text", { x: rx, y: stripY + stripH + 18, class: "t t-sm t-orange t-mid", "font-weight": 650, text: "r = 0.63" }, svg);
