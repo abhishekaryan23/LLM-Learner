@@ -94,11 +94,11 @@
 
 <h2>Why voting works: the binomial</h2>
 <p>Suppose each sample is right with probability $p$, independently of the others, and $N$ is odd so there are no ties. Let $X$ be the number of correct samples. The correct answer is <strong>guaranteed</strong> to win the vote if it gets more than half of the votes:</p>
-$$P(\text{majority right}) = P\!\left(X > \tfrac{N}{2}\right) = \sum_{k = \lceil N/2 \rceil}^{N} \binom{N}{k}\, p^{k} (1-p)^{N-k}$$
+$$P(\text{majority right}) = P\!\left(X > \tfrac{N}{2}\right) = \sum_{k > N/2}  \binom{N}{k}\, p^{k} (1-p)^{N-k}$$
 <ul>
   <li>$\binom{N}{k}$ counts the ways to choose which $k$ of the $N$ samples are the correct ones.</li>
   <li>$p^k (1-p)^{N-k}$ is the probability of one particular arrangement with exactly $k$ right and $N - k$ wrong.</li>
-  <li>The sum adds up every case where the right answers hold a strict majority, $k \ge \lceil N/2 \rceil$ (for $N = 9$: $k = 5, \dots, 9$).</li>
+  <li>The sum adds up every case where the right answers hold a strict majority, $k > N/2$ (for $N = 9$: $k = 5, \dots, 9$).</li>
 </ul>
 <p>The numbers, computed exactly:</p>
 <div style="overflow-x:auto">
@@ -106,7 +106,7 @@ $$P(\text{majority right}) = P\!\left(X > \tfrac{N}{2}\right) = \sum_{k = \lceil
   <thead><tr><th>per-sample $p$</th><th>$N = 1$</th><th>$N = 5$</th><th>$N = 9$</th><th>$N = 21$</th><th>$N = 41$</th></tr></thead>
   <tbody>
     <tr><td>0.7</td><td>0.700</td><td>0.837</td><td>0.901</td><td>0.974</td><td>0.996</td></tr>
-    <tr><td>0.6</td><td>0.600</td><td>0.683</td><td>0.733</td><td>0.826</td><td>0.904</td></tr>
+    <tr><td>0.6</td><td>0.600</td><td>0.683</td><td>0.733</td><td>0.826</td><td>0.903</td></tr>
     <tr><td>0.4</td><td>0.400</td><td>0.317</td><td>0.267</td><td>0.174</td><td>0.097</td></tr>
   </tbody>
 </table>

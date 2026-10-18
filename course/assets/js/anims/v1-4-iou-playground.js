@@ -96,7 +96,7 @@
       var union = A.w * A.h + b.w * b.h - inter, iou = inter / union;
       iouTxt.textContent = "IoU = " + iou.toFixed(2);
       iouTxt.setAttribute("class", "t t-mid " + (iou >= 0.5 ? "t-blue" : "t-orange"));
-      var verdict = iou >= 0.75 ? "a match even at COCO's strict 0.75 threshold" : iou >= 0.5 ? "a match at the usual 0.5 threshold (not at 0.75)" : "a miss at 0.5: this detection would count as a false positive";
+      var verdict = iou >= 0.75 ? "a match even at the strict 0.75 threshold (COCO's AP75)" : iou >= 0.5 ? "a match at the usual 0.5 threshold (not at 0.75)" : "a miss at 0.5: this detection would count as a false positive";
       readout.textContent = "intersection " + Math.round(inter) + " · union " + Math.round(union) + " · IoU " + iou.toFixed(3) + " → " + verdict;
       chips.querySelectorAll(".chip").forEach(function (c, i) {
         var p = PRESETS[i];

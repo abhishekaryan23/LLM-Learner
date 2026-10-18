@@ -76,7 +76,7 @@
       if (tau > 0.4) msg = "High τ: every probability is close to 0.25. The model can barely tell the captions apart, so the loss is near ln 4 ≈ 1.39.";
       else if (batch === "mix" && tau < 0.02) msg = "Very low τ with a mix-up: the cat row confidently picks “a dog”, and cross-entropy punishes that hard. The loss is rising again.";
       else if (tau < 0.02) msg = "Very low τ: nearly one-hot. Every match here is right, so the loss is tiny; real batches always contain some mistakes.";
-      else msg = batch === "mix" ? "Look at the cat row: “a dog” scores higher than “a cat”. For this batch the loss is lowest around τ ≈ 0.03." : "Lower τ sharpens each softmax. CLIP learns τ during training; it starts at 0.07.";
+      else msg = batch === "mix" ? "Look at the cat row: “a dog” scores higher than “a cat”. For this batch the loss is lowest around τ ≈ 0.03." : "Lower τ sharpens each softmax. CLIP learns τ during training; it starts at about 0.07.";
       hint.textContent = msg;
     }
 

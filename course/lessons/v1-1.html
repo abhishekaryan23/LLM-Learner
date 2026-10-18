@@ -118,7 +118,7 @@ $$z_0 = \big[\,x_{\text{cls}};\; x_p^1 E;\; \dots;\; x_p^N E\,\big] + E_{\text{p
 </ol>
 
 <div class="byte-check"><div class="q" data-answer="2">
-  <p class="q-prompt">You remove the position embeddings from a trained ViT and shuffle the input patches. What happens to the [CLS] output?</p>
+  <p class="q-prompt">A ViT was trained with no position embeddings. You shuffle its input patches. How does the [CLS] output change?</p>
   <ol class="q-src">
     <li>It becomes random noise</li>
     <li>It changes a lot, because attention depends on the order of tokens</li>
@@ -137,7 +137,7 @@ $$z_0 = \big[\,x_{\text{cls}};\; x_p^1 E;\; \dots;\; x_p^N E\,\big] + E_{\text{p
 </ul>
 <p>The suffix is the patch size: ViT-L/14 uses 14 × 14 patches, so a 224-pixel image gives $16 \times 16 = 256$ patches.</p>
 <p><strong>The catch: data.</strong> Trained on ImageNet-1k alone (1.3M images), ViTs did <em>worse</em> than ResNets of similar size. They only pulled ahead when pretrained on much larger datasets: ImageNet-21k (14M images) or Google's internal <strong>JFT-300M</strong> (about 300M images). After JFT pretraining, ViT-H/14 reached 88.55% top-1 accuracy on ImageNet, matching or beating the best CNNs while using less pretraining compute. The lesson: weaker inductive bias means the model must learn locality from examples, and at scale, learning it beats hard-coding it.</p>
-<p><strong>DeiT</strong> (Touvron et al., 2021) showed the data problem could also be engineered around. Using ImageNet-1k only, with heavy augmentation (RandAugment, Mixup, CutMix), strong regularization and a <strong>distillation token</strong> that learns from a CNN teacher, DeiT-B reached 81.8% top-1, trained on a single 8-GPU machine in under three days. Today the main answer is <strong>self-supervised pretraining</strong> on unlabelled images, which is the subject of <a href="v1-3.html">V1.3</a>.</p>
+<p><strong>DeiT</strong> (Touvron et al., 2021) showed the data problem could also be engineered around. Using ImageNet-1k only, with heavy augmentation (RandAugment, Mixup, CutMix), strong regularization and a <strong>distillation token</strong> that learns from a CNN teacher, DeiT-B reached 81.8% top-1 (83.4% with the distillation token), trained on one multi-GPU machine in under three days. Today the main answer is <strong>self-supervised pretraining</strong> on unlabelled images, which is the subject of <a href="v1-3.html">V1.3</a>.</p>
 <p>What do ViTs learn? The original paper found that some heads attend locally even in the lowest layers (rediscovering CNN-like behaviour), while others attend across the whole image from the start. The learned position embeddings even arrange themselves into a 2-D grid: patches in the same row or column get similar vectors.</p>
 
 <div class="byte-check"><div class="q" data-answer="1">

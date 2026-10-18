@@ -92,7 +92,7 @@
 
 <figure class="anim wide" data-anim="vd-4-videollm"></figure>
 
-<p>Some models encode short groups of frames together, with space-time patches like the tubelets in <a href="vd-1.html">VD.1</a>, which captures motion better and halves the tokens. Others, like Google's Gemini models (from 2024), are trained natively on interleaved video, audio and text and accept very long inputs. Either way, the LLM only "sees" what survives sampling and compression.</p>
+<p>Some models encode short groups of frames together, with space-time patches like the tubelets in <a href="vd-1.html">VD.1</a>, which captures motion better and halves the tokens. Others, like Google's Gemini models (since late 2023), are trained natively on interleaved video, audio and text and accept very long inputs. Either way, the LLM only "sees" what survives sampling and compression.</p>
 
 <details class="eli5">
   <summary>Explain like I'm 5</summary>
@@ -180,7 +180,7 @@ $$\text{tokens} = \underbrace{\text{duration} \times \text{sampling rate}}_{\tex
   <li><strong>Longer context:</strong> long-context models (Gemini 1.5, 2024, was an early example) simply accept around a million tokens, at a correspondingly higher compute cost.</li>
 </ul>
 <p><strong>Benchmarks.</strong> Kinetics and Something-Something test recognition; NExT-QA (Xiao et al., 2021) asks causal and temporal questions; EgoSchema (Mangalam et al., 2023) uses 3-minute first-person clips; MVBench (Li et al., 2024) covers many short temporal skills; and <strong>Video-MME</strong> (Fu et al., 2024) has 900 videos from about 11 seconds to an hour long with 2,700 multiple-choice questions, tested with and without subtitles. Long-video suites such as LongVideoBench (Wu et al., 2024) push further.</p>
-<p>Read results with care. Many questions can be answered from one frame, the subtitles or general knowledge, and a model that ignores most of the video can still score well. Good benchmarks filter such questions (Video-MME's authors removed questions a text-only model could answer) and report results by video length; good evaluations include a "blind" or single-frame baseline.</p>
+<p>Read results with care. Many questions can be answered from one frame, the subtitles or general knowledge, and a model that ignores most of the video can still score well. Good benchmarks filter such questions (Video-MME's authors rewrote or dropped questions that a text-only model could answer) and report results by video length; good evaluations include a "blind" or single-frame baseline.</p>
 
 <div class="why"><strong>Why this matters for LLM practice:</strong> a video-LLM is an LLM with a context-budget problem, the same one you meet with long documents in retrieval-augmented generation. Sampling is chunking, token merging is compression, segment captions plus retrieval is RAG over a video, and "look again" is an agent with a tool. If a product claims to "watch" an hour of video, ask how many frames per second it samples and how many tokens each frame gets.</div>
 

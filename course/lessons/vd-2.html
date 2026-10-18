@@ -84,7 +84,7 @@
 <h2>Inside one generation</h2>
 <p>At sampling time a video DiT runs the diffusion loop you know from images, just on a bigger tensor:</p>
 <ol class="steps">
-  <li>Pick the output shape, say 5 s of 720p, and fill a latent of that shape (21 latent frames × 90 × 160 × 16 channels for a 4 × 8 × 8 VAE) with <strong>pure noise</strong>.</li>
+  <li>Pick the output shape, say 5 s of 720p at 16 fps (81 frames), and fill a latent of that shape (21 latent frames × 90 × 160 × 16 channels for a 4 × 8 × 8 VAE) with <strong>pure noise</strong>.</li>
   <li><strong>Patchify</strong> it into tokens ($1 \times 2 \times 2$ patches gives 75,600 here) and add positions. Many open models use a 3D version of RoPE, splitting each head's rotary dimensions into time, height and width parts.</li>
   <li>The transformer predicts the noise (or, with flow matching, a velocity) from the noisy tokens, the <strong>timestep</strong> and the <strong>conditioning</strong>. A sampler takes a small step.</li>
   <li>Repeat for tens of steps, then <strong>decode</strong> the clean latent with the VAE decoder.</li>

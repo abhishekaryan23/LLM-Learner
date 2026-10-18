@@ -123,7 +123,7 @@
 <p><strong>DeepSeek-R1</strong> (DeepSeek-AI, January 2025; later published in <em>Nature</em>) described a recipe in the open, with open weights.</p>
 <p><strong>R1-Zero</strong> started from the base model DeepSeek-V3-Base and applied GRPO directly, with <strong>no supervised fine-tuning first</strong>. The reward was purely rule-based: an <strong>accuracy</strong> reward (correct final answer; tests for code) and a <strong>format</strong> reward (reasoning inside <code>&lt;think&gt;</code> tags). The paper reports that:</p>
 <ul>
-  <li>Accuracy rose steadily: pass@1 on the AIME 2024 maths competition went from 15.6% to 71.0% over training.</li>
+  <li>Accuracy rose steadily: pass@1 on the AIME 2024 maths competition went from 15.6% to 71.0% over training in the January 2025 preprint; the later <em>Nature</em> version reports 77.9% (both report 86.7% with majority voting over 64 samples).</li>
   <li>The average response length kept <strong>growing</strong>: the model learned by itself to spend more tokens on harder problems.</li>
   <li>Behaviours nobody programmed appeared: re-checking work, trying alternative approaches, and an "aha moment" where it stops mid-solution to re-evaluate ("Wait, …").</li>
   <li>But the chains were often hard to read and <strong>mixed languages</strong>.</li>

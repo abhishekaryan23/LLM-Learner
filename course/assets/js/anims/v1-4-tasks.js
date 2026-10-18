@@ -104,8 +104,10 @@
         var b = dd[0].getBBox(), pad = 3;
         S("rect", { x: b.x - pad, y: b.y - pad, width: b.width + 2 * pad, height: b.height + 2 * pad, rx: 2, class: "f-none", stroke: dd[2], "stroke-width": 2.5 }, det);
         var tw = dd[1].length * 7 + 10, tx = Math.min(b.x - pad, sx + sw - tw);
-        S("rect", { x: tx, y: b.y - pad - 18, width: tw, height: 18, rx: 3, fill: dd[2] }, det);
-        S("text", { x: tx + 5, y: b.y - pad - 5, class: "t t-sm t-mono t-nohalo", style: "fill:var(--a-paper)", text: dd[1] }, det);
+        // A tag pushed left by the scene edge would sit on the neighbouring box: put it below its own box instead.
+        var ty = tx < b.x - pad ? b.y + b.height + pad : b.y - pad - 18;
+        S("rect", { x: tx, y: ty, width: tw, height: 18, rx: 3, fill: dd[2] }, det);
+        S("text", { x: tx + 5, y: ty + 13, class: "t t-sm t-mono t-nohalo", style: "fill:var(--a-paper)", text: dd[1] }, det);
       });
       det.style.opacity = 0;
       var L2 = legend([{ t: compact ? "box + class + score" : "box + class + confidence", muted: true }]);

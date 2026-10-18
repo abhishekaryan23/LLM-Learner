@@ -13,7 +13,7 @@
       "Step 2 <strong>reads</strong> the 36 it just wrote: $36 - 15 = 21$. Attention can look back at earlier tokens, so the written steps work like a <strong>scratchpad</strong>.",
       "Step 3 builds on step 2: $21 \\div 3 = 7$. Each step is a small, familiar sub-problem, far easier than doing all three at once.",
       "Only now does it answer: <strong>7</strong>, which is right. Same model, same weights. The only change is that it wrote its working first.",
-      "The price: about 20 extra tokens before the answer (the exact count depends on the tokenizer), so roughly <strong>20× the serial computation</strong>, and 20× the output tokens you pay for."
+      "The price: about 20 extra tokens before the answer (the exact count depends on the tokenizer), so roughly <strong>20× the serial computation</strong> (21 passes instead of 1), and 20× the output tokens you pay for."
     ],
     size: function (layout) { return layout === "compact" ? { w: 360, h: 458 } : { w: 640, h: 350 }; },
     build: function (svg, ctx) {
