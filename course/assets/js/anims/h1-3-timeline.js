@@ -188,7 +188,7 @@
       (function (g) {
         var x0 = compact ? 150 : 250, maxW = compact ? 150 : 270, lo = 20, hi = 30;
         function bw(v) { return (v - lo) / (hi - lo) * maxW; }
-        S("text", { x: compact ? 14 : x0, y: top + 6, class: "t t-sm t-muted", text: compact ? "WMT14 En→De BLEU (higher = better)" : "WMT14 English→German, BLEU (higher is better; axis starts at 20)" }, g);
+        S("text", { x: compact ? 14 : x0, y: top + 6, class: "t t-sm t-muted", text: compact ? "WMT14 En→De BLEU (axis from 20)" : "WMT14 English→German, BLEU (higher is better; axis starts at 20)" }, g);
         [["GNMT ens. (2016)", 26.3, "f-faint"], ["ConvS2S ens. (2017)", 26.4, "f-faint"], ["Transformer big", 28.4, "f-orange"]].forEach(function (b, i) {
           var y = top + 24 + i * 40;
           S("text", { x: x0 - 10, y: y + 18, class: "t t-sm t-end", "font-weight": i === 2 ? 600 : 400, text: compact ? b[0].replace(" (2016)", "").replace(" (2017)", "") : b[0] }, g);

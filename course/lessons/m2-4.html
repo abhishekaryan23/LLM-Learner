@@ -84,7 +84,7 @@ $$N_{\text{opt}} \propto C^{0.5}, \qquad D_{\text{opt}} \propto C^{0.5}, \qquad 
   <li>Tokens: $D \approx 20 \times 7\times10^{9} = 1.4\times10^{11}$, i.e. 140B tokens.</li>
   <li>Compute: $C \approx 6 \times 7\times10^{9} \times 1.4\times10^{11} = 5.88\times10^{21}$ FLOPs.</li>
   <li>An H100 peaks near $10^{15}$ dense BF16 FLOP/s; real training typically achieves something like 30–50% of peak. At 40%, that's about $4\times10^{14}$ FLOP/s.</li>
-  <li>Time: $5.88\times10^{21} / (3.96\times10^{14}) \approx 1.5\times10^{7}$ GPU-seconds, about <strong>4,100 GPU-hours</strong>: under three days on 64 GPUs.</li>
+  <li>Time: $5.88\times10^{21} / (4\times10^{14}) \approx 1.5\times10^{7}$ GPU-seconds, about <strong>4,100 GPU-hours</strong>: under three days on 64 GPUs.</li>
 </ol>
 
 <section class="card" aria-labelledby="ft">

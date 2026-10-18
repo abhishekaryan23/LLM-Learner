@@ -14,7 +14,7 @@
       "Each turn starts with the agent observing the <strong>state</strong> $s_t$, here simply which cell it is in.",
       "Its <strong>policy</strong> $\\pi(a \\mid s)$ picks an <strong>action</strong>: up.",
       "The <strong>environment</strong> answers with a <strong>reward</strong> $r_{t+1} = 0$ and the next state $s_{t+1}$. Then the loop repeats.",
-      "Six moves later the agent reaches the goal and gets +1. One run from start to a terminal state is an <strong>episode</strong>.",
+      "After six moves in total the agent reaches the goal and gets +1. One run from start to a terminal state is an <strong>episode</strong>.",
       "The <strong>return</strong> adds up the rewards, each discounted by $\\gamma^k$ for being $k$ steps later. With $\\gamma = 0.9$: $G_0 = 0.9^5 \\times 1 \\approx 0.59$.",
       "A different episode walks into the pit: $G_0 = 0.9^4 \\times (-1) \\approx -0.66$. The agent's goal is a policy with the <strong>highest expected return</strong>."
     ],

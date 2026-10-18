@@ -408,6 +408,9 @@ footer.site-foot { border-top: 1px solid var(--line); margin-top: 64px; padding:
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; scroll-behavior: auto !important; }
+  /* Animations jump straight to each state here. Even a 0.01 ms transition
+     can briefly show an undrawn path (a stray dot) on a busy device. */
+  figure.anim svg *, .playground svg * { transition: none !important; }
 }
 @media print {
   .topbar, .sidebar, .bottombar, .anim-controls, .anim-dots { display: none !important; }

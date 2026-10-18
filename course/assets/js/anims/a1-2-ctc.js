@@ -30,7 +30,7 @@
       var main = S("g", {}, svg);
 
       // s0: frames as a spectrogram strip
-      S("text", { x: x0, y: 18, class: "t t-sm t-muted", text: compact ? "12 audio frames · target “hello”" : "12 audio frames (about 20 ms each) · target text “hello”" }, main);
+      S("text", { x: x0, y: 18, class: "t t-sm t-muted", text: compact ? "12 audio frames · target “hello”" : "12 audio frames · target text “hello”" }, main);
       var specTop = 28, specRows = 6, sh = 7;
       for (var i = 0; i < 12; i++) for (var j = 0; j < specRows; j++)
         S("rect", { x: cx(i, 12, x0), y: specTop + j * sh, width: cw, height: sh - 1, class: "f-blue", "fill-opacity": shade(i, j).toFixed(2) }, main);

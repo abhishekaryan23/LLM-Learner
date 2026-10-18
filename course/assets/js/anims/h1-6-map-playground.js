@@ -29,7 +29,7 @@
     ["vit", "mm"], ["llm", "mm"], ["llm", "reason"], ["rl", "reason"]];
   // grid positions: wide = [column (era), row]; compact = [column, row] with time running down
   var POS = {
-    wide: { perc: [0, 0], mlp: [0, 2], cnn: [1, 0], rnn: [1, 3], rl: [1, 4], resnet: [2, 0], gan: [2, 1], ae: [2, 2],
+    wide: { perc: [0, 0], mlp: [0, 2], cnn: [1, 0], rnn: [1, 3], rl: [2, 4], resnet: [2, 0], gan: [2, 1], ae: [2, 2],
       diff: [3, 0], vit: [3, 1], moe: [3, 2], tf: [3, 3], llm: [3, 4], flow: [4, 0], mm: [4, 1], ssm: [4, 2], reason: [4, 4] },
     compact: { perc: [1, 0], mlp: [1, 1], cnn: [0, 2], rnn: [1, 2], gan: [2, 2], resnet: [0, 3], ae: [2, 3], rl: [1, 3],
       tf: [1, 4], diff: [0, 4], moe: [2, 4], vit: [0, 5], llm: [1, 5], ssm: [2, 5], flow: [0, 6], reason: [1, 6], mm: [2, 6] } // rl sits in the rnn→tf column; links route around it
@@ -91,7 +91,11 @@
         // orthogonal routing through the gaps between buttons, so no link runs behind a button
         if (!compact) {
           if (a[0] === b[0]) pts = [[ax - hw, ay], [ax - hw - colGap, ay], [ax - hw - colGap, by], [bx - hw, by]];
-          else if (a[1] === b[1]) pts = [[ax + hw, ay], [bx - hw, by]];
+          else if (a[1] === b[1]) {
+            // same row: straight across, unless a button sits in between; then run under the row
+            var blocked = Object.keys(P).some(function (k) { return P[k][1] === a[1] && P[k][0] > Math.min(a[0], b[0]) && P[k][0] < Math.max(a[0], b[0]); });
+            pts = blocked ? [[ax, ay + hh], [ax, ay + hh + rowGap], [bx, by + hh + rowGap], [bx, by + hh]] : [[ax + hw, ay], [bx - hw, by]];
+          }
           else {
             var gx1 = ax + hw + colGap, gx2 = bx - hw - colGap, gy = by + (by > ay ? -1 : 1) * (hh + rowGap);
             pts = b[0] - a[0] === 1 ? [[ax + hw, ay], [gx1, ay], [gx1, by], [bx - hw, by]]

@@ -14,7 +14,7 @@
     steps: [
       "An RNN <strong>unrolled</strong> over 6 steps: one copy per input, all sharing the same weights. The first input is a token <strong>A</strong> we'll need to remember; the rest are filler.",
       "Step 1 reads <strong>A</strong>: the hidden state $h_1$ is full of it (orange = how much of A is left).",
-      "Each step pushes the memory through $\\tanh(W h + \\ldots)$ again. With an effective factor of 0.5 per step, A <strong>fades</strong>: after 5 steps only $0.5^5 \\approx 0.03$ remains. The telephone game.",
+      "Each step pushes the memory through $\\tanh(W h + \\ldots)$ again. With an effective factor of 0.5 per step (illustrative), A <strong>fades</strong>: after 5 steps only $0.5^5 \\approx 0.03$ remains. The telephone game.",
       "Training runs the same chain <strong>backwards</strong>. The gradient that would teach step 1 to keep A shrinks by the same factor at every step: it <strong>vanishes</strong>.",
       "An <strong>LSTM</strong> adds a <strong>cell state</strong> $c$, a conveyor belt running along the top. It's updated by addition: $c_t = f_t \\odot c_{t-1} + i_t \\odot \\tilde{c}_t$.",
       "The <strong>input gate</strong> writes A onto the belt at step 1. The <strong>forget gates</strong> stay near 1 (here 0.97), so A rides along almost intact: $0.97^5 \\approx 0.86$.",

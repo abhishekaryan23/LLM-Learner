@@ -24,7 +24,7 @@
       "<strong>Sample</strong> an answer from the policy: Paris. A verifier checks it and returns reward $G = +1$.",
       "The <strong>score function</strong> $\\nabla_\\theta \\log \\pi_\\theta(\\text{Paris})$ points to the logit change that makes Paris more likely. For a softmax it is one-hot minus the probabilities: $(+0.67, -0.33, -0.33)$.",
       "<strong>REINFORCE update</strong>: $\\theta \\leftarrow \\theta + \\alpha\\,G\\,\\nabla_\\theta \\log\\pi_\\theta$ with $\\alpha = 0.5$. Paris rises to 0.45; the others fall to 0.27.",
-      "Next sample: Lyon, reward $G = -1$. A negative return flips the push: Lyon's logit goes <strong>down</strong> (to 0.18) and probability flows to the others.",
+      "Next sample: Lyon, reward $G = -1$. A negative return flips the push: Lyon's logit goes <strong>down</strong> (to −0.53), its probability drops to 0.18, and probability flows to the others.",
       "If every reward is positive, every sample gets pushed up and only the sizes differ: noisy. Subtract a <strong>baseline</strong> $b$ (here the average reward, 0.8): better-than-average answers go up, worse ones go down.",
       "For an LLM the action is a whole <strong>response</strong>. Its log-probability is the <strong>sum of its token log-probs</strong>, so the gradient is a sum too, and every token in the response is pushed by the same return."
     ],

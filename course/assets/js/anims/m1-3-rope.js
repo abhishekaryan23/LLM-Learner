@@ -16,7 +16,7 @@
       "<strong>RoPE</strong> (Su et al., 2021) instead <strong>rotates</strong> the query. Each pair of dimensions is a 2-D arrow; at position $m$ it turns by $m\\,\\theta$. Here $\\theta = 30°$, so at $m = 2$ the query turns 60°.",
       "The key at position $n = 5$ turns by $5\\theta = 150°$. Their dot product depends on the angle between them: 70°, so $q\\cdot k = \\cos 70° \\approx 0.34$.",
       "Shift both tokens 3 places later. Both arrows turn a further 90°, the angle between them is <strong>still 70°</strong>, and the score is unchanged. Only the <strong>relative distance</strong> $n - m$ matters.",
-      "Real RoPE uses many pairs, each with its own speed $\\theta_i = 10000^{-2i/d}$. At the same distance (5 tokens) fast pairs have spun far around and slow ones have barely moved: <strong>fast pairs sense nearby order, slow pairs long-range distance</strong>."
+      "Real RoPE uses many pairs, each with its own speed $\\theta_i = 10000^{-2i/d_k}$. At the same distance (5 tokens) fast pairs have spun far around and slow ones have barely moved: <strong>fast pairs sense nearby order, slow pairs long-range distance</strong>."
     ],
     size: function (layout) { return layout === "compact" ? { w: 360, h: 380 } : { w: 640, h: 360 }; },
     build: function (svg, ctx) {

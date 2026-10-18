@@ -7,7 +7,7 @@
   LC.anims["h1-5-timeline"] = {
     title: "Today's landscape, 2023–2026",
     steps: [
-      "<strong>2023.</strong> <strong>GPT-4</strong> (March) is far stronger than GPT-3.5 and accepts <strong>images</strong> as input. Within months, Anthropic's Claude and Google's Bard (later Gemini) join a race of chat assistants.",
+      "<strong>2023.</strong> <strong>GPT-4</strong> (March) is far stronger than GPT-3.5 and accepts <strong>images</strong> as input. Within days, Anthropic's Claude and Google's Bard (later Gemini) join a race of chat assistants.",
       "<strong>2023 onward.</strong> <strong>Open-weight</strong> models you can download and run yourself: Meta's LLaMA (Feb 2023) and Llama 2, Mistral, Alibaba's Qwen, DeepSeek and others. The gap to the best closed models narrows.",
       "<strong>Mixture of experts.</strong> Mixtral 8×7B (Dec 2023) has 8 expert MLPs per layer and a router that sends each token to just <strong>2</strong>. DeepSeek-V3 (Dec 2024): 671B weights in total, only 37B used per token.",
       "<strong>Long context.</strong> How much text a model can read at once grows from 2,048 tokens (GPT-3) to <strong>1 million</strong> (Gemini 1.5, Feb 2024): whole codebases, books or hours of video. Note the log scale.",
@@ -29,7 +29,7 @@
           { year: "2024", text: "Natively multimodal: GPT-4o, Gemini", short: "Natively multimodal", dots: [2024.37] },
           { year: "2024", text: "Reasoning models: o1 and DeepSeek-R1", short: "Reasoning models", dots: [2024.7, 2025.05] },
           { year: "2025", text: "Agents: tools, computer use, coding", short: "Agents and tools", dots: [2024.9, 2025.5] },
-          { year: "2025", text: "Video with sound: Sora, Veo", short: "Video generation", dots: [2024.13, 2025.4, 2025.75] }
+          { year: "2025", text: "Video with sound: Sora, Veo", short: "Video generation", dots: [2024.13, 2024.37, 2025.4, 2025.75] }
         ]
       });
       var top = T.top, A = LC.h1.arrow, tl = gsap.timeline();

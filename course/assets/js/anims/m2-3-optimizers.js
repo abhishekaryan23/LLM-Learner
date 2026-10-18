@@ -41,7 +41,7 @@
       "<strong>SGD</strong> ($\\eta = 0.09$) steps along $-\\nabla L$, so it <strong>zig-zags</strong> across the valley. Its rate is capped by the steep direction: above $\\eta = 0.1$ the $y$ zig-zag grows and it diverges.",
       "<strong>Momentum</strong> keeps a running sum of past gradients. The $y$ components flip sign every step and cancel; the $x$ components agree and build up. The path smooths out.",
       "<strong>Adam</strong> divides each coordinate by its own running gradient size $\\sqrt{\\hat v}$. Its first step (blue) is exactly $\\eta = 0.2$ in <strong>both</strong> $x$ and $y$. SGD's first step (orange) was $(0.72, -1.8)$, 2.5× bigger in $y$, just like the gradient.",
-      "So Adam heads <strong>diagonally</strong>, with per-parameter step sizes, then curves in. Its momentum ($\\beta_1 = 0.9$) carries it a little past the minimum.",
+      "So Adam heads <strong>diagonally</strong>, with per-parameter step sizes, then curves in. Its momentum ($\\beta_1 = 0.9$) carries it across the valley floor before it curves back.",
       "Honest scorecard: on a tiny, smooth, noise-free bowl, tuned SGD does fine. Adam earns its place in LLMs, where gradient scales differ wildly between parameters and every gradient is <strong>noisy</strong>, because one learning rate then works for all of them."
     ],
     size: function (layout) { return layout === "compact" ? { w: 360, h: 272 } : { w: 640, h: 304 }; },

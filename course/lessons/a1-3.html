@@ -139,7 +139,7 @@ $$r_0 = x, \qquad c^{(i)} = q_i(r_{i-1}), \qquad r_i = r_{i-1} - c^{(i)}, \qquad
 </div></div>
 
 <h2>SoundStream and EnCodec: the bitrate arithmetic</h2>
-<p><strong>SoundStream</strong> (Zeghidour et al., 2021, Google) put the pieces together: a convolutional encoder and decoder, RVQ with quantizer dropout, and adversarial training, for 24 kHz audio at 3 to 18 kbit/s. In the authors' listening tests, SoundStream at 3 kbit/s beat the classic Opus codec at 12 kbit/s. <strong>EnCodec</strong> (Défossez et al., 2022, Meta) refined the recipe and released the models; its 24 kHz version became the default tokenizer in a wave of research, including VALL-E (A1.4) and MusicGen (A1.5).</p>
+<p><strong>SoundStream</strong> (Zeghidour et al., 2021, Google) put the pieces together: a convolutional encoder and decoder, RVQ with quantizer dropout, and adversarial training, for 24 kHz audio at 3 to 18 kbit/s. In the authors' listening tests, SoundStream at 3 kbit/s beat the classic Opus codec at 12 kbit/s. <strong>EnCodec</strong> (Défossez et al., 2022, Meta) refined the recipe and released the models; its 24 kHz version became the default speech tokenizer in a wave of research, including VALL-E (A1.4); MusicGen (A1.5) trained a 32 kHz variant.</p>
 <p>For RVQ codecs the bitrate is simple arithmetic:</p>
 $$\text{bitrate} = f_{\text{frame}} \times Q \times \log_2 K, \qquad \text{tokens per second} = f_{\text{frame}} \times Q$$
 <p class="math-note">$f_{\text{frame}}$ is frames per second, $Q$ the number of codebooks used, $K$ the codebook size.</p>

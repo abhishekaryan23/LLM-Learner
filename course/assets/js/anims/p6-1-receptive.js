@@ -16,7 +16,7 @@
       "A <strong>layer-2</strong> unit looks at 3×3 layer-1 units. Each of those saw its own 3×3 patch, and together they cover <strong>5×5</strong> input pixels.",
       "A <strong>layer-3</strong> unit reaches <strong>7×7</strong>. Every 3×3 layer adds 2 pixels: $1 + L(k-1) = 1 + 3 \\times 2 = 7$.",
       "One 7×7 filter would see the same patch, but with $49C^2$ weights and one ReLU. Three 3×3 layers use only $27C^2$ and get <strong>three</strong> nonlinearities. That was VGG's design choice.",
-      "Not every pixel counts equally. The centre pixel reaches the top unit through $7 \\times 7 = 49$ paths, a corner pixel through just 1. So the <strong>effective</strong> receptive field is concentrated in the middle (Luo et al., 2016)."
+      "Not every pixel counts equally. The centre pixel reaches the top unit through 7 paths per axis, $7 \\times 7 = 49$ in 2-D; a corner pixel through just 1. So the <strong>effective</strong> receptive field is concentrated in the middle (Luo et al., 2016)."
     ],
     size: function (layout) { return layout === "compact" ? { w: 360, h: 496 } : { w: 640, h: 340 }; },
     build: function (svg, ctx) {

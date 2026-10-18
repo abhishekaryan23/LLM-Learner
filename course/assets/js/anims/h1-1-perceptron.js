@@ -53,7 +53,7 @@
       "Eight examples with two inputs each: <strong>blue circles</strong> (target 1) and <strong>orange squares</strong> (target 0). The perceptron computes $w_1x_1 + w_2x_2 + b$ and answers 1 if it's positive.",
       "Its weights start arbitrary. The line where $w_1x_1 + w_2x_2 + b = 0$ is its <strong>decision boundary</strong>: the shaded side gets answer 1. Right now <strong>3 points are wrong</strong>.",
       "The <strong>learning rule</strong>: go through the points; on a mistake, add $\\eta \\times (\\text{target} - \\text{output}) \\times x$ to the weights. This orange square was called 1, so the line is pushed away from it.",
-      "Two more corrections and every point is on the right side: <strong>0 mistakes</strong>. Rosenblatt proved this always happens, in a finite number of updates, if <em>some</em> line can separate the classes.",
+      "Two more corrections and every point is on the right side: <strong>0 mistakes</strong>. The convergence theorem (Novikoff, 1962) guarantees this always happens, in a finite number of updates, if <em>some</em> line can separate the classes.",
       "Now <strong>XOR</strong>: answer 1 only when exactly one input is on. The same rule keeps correcting and never settles: every fix breaks another point. No straight line gets all four right; the best possible is 3 of 4.",
       "Add a <strong>hidden layer</strong> of two perceptrons. $h_1$ (an OR) fires above the lower line, $h_2$ (a NAND) fires below the upper line. The output fires only when <strong>both</strong> do: the band between them.",
       "As a network: inputs → 2 hidden units → 1 output gets XOR right. Here the weights were set by hand. <strong>Backpropagation</strong> (1986) is what lets a network find hidden units like these by itself."

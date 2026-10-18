@@ -51,7 +51,7 @@
       S("path", { d: LC.fnPath(function (t) { return Math.sin(2 * Math.PI * f * t + PH); }, 0, DUR, sx, sy, 600), class: "s-blue", "stroke-width": 2, opacity: 0.8 }, gWave);
       S("path", { d: LC.fnPath(function (t) { return Math.sin(2 * Math.PI * d * t + PH); }, 0, DUR, sx, sy, 400), class: "s-orange", "stroke-width": 2.5, "stroke-dasharray": "6 5" }, gWave);
       var n = Math.floor(DUR * fs + 1e-9), r = fs > 30 ? 2.2 : 3.5;
-      for (var i = 0; i <= n; i++) {
+      for (var i = 0; i < n; i++) {
         var t = i / fs, v = Math.sin(2 * Math.PI * f * t + PH);
         S("line", { x1: sx(t), x2: sx(t), y1: sy(0), y2: sy(v), class: "s-ink", "stroke-width": 1, opacity: 0.45 }, gSamp);
         S("circle", { cx: sx(t), cy: sy(v), r: r, class: "f-orange" }, gSamp);

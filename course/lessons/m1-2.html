@@ -116,7 +116,7 @@ $$\text{attention parameters per layer} = 4\,d_{\text{model}}^2 \quad (\text{ign
     <li>Head size $d_k =$ <span class="blank" data-answer="128" data-tol="0.001" data-hint="Divide d_model by the number of heads: 4096 / 32."></span></li>
     <li>Each head's scores are divided by $\sqrt{d_k} \approx$ <span class="blank" data-answer="11.31" data-tol="0.02" data-hint="The square root of the head size, √128, not √4096."></span></li>
     <li>Attention parameters per layer, in millions: <span class="blank" data-answer="67.1" data-tol="0.15" data-hint="4 · 4096² = 4 × 16,777,216 ≈ 67.1 million."></span></li>
-    <li>Now use grouped-query attention with 8 K/V heads (as Llama 3 8B does). $W_K$ becomes $4096 \times (8 \cdot 128)$. Its parameters, in millions: <span class="blank" data-answer="4.19" data-tol="0.02" data-hint="8 × 128 = 1024 columns, and 4096 × 1024 = 4,194,304."></span></li>
+    <li>Llama 2 7B itself uses full multi-head attention. Now suppose this same layer used grouped-query attention with 8 K/V heads instead (as Llama 3 8B, also 4096 wide with 32 query heads, does). $W_K$ becomes $4096 \times (8 \cdot 128)$. Its parameters, in millions: <span class="blank" data-answer="4.19" data-tol="0.02" data-hint="8 × 128 = 1024 columns, and 4096 × 1024 = 4,194,304."></span></li>
   </ol>
 </section>
 

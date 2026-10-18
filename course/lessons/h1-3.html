@@ -62,7 +62,7 @@
 
 <h2>Translation through one summary vector (2014)</h2>
 <p>Machine translation is one of AI's oldest goals. The 1954 Georgetown–IBM demo translated about 60 Russian sentences with hand-written rules, and promised the problem would be solved within a few years. It wasn't. From the 1990s the best systems were <strong>statistical</strong>: they learned which phrases tend to translate to which from millions of human-translated sentence pairs, then stitched phrases together. Google Translate worked like that from its launch in 2006.</p>
-<p>In <strong>2014</strong>, Ilya Sutskever, Oriol Vinyals and Quoc Le at Google showed a pure neural network could compete. Their <strong>sequence-to-sequence</strong> (seq2seq) model has two LSTMs. The <strong>encoder</strong> reads the English sentence word by word and ends with one vector, a list of numbers summarising the whole sentence. The <strong>decoder</strong> starts from that vector and writes the French, one word at a time. Kyunghyun Cho and colleagues proposed a similar encoder–decoder the same year.</p>
+<p>In <strong>2014</strong>, Ilya Sutskever, Oriol Vinyals and Quoc Le at Google showed a pure neural network could compete. Their <strong>sequence-to-sequence</strong> (seq2seq) model has two LSTMs. The <strong>encoder</strong> reads the English sentence word by word and ends with one vector, a list of numbers summarising the whole sentence. The <strong>decoder</strong> starts from that vector and writes the French, one word at a time. Kyunghyun Cho and colleagues had proposed a similar encoder–decoder a few months earlier.</p>
 <p>On a standard English→French test it scored <strong>34.8 BLEU</strong>, beating a strong phrase-based system's 33.3. (<strong>BLEU</strong> measures how many word sequences a translation shares with human reference translations, on a 0–100 scale; higher is better.) An odd trick helped: feeding the source sentence in <em>reverse</em>, so the first English words ended up closest to the first French words.</p>
 <p>That trick hints at the flaw. Every sentence, 5 words or 50, has to fit into <strong>one fixed-size vector</strong> before a single French word is written. That's the <strong>bottleneck</strong>: long sentences lose detail.</p>
 
@@ -80,14 +80,14 @@
 </div></div>
 
 <h2>Attention: look back at every word (2014–2016)</h2>
-<p>Later in <strong>2014</strong>, Dzmitry Bahdanau, Kyunghyun Cho and Yoshua Bengio removed the bottleneck. Keep the encoder's vector for <em>every</em> source word, not just the last one. Then, each time the decoder writes a word, it:</p>
+<p>The same year (building on Cho's earlier encoder–decoder), Dzmitry Bahdanau, Kyunghyun Cho and Yoshua Bengio removed the bottleneck. Keep the encoder's vector for <em>every</em> source word, not just the last one. Then, each time the decoder writes a word, it:</p>
 <ol>
   <li>scores how relevant each source word is right now,</li>
   <li>turns the scores into <strong>weights</strong> that are positive and add up to 1 (using softmax),</li>
   <li>takes the <strong>weighted blend</strong> of the source words' vectors, and uses that blend to choose the next word.</li>
 </ol>
 $$c = \alpha_1 h_1 + \alpha_2 h_2 + \dots + \alpha_n h_n$$
-<p>Here $h_i$ is the encoder's vector for source word $i$, $\alpha_i$ (alpha) is its attention weight, and $c$ is the <strong>context</strong>: what the decoder "looks at" for this word. Big weight = look closely; tiny weight = mostly ignore. Nobody tells the model which words match; the weights are learned with backprop like everything else. In <strong>2015</strong>, Minh-Thang Luong and colleagues at Stanford showed that a plain <strong>dot product</strong> works well as the relevance score, which is the form transformers use.</p>
+<p>Here $h_i$ is the encoder's vector for source word $i$, $\alpha_i$ (alpha) is its attention weight, and $c$ is the <strong>context</strong>: what the decoder "looks at" for this word. Big weight = look closely; tiny weight = mostly ignore. Nobody tells the model which words match; the weights are learned with backprop like everything else. In <strong>2015</strong>, Minh-Thang Luong and colleagues at Stanford showed that a plain <strong>dot product</strong> works well as the relevance score, which, with a scaling factor, is the form transformers use.</p>
 
 <h3>Worked example</h3>
 <p>Pretend each source word's vector is a single number. The decoder's weights are $0.7, 0.2, 0.1$ over values $10, 4, 0$.</p>
@@ -186,12 +186,12 @@ $$c = \alpha_1 h_1 + \alpha_2 h_2 + \dots + \alpha_n h_n$$
   <div class="q" data-answer="0">
     <p class="q-prompt">Which order is right?</p>
     <ol class="q-src">
-      <li>seq2seq (2014) → Bahdanau attention (2014) → Luong dot-product attention (2015) → GNMT in Google Translate (2016) → Transformer (2017)</li>
+      <li>seq2seq and Bahdanau attention (2014) → Luong dot-product attention (2015) → GNMT in Google Translate (2016) → Transformer (2017)</li>
       <li>Transformer → seq2seq → Bahdanau attention → GNMT</li>
       <li>Bahdanau attention → Transformer → seq2seq → GNMT</li>
       <li>GNMT → seq2seq → Transformer → Luong attention</li>
     </ol>
-    <div class="q-explain">Attention was invented to fix seq2seq, went into production in 2016, and became "all you need" in 2017.</div>
+    <div class="q-explain">Attention was invented to fix the encoder–decoder's one-vector bottleneck, went into production in 2016, and became "all you need" in 2017.</div>
   </div>
   <div class="q" data-answer="3">
     <p class="q-prompt">The Transformer has no recurrence. How does it know word order?</p>

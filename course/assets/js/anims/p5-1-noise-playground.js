@@ -1,7 +1,7 @@
 /* P5.1 playground: forward-noise a 2D point cloud, x_t = √ᾱ_t · x_0 + √(1 − ᾱ_t) · ε.
    Each point keeps its own ε (resample with a button), so dragging t morphs the shape smoothly.
    The shapes are scaled so each coordinate has mean 0 and variance 1; the process is variance-preserving,
-   so the measured variance stays ≈ 1 at every t. Schedules: cosine (Nichol & Dhariwal, 2021, s = 0.008)
+   so the measured variance stays ≈ 1 at every t. Schedules: cosine (Nichol & Dhariwal, 2021, s = 0.008, β clipped at 0.999)
    and DDPM's linear β from 1e-4 to 0.02 over T = 1000 steps (Ho et al., 2020). */
 (function () {
   var LC = window.LC;
@@ -19,8 +19,11 @@
   // schedules: ᾱ_t for t = 0..T
   var AB = { cosine: [], linear: [] };
   (function () {
-    var s = 0.008, f0 = Math.pow(Math.cos((s / (1 + s)) * Math.PI / 2), 2);
-    for (var t = 0; t <= T; t++) AB.cosine.push(Math.max(0, Math.pow(Math.cos(((t / T + s) / (1 + s)) * Math.PI / 2), 2) / f0));
+    // cosine: β_t = min(1 − f(t)/f(t−1), 0.999) as in the paper, so ᾱ_T ≈ 2.4e-9 rather than 0
+    var s = 0.008, ac = 1;
+    function f(t) { return Math.pow(Math.cos(((t / T + s) / (1 + s)) * Math.PI / 2), 2); }
+    AB.cosine.push(1);
+    for (var t = 1; t <= T; t++) { ac *= 1 - Math.min(1 - f(t) / f(t - 1), 0.999); AB.cosine.push(ac); }
     var a = 1; AB.linear.push(1);
     for (var k = 1; k <= T; k++) { a *= 1 - (1e-4 + (0.02 - 1e-4) * (k - 1) / (T - 1)); AB.linear.push(a); }
   })();
