@@ -67,7 +67,7 @@
 <p>The plan: the notebook draws 5,000 images of four shapes (disk, square, triangle, plus) at 16×16 pixels, so there's nothing to download. You write the noise schedule, a time embedding, the training loss, the 1,000-step sampler with guidance, and a 20-step DDIM sampler. A small judge network, trained on clean shapes, tells you what fraction of your samples look like the class you asked for. Budget about 30 minutes to read this page and about an evening for the notebook.</p>
 
 <figure class="anim wide" data-anim="cap-2-pipeline"></figure>
-<p class="math-note">Every picture and number in the animation is real output of the notebook's default CPU run (brightness rounded to 9 levels). Your numbers will differ a little.</p>
+<p class="math-note">Every picture and number in the animation is real output of the notebook's default CPU run (brightness rounded to 9 levels). The sample rows show one sample per class that the judge got right, not a random draw. Your numbers will differ a little.</p>
 
 <details class="eli5">
   <summary>Explain like I'm 5</summary>
@@ -116,7 +116,7 @@
 <p>One training step is <a href="g1-3.html">G1.3</a>'s recipe plus one line from <a href="g1-4.html">G1.4</a>: draw a step $t$ and noise $\varepsilon$ for every image, make $x_t$ in one jump, <strong>replace each label by NULL with probability 0.15</strong>, and take the squared error between $\varepsilon$ and the prediction:</p>
 $$\mathcal{L} = \big\|\varepsilon - \varepsilon_\theta(x_t, t, c)\big\|^2, \qquad c = \begin{cases}\varnothing & \text{with probability } p_{\text{uncond}} = 0.15\\ \text{the true label} & \text{otherwise}\end{cases}$$
 <p>$\varepsilon_\theta$ is the network, $x_t$ the noisy image, $t$ the step and $c$ the class (or $\varnothing$, the NULL label). Label dropout is what makes classifier-free guidance possible later: the same network learns both the conditional prediction $\varepsilon_c$ and the unconditional one $\varepsilon_u$. The training loop itself is <a href="p4-2.html">P4.2</a>'s five lines; the notebook uses AdamW with a one-cycle learning-rate schedule (peak $10^{-3}$), batches of 128, and 3,000 steps.</p>
-<p><em>Done when:</em> the validation loss (fixed noise draws, so it's comparable between runs) is <strong>below 0.09</strong>. The reference run went 1.33 → 0.128 (step 500) → 0.101 (1,000) → 0.075 (2,000) → <strong>0.064</strong> (3,000), in about a minute and a half on a laptop CPU. Don't expect 0: at large $t$ the added noise is close to unpredictable, so the loss has a floor well above zero.</p>
+<p><em>Done when:</em> the validation loss (fixed noise draws, so it's comparable between runs) is <strong>below 0.09</strong>. The reference run went 1.33 → 0.128 (step 500) → 0.101 (1,000) → 0.075 (2,000) → <strong>0.064</strong> (3,000), in about a minute and a half on a laptop CPU. Don't expect 0: at middle noise levels the network can't tell exactly how much of each pixel is image and how much is noise, so the loss has a floor well above zero. (At the largest $t$, $x_t \approx \varepsilon$ and the noise is easy to predict; so it is at tiny $t$ for this two-level data.)</p>
 
 <h3>Worked example: what 3,000 steps buys</h3>
 <ol class="steps">
@@ -172,9 +172,9 @@ $$\hat x_0 = \frac{x_t - \sqrt{1-\bar\alpha_t}\,\tilde\varepsilon}{\sqrt{\bar\al
 <h2>Where people get stuck</h2>
 <p>Most diffusion bugs don't crash. They produce grey mush, and the loss still looks fine. Check these first:</p>
 <ul>
-  <li><strong>Off-by-one in $t$.</strong> Tensors are indexed 0–999 while papers count 1–1000. Use one convention everywhere: the step fed to the network, the coefficients in training, and those in sampling must match.</li>
+  <li><strong>Off-by-one in $t$.</strong> Tensors are indexed 0–999 while papers count 1–1000. Use one convention everywhere: the step fed to the network, the coefficients in training, and those in sampling must match. A shift of one step is nearly harmless on its own (in the reference run, feeding the network $t + 1$ left DDPM accuracy at 92%); it bites as a crash at index 1000 or as the silent wraparound below.</li>
   <li><strong>Broadcasting.</strong> Coefficients of shape $(B,)$ multiplied into $(B, 1, 16, 16)$ images either crash or, worse, silently broadcast the wrong way. Reshape to $(B, 1, 1, 1)$.</li>
-  <li><strong>Fresh noise on the last step.</strong> Adding $\sqrt{\beta_t}\,z$ at $t = 0$ leaves visible speckle on every sample.</li>
+  <li><strong>Negative-index wraparound.</strong> In Python, <code>alpha_bar[-1]</code> is the <em>last</em> element, $\bar\alpha_{1000} \approx 4 \times 10^{-5}$ (pure noise), not "zero noise". If your DDIM loop jumps to "step $-1$" after the final step, the output is almost pure static: in the reference run, class accuracy fell from 88% to 28% while 1,000-step DDPM stayed at 92%. On the last step return $\hat x_0$ instead.</li>
   <li><strong>Sampling with gradients on.</strong> 1,000 steps without <code>torch.no_grad()</code> build a huge graph: slow, then out of memory. And call <code>model.eval()</code> (<a href="p4-2.html">P4.2</a>).</li>
   <li><strong>Judging by loss alone.</strong> Loss can't see a broken sampler or missing label dropout. Always look at samples and run the judge.</li>
   <li><strong>Too much guidance.</strong> In the reference run, 50-step DDIM peaks near $w = 3$ (86% on-label) and drops to 70% at $w = 8$, as images get over-saturated and off-distribution: G1.4's fidelity–diversity trade-off.</li>
@@ -182,15 +182,15 @@ $$\hat x_0 = \frac{x_t - \sqrt{1-\bar\alpha_t}\,\tilde\varepsilon}{\sqrt{\bar\al
   <li><strong>Devices and generators.</strong> On a GPU, create noise with a CPU generator and then move it with <code>.to(device)</code>, or use a generator on the GPU; mixing them raises an error.</li>
 </ul>
 
-<div class="byte-check"><div class="q" data-answer="0">
-  <p class="q-prompt">Your samples are recognisable shapes covered in fine speckle, and the loss looks normal. What's the most likely bug?</p>
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Your 1,000-step DDPM samples are 92% on-label, but your 20-step DDIM samples look like static (about 28% on-label). The loss was fine. What's the most likely bug?</p>
   <ol class="q-src">
-    <li>Fresh noise is still being added on the final step</li>
-    <li>The learning rate is too low</li>
-    <li>The time embedding has too many dimensions</li>
-    <li>Label dropout is too high</li>
+    <li>DDIM needs its own trained network, not the DDPM one</li>
+    <li>Twenty steps can never be enough for shapes this simple</li>
+    <li>The last jump looks up $\bar\alpha$ at "step $-1$", and <code>alpha_bar[-1]</code> is the noisiest value, not a clean image</li>
+    <li>Guidance with $w = 3$ always turns DDIM samples into static</li>
   </ol>
-  <div class="q-explain">The last update should return the mean, with $z = 0$. Adding $\sqrt{\beta_1}\,z$ there leaves exactly this pixel-level noise; nothing later removes it.</div>
+  <div class="q-explain"><code>alpha_bar[-1]</code> wraps around to the last element, $\approx 4 \times 10^{-5}$, so the final jump mixes the image with almost pure noise and returns $x \approx \varepsilon$. DDPM never indexes past 0 (it just skips $z$), so it still works. The correct DDIM, with the same network, $w = 3$ and 20 steps, reaches 88%.</div>
 </div></div>
 
 <h2>Stretch goals and the rubric</h2>
@@ -211,7 +211,7 @@ $$\hat x_0 = \frac{x_t - \sqrt{1-\bar\alpha_t}\,\tilde\varepsilon}{\sqrt{\bar\al
   <li><strong>Stretch:</strong> one of the goals above, with a before/after comparison on the same judge.</li>
 </ul>
 
-<div class="why"><strong>Why this matters in practice:</strong> production image and video models add a VAE, a text encoder, a transformer backbone and a great deal of compute, but their training step and sampler are this loop. The day-to-day questions are the ones you just answered: is the loss healthy, do samples follow the condition, what guidance scale, how few steps. Teams answer them with automatic judges and fixed-seed sample grids, exactly as here, plus human preference studies at the end.</div>
+<div class="why"><strong>Why this matters in practice:</strong> production image and video models add a VAE, a text encoder, a transformer backbone and a great deal of compute, but their training step and sampler are close cousins of this loop (many newer models regress a velocity instead of the noise, <a href="g1-5.html">G1.5</a>). The day-to-day questions are the ones you just answered: is the loss healthy, do samples follow the condition, what guidance scale, how few steps. Teams answer them with automatic judges and fixed-seed sample grids, exactly as here, plus human preference studies at the end.</div>
 
 <div class="byte-check"><div class="q" data-answer="2">
   <p class="q-prompt">Which comparison is fair for "does the cosine schedule beat the linear one?"</p>

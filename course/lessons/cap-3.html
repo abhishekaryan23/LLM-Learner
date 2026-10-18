@@ -54,14 +54,14 @@
     <div class="q-explain">If the right passage wasn't retrieved, no prompt fix will help; if it was, the problem is in how the model used it. Logging retrieved ids splits the two, and recall@k measures the first on its own.</div>
   </div>
   <div class="q" data-answer="0">
-    <p class="q-prompt">A change raises your agent from 21 to 23 correct answers on a 29-question eval. What can you conclude?</p>
+    <p class="q-prompt">A change raises your agent from 21 to 23 correct answers on a 29-question eval (3 questions fixed, 1 broken). What can you conclude?</p>
     <ol class="q-src">
       <li>Probably a real fix for the questions that flipped, but 29 questions can't show a 7-point gain is significant; read the flips and grow the set</li>
       <li>It's 7 points better, so ship it</li>
       <li>Nothing at all; small evals are useless</li>
       <li>The eval set must be wrong</li>
     </ol>
-    <div class="q-explain">Small sets catch breakages and let you read every case, but their confidence intervals are wide. You'll compute this one below: the paired 95% CI runs from about −6 to +20 points.</div>
+    <div class="q-explain">Small sets catch breakages and let you read every case, but their confidence intervals are wide. For these flips the paired 95% CI runs from about −6 to +20 points; you'll compute one like it below.</div>
   </div>
 </section>
 
@@ -164,32 +164,33 @@ $$\text{score}(D) = \sum_{q} \text{idf}(q)\cdot\frac{f(q, D)\,(k_1 + 1)}{f(q, D)
   <li>"Can I keep a present worth 80 euros from a supplier?": needs a comparison with the 50-euro limit; copying a sentence can't do that.</li>
   <li>"Can I bring my dog to the office?": "office" matches the opening-hours section strongly enough to answer instead of abstaining.</li>
 </ul>
-<p>Two of four are vocabulary mismatches, so change <strong>one thing</strong>: the analyzer gets a small synonym table (adopt → adoptive, text → SMS, holiday → leave, wine → alcohol, …) and a crude stemmer, for both retrieval and the reader. <em>Done when</em> you've re-run <strong>every</strong> question and read every flip. Reference result: dev 10 → 11 of 14 (adoption and SMS <strong>fixed</strong>; "how many days a week can I work from home?" <strong>broken</strong>, because "home" now also matches "home-office equipment"); test 11 → 12 of 15 (the wine question fixed, nothing broken); recall@3 96% → 100%.</p>
+<p>Two of four are vocabulary mismatches, so change <strong>one thing</strong>: the analyzer gets a small synonym table (adopt → adoptive, text → SMS, present → gift, home → remote, …) built from the dev failures and a few generic synonyms, plus a crude stemmer, for both retrieval and the reader. Never pick entries by reading test questions: that turns the test split into a second dev set. <em>Done when</em> you've re-run <strong>every</strong> question and read every flip. Reference result: dev 10 → 11 of 14 (adoption and SMS <strong>fixed</strong>; "how many days a week can I work from home?" <strong>broken</strong>: the synonym home → remote is applied to the handbook text too, so "Home-office equipment…" matches the question twice, as <em>home</em> and as <em>remote</em>, and outscores the right sentence, which says <em>remotely</em>); test 11 → 11 of 15 (nothing fixed, nothing broken); recall@3 96% → 100%.</p>
+<p>That flat test result is the honest outcome and the point of keeping a test split: the net gain of one answer on dev <strong>did not transfer</strong> to held-out questions, so it is not evidence the change helps. (Retrieval did improve on one test question, since stemming lets "dinner" match "dinners", but the reader still chose the wrong sentence.)</p>
 
 <h3>Worked example: is the gain real?</h3>
-<p>Both versions answered the same 29 questions, so compare them <strong>paired</strong> (<a href="m4-6.html">M4.6</a>): only the flips matter. $b = 3$ questions only v2 gets right, $c = 1$ only v1 gets right, $n = 29$.</p>
+<p>Both versions answered the same 29 questions, so compare them <strong>paired</strong> (<a href="m4-6.html">M4.6</a>): only the flips matter. $b = 2$ questions only v2 gets right, $c = 1$ only v1 gets right, $n = 29$.</p>
 <ol class="steps">
-  <li><strong>Difference:</strong> $\hat d = (b - c)/n = 2/29 \approx +6.9$ points.</li>
-  <li><strong>Standard error:</strong> $\sqrt{(b + c)/n^2 - (b - c)^2/n^3} = \sqrt{4/841 - 4/24{,}389} \approx 0.068$.</li>
-  <li><strong>95% CI:</strong> $6.9 \pm 1.96 \times 6.8 \approx [-6.4,\ +20.2]$ points. It includes 0.</li>
+  <li><strong>Difference:</strong> $\hat d = (b - c)/n = 1/29 \approx +3.4$ points.</li>
+  <li><strong>Standard error:</strong> $\sqrt{(b + c)/n^2 - (b - c)^2/n^3} = \sqrt{3/841 - 1/24{,}389} \approx 0.059$.</li>
+  <li><strong>95% CI:</strong> $3.4 \pm 1.96 \times 5.9 \approx [-8.2,\ +15.1]$ points. It includes 0.</li>
 </ol>
-<p>So: the targeted failures are genuinely fixed (you read them), one regression was found and can be fixed next, and the held-out split moved in the right direction. But "v2 is 7 points better" is not yet a claim 29 questions can support. That's the normal state of a young eval set: grow it from real questions until it can.</p>
+<p>So: the targeted failures are genuinely fixed (you read them), one regression was found and can be fixed next, and the held-out split did not move. "v2 is 3 points better" is not a claim 29 questions can support, and the flat test result is a reason to doubt it. That's the normal state of a young eval set: grow it from real questions until it can.</p>
 
 <div class="byte-check"><div class="q" data-answer="0">
   <p class="q-prompt">Why build the synonym table from dev failures only, and then check the test split?</p>
   <ol class="q-src">
-    <li>A fix tuned on the cases you read can overfit them; the untouched test split tells you whether it generalises</li>
+    <li>A fix tuned on the cases you read can overfit them; the untouched test split tells you whether it generalises (here it didn't move)</li>
     <li>Test questions are easier</li>
     <li>The test split is only for the final report's formatting</li>
     <li>Synonyms don't affect test questions</li>
   </ol>
-  <div class="q-explain">Goodhart's law in miniature (M4.7): every round of tuning on the same cases makes them less predictive. A held-out split, checked rarely, keeps you honest.</div>
+  <div class="q-explain">Goodhart's law in miniature (M4.7): every round of tuning on the same cases makes them less predictive. A held-out split, checked rarely, keeps you honest, but only if you never use it to choose the fixes: a synonym added after reading a test question makes that question's "gain" worthless.</div>
 </div></div>
 
 <h2>Swap in a real LLM</h2>
 <p>The notebook's optional cell keeps the loop, the tool and the metrics, and replaces only the model function with a call to a chat API with tool calling (it runs only if an API key is set; any provider with tool use works the same way). The system prompt says: always search first, answer in one sentence from the returned text only, end with the section id in brackets, and reply exactly "I don't know: the handbook doesn't say." otherwise. Expect three things:</p>
 <ul>
-  <li><strong>Most reader failures go away.</strong> A capable model understands that a present is a gift, compares 80 with 50, and declines the dog question. Retrieval stays the same, so recall@3 doesn't move.</li>
+  <li><strong>Most reader failures go away.</strong> A capable model understands that a present is a gift, compares 80 with 50, and declines the dog question. Retrieval can change too: the model writes its own search query, so log it and re-check recall@3.</li>
   <li><strong>Your graders become too strict.</strong> A correct paraphrase may miss a keyword, and a faithful paraphrase never appears word for word in the section. Swap the exact checks for an LLM judge with a specific rubric ("is every claim supported by the cited section?"), and validate it against your own labels on a few dozen answers before trusting it (<a href="m4-4.html">M4.4</a>).</li>
   <li><strong>Runs vary.</strong> Even at low temperature, outputs can change between runs and model versions. Pin the model version, repeat flaky cases, and report cost and latency next to accuracy (<a href="sy-5.html">SY.5</a>).</li>
 </ul>
@@ -370,7 +371,7 @@ $$\text{score}(D) = \sum_{q} \text{idf}(q)\cdot\frac{f(q, D)\,(k_1 + 1)}{f(q, D)
   {"id":"cap-3-b","front":"What goes into a RAG eval case?","back":"A question in users' words, the expected source, what a correct answer must contain, a dev/test split label, and some questions the documents can't answer (expected: \"I don't know\")."},
   {"id":"cap-3-c","front":"BM25 idf of a word in $n_q$ of $N$ documents?","back":"$\\ln\\left(\\frac{N - n_q + 0.5}{n_q + 0.5} + 1\\right)$. E.g. 1 of 18: ≈ 2.539; 9 of 18: ln 2 ≈ 0.693."},
   {"id":"cap-3-d","front":"The error-analysis loop for an agent?","back":"Bucket each dev failure (retrieval miss, false abstain, wrong passage, bad citation, should abstain), read them for causes, change one thing, re-run everything, read the flips, then check the held-out split once."},
-  {"id":"cap-3-e","front":"v2 fixes 3 questions and breaks 1 out of 29. Paired difference and 95% CI?","back":"$+2/29 \\approx +6.9$ points, SE $\\approx 6.8$, CI ≈ [−6.4, +20.2]: real fixes, not yet a proven gain. Grow the eval set."},
+  {"id":"cap-3-e","front":"v2 fixes 2 questions and breaks 1 out of 29. Paired difference and 95% CI?","back":"$+1/29 \\approx +3.4$ points, SE $\\approx 5.9$, CI ≈ [−8.2, +15.1], and the held-out test split didn't move: not a proven gain. Grow the eval set, and never pick fixes by reading test questions."},
   {"id":"cap-3-f","front":"When should a retrieval tool become an MCP server?","back":"When several apps or agents need it: one read-only server, one access policy, one set of logs. For a single app, plain function calling is simpler."}
 ]</script>
 

@@ -2,8 +2,8 @@
    BM25 top 3 for "How many days of leave do I get when I adopt a child?": leave-parental 5.015, leave-annual 4.368, leave-sick 2.685.
    v1 on 29 questions: recall@3 25/26 = 96.2%, correct 21/29 = 72.4%, faithful 25/27 = 92.6%.
    Dev error buckets (v1): wrong sentence 3, should abstain 1.
-   v2 (synonyms + stemming): dev 10 -> 11 of 14 (2 fixed, 1 broken), test 11 -> 12 of 15 (1 fixed), recall@3 100%;
-   paired b = 3, c = 1, n = 29: +6.9 pts, 95% CI [-6.4, +20.2]. */
+   v2 (synonyms + stemming; table built from dev failures only): dev 10 -> 11 of 14 (2 fixed, 1 broken), test 11 -> 11 of 15 (no flips),
+   recall@3 100%; paired b = 2, c = 1, n = 29: +3.4 pts, 95% CI [-8.2, +15.1]. */
 (function () {
   var LC = window.LC;
   var NODES = ["Eval set", "Search", "Agent loop", "Answer", "Metrics", "Errors", "Improve"];
@@ -17,7 +17,7 @@
       "The stand-in model copies the sentence that best matches the question, but here it picks the wrong one (\"adopt\" never matches \"adoptive\"), and cites the top hit, not the section its sentence came from.",
       "<strong>Metrics</strong> on all 29 questions: retrieval is nearly perfect (recall@3 96%), but only 72% of answers are correct, and 93% of cited answers are faithful to their citation.",
       "<strong>Error analysis</strong> on the dev split: 4 failures. Bucketing says where (3 wrong sentences, 1 missed abstention); reading them says why: two are vocabulary mismatches.",
-      "<strong>One change</strong>: synonyms plus crude stemming. Re-run everything and read the flips: dev 10 → 11 (2 fixed, 1 broken), held-out test 11 → 12. Real progress, but with 29 questions the paired CI still includes zero."
+      "<strong>One change</strong>: synonyms plus crude stemming. Re-run everything and read the flips: dev 10 → 11 (2 fixed, 1 broken), but held-out test stays 11 → 11. The dev gain did not transfer, and the paired CI includes zero."
     ],
     size: function (layout) { return layout === "compact" ? { w: 360, h: 340 } : { w: 640, h: 296 }; },
     build: function (svg, ctx) {
@@ -167,13 +167,13 @@
       var g6 = panel();
       title(compact ? "v2: synonyms + stemming" : "v2: add synonyms and stemming, then re-run everything", g6);
       var c2x = L + (compact ? 76 : 110);
-      var rows6 = [["dev", "10 → 11 of 14  (2 fixed, 1 broken)"], ["test", "11 → 12 of 15  (1 fixed, held out)"], ["recall@3", "96% → 100%"], ["paired", "+6.9 points, 95% CI [−6, +20]"]];
+      var rows6 = [["dev", "10 → 11 of 14  (2 fixed, 1 broken)"], ["test", "11 → 11 of 15  (no change, held out)"], ["recall@3", "96% → 100%"], ["paired", "+3.4 points, 95% CI [−8, +15]"]];
       rows6.forEach(function (r, i) {
         var y = PT + 32 + i * 26;
         text(L, y, r[0], "t t-sm t-muted", g6, { "font-weight": 650 });
         text(c2x, y, r[1], "t t-sm", g6);
       });
-      var fin = compact ? ["a real fix, not yet a proven gain:", "grow the eval set from real questions"] : ["a real fix, not yet a proven gain: grow the eval set from real questions"];
+      var fin = compact ? ["the dev gain did not transfer to test:", "keep the split, grow the eval set"] : ["the dev gain did not transfer to test: keep the split, grow the eval set"];
       fin.forEach(function (s, i) { text(W / 2, PT + 32 + 4 * 26 + 12 + i * 18, s, "t t-sm t-mid t-orange", g6, { "font-weight": 650 }); });
 
       groups.forEach(function (g, i) { if (i) g.style.opacity = 0; });
