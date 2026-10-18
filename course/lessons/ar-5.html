@@ -131,7 +131,7 @@ $$\text{KV bytes} = 2 \times L \times n_{kv} \times d_{\text{head}} \times b \ti
   <li><strong>NTK-aware:</strong> $b' = 10{,}000 \times 4^{128/126} \approx 40{,}900$. The slowest pair turns 4× slower; the second-fastest only about 2% slower.</li>
   <li><strong>YaRN temperature:</strong> $0.1 \ln 4 + 1 \approx 1.139$ on queries and keys, so attention logits are about $1.139^2 \approx 1.30$× larger.</li>
 </ol>
-<p>In practice these come with a stage of training on long documents. DeepSeek-V3 and the Qwen models used YaRN to reach 128K; Llama 3.1 uses its own frequency-dependent rescaling (an 8× factor applied mostly to the slow pairs) after training up to 128K.</p>
+<p>In practice these come with a stage of training on long documents. DeepSeek-V3 and the Qwen models used YaRN to reach 128K; Llama 3.1 uses its own frequency-dependent rescaling (an 8× factor applied mostly to the slow pairs) during a staged long-context training that raises the length from 8K to 128K.</p>
 
 <section class="card" aria-labelledby="ft2">
   <div class="card-label" id="ft2">Your turn · faded example</div>
@@ -201,7 +201,7 @@ $$\text{KV bytes} = 2 \times L \times n_{kv} \times d_{\text{head}} \times b \ti
 <h2>Does the model actually use it? Evaluating long context</h2>
 <p>A model that <em>accepts</em> a million tokens may not <em>use</em> them. The popular first test was <strong>needle in a haystack</strong> (Greg Kamradt, 2023): plant one sentence ("the best thing to do in San Francisco is…") at different depths of a long filler document and ask for it. Most current long-context models score near 100%, which is exactly the problem. The needle shares words with the question and stands out from unrelated filler, so this mostly tests literal lookup.</p>
 <ul>
-  <li><strong>RULER</strong> (Hsieh et al., 2024, NVIDIA) adds 13 synthetic tasks in four groups: retrieval with several needles and distractors, multi-hop tracing of variables, aggregation (such as most common words), and question answering. It defines a model's <strong>effective length</strong> as the longest length at which its average score stays above Llama-2-7B's score at 4K (85.6%). Of the 17 models it evaluated, all claiming at least 32K, only about half still met that bar at 32K, even though almost all aced plain needle tests.</li>
+  <li><strong>RULER</strong> (Hsieh et al., 2024, NVIDIA) adds 13 synthetic tasks in four groups: retrieval with several needles and distractors, multi-hop tracing of variables, aggregation (such as most common words), and question answering. It defines a model's <strong>effective length</strong> as the longest length at which its average score stays above Llama-2-7B's score at 4K (85.6%). In the paper's updated evaluation of 17 models, all claiming at least 32K, only about half still met that bar at 32K, even though almost all aced plain needle tests.</li>
   <li><strong>Lost in the middle</strong> (Liu et al., 2023) gave models 20–30 retrieved documents with the answer in one of them. Accuracy was U-shaped: best when the answer sat at the start or end, worst in the middle. For GPT-3.5-Turbo, the worst middle positions scored below its 56.1% accuracy with <em>no documents at all</em>.</li>
   <li>Later tests push further: NoLiMa (Modarressi et al., 2025) removes literal word overlap between question and needle, and benchmarks such as HELMET (Yen et al., 2024) use realistic tasks. Scores typically fall well before the advertised window.</li>
 </ul>

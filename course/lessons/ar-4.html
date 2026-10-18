@@ -142,7 +142,7 @@ $$S_i = S_{i-1} + \phi(k_i)\,v_i^\top, \qquad z_i = z_{i-1} + \phi(k_i), \qquad 
 </div></div>
 
 <h2>Hybrids: a few attention layers go a long way</h2>
-<p>However clever the update, a fixed-size state is still a compressed memory (<a href="ar-3.html">AR.3</a>). Full attention keeps every token, so one attention layer can look up any earlier detail exactly. The hybrid recipe: <strong>use cheap linear or SSM layers for most of the stack, and keep a few full-attention layers for retrieval</strong>. Studies like Zoology (Arora et al., 2023) and NVIDIA's 8B comparison (Waleffe et al., 2024) found that a small share of attention layers recovers most of the recall gap. At long context, memory is dominated by the attention layers' KV cache, so a 1-in-8 hybrid needs roughly 1/8 of the cache.</p>
+<p>However clever the update, a fixed-size state is still a compressed memory (<a href="ar-3.html">AR.3</a>). Full attention keeps every token, so one attention layer can look up any earlier detail exactly. The hybrid recipe: <strong>use cheap linear or SSM layers for most of the stack, and keep a few full-attention layers for retrieval</strong>. Zoology (Arora et al., 2023) traced the gap to recall, and NVIDIA's 8B comparison (Waleffe et al., 2024) found that a small share of attention layers recovers most of it. At long context, memory is dominated by the attention layers' KV cache, so a 1-in-8 hybrid needs roughly 1/8 of the cache.</p>
 <p>Some notable hybrids (figures as reported by their makers):</p>
 <ul>
   <li><strong>Jamba</strong> (AI21 Labs, 2024): one attention layer per 8, the rest Mamba, plus MoE; 52B total, 12B active, 256K context, designed to fit long inputs on a single 80 GB GPU.</li>
