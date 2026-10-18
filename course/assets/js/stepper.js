@@ -96,7 +96,7 @@
       svg.style.maxHeight = layout === "wide" ? "460px" : "none";
       stage.appendChild(svg);
       tl = mod.build(svg, { layout: layout, w: sz.w, h: sz.h, gsap: gsap });
-      tl.pause(0);
+      tl.pause(0, false);
       setStep(keep, true);
     }
 
@@ -114,7 +114,7 @@
       step = i;
       var t = times()[i];
       if (moving) moving.kill();
-      if (instant || reduce) { tl.pause(t); scrub.value = Math.round((t / (tl.duration() || 1)) * 1000); }
+      if (instant || reduce) { tl.pause(t, false); scrub.value = Math.round((t / (tl.duration() || 1)) * 1000); }
       else {
         moving = tl.tweenTo(t, { duration: Math.min(2.4, Math.max(0.35, Math.abs(tl.time() - t))), ease: "none",
           onUpdate: function () { scrub.value = Math.round((tl.time() / (tl.duration() || 1)) * 1000); } });
@@ -149,7 +149,7 @@
     scrub.addEventListener("input", function () {
       stop(); if (moving) moving.kill();
       var t = (scrub.value / 1000) * tl.duration();
-      tl.pause(t);
+      tl.pause(t, false); // false = run onUpdate callbacks so jumps land on the right state
       var ts = times(), s = 0;
       for (var i = 0; i < ts.length; i++) if (t >= ts[i] - 0.001) s = i;
       if (s !== step) { step = s; setUI(); }

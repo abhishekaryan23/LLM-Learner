@@ -4,6 +4,7 @@
 //   - SVG text that sticks out of its drawing
 //   - "stray caps": a visible stroked path that hasn't started drawing (shows as a dot)
 //   - horizontal page overflow
+//   - math that failed to render (KaTeX errors, raw $ left in text), checked once per page
 // Usage: node tools/qa/check-layout.js [baseUrl] [page ...]
 //   baseUrl defaults to http://localhost:8123/ (serve the course/ folder there)
 //   CHROME_PATH overrides the browser binary.
@@ -80,6 +81,21 @@ function inspectSvg() {
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       if (overflow > 0) problems.push(`${where}: page scrolls sideways by ${overflow}px`);
       (await page.evaluate(inspectSvg)).forEach(p => problems.push(`${where}: ${p}`));
+      if (vpName === "desktop") {
+        // math that failed to render: KaTeX errors, or raw $…$ / \( left in visible text
+        const math = await page.evaluate(() => {
+          const out = [];
+          document.querySelectorAll(".katex-error").forEach(e => out.push("KaTeX error: " + e.textContent.slice(0, 60)));
+          const w = document.createTreeWalker(document.querySelector("main") || document.body, NodeFilter.SHOW_TEXT);
+          for (let n; (n = w.nextNode());) {
+            const el = n.parentElement;
+            if (!el || el.closest(".katex, script, style, code, pre, textarea, svg, .pg-readout")) continue; // readouts are live text, never typeset
+            if (/\$|\\\(|\\\[/.test(n.textContent)) out.push("unrendered math: \"" + n.textContent.trim().slice(0, 60) + "\"");
+          }
+          return out;
+        });
+        math.forEach(m => problems.push(`${where}: ${m}`));
+      }
       // every step of every animation (reduced motion => steps jump instantly)
       const figs = await page.$$("figure.anim");
       for (const fig of figs) {

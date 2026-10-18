@@ -14,7 +14,7 @@ Every animation and playground must be legible at **every step** on **phone (360
    cd tools/qa && npm install && node check-layout.js http://localhost:8123/
    # in cloud sessions: CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome
    ```
-   It fails on overlapping SVG text, text outside its drawing, visible undrawn paths (stray dots) and sideways page scroll.
+   It fails on overlapping SVG text, text outside its drawing, visible undrawn paths (stray dots), sideways page scroll, and math that failed to render (KaTeX errors or raw `$` left in text).
 2. Then **look at screenshots yourself** of every animation step on a phone width: the guard can't see text colliding with lines, dots or shapes.
 
 When designing an animation:
@@ -23,10 +23,12 @@ When designing an animation:
 - Labels near the top of a plot (e.g. markers at 100%) must not share a y-band with titles; prefer short labels on phones ("R1" not "review 1").
 - Keep labels off curves and other labels at **every** step, including the final, most crowded one.
 - Draw paths with `LC.drawIn` (never set opacity on a step label yourself) so round line-caps don't show as dots before the line draws.
+- Animations may move things in `onUpdate`: the player jumps with `tl.pause(t, false)` so callbacks still run on instant jumps (reduced motion, scrubbing, dots, resize). Don't change that back.
 - Text inside SVG ≥ 12 viewBox units in compact layouts (dense number grids such as heatmaps: ≥ 9.5).
 - All SVG labels get a background-coloured halo from `main.css`, so a line passing behind stays legible. Text drawn *on* a coloured fill (heatmap cells, badges) must add class `t-nohalo`.
 
 ### Other course conventions
+- Currency in lesson text: KaTeX auto-render treats `$` as a math delimiter, so write prices as `$\$2.00$` (or say "2 dollars"). Live playground readouts (`.pg-readout`, set via `textContent`) can use a plain `$`.
 - Lesson pages follow `course/lessons/m0-1.html`: pretest → learn (animation) → ELI5 → explain-it-back → quiz → takeaways → lock-in cards.
 - Mark a lesson `ready: true` in `assets/js/course-data.js` only when its page exists.
 - Images: OpenArt, GPT Image 2.5 Flare (ELI5) / Sunburst (covers), `quality: low`, `resolutionTier: 1k` (5 credits each). No text inside generated images; labels are drawn in code. Add new image URLs to `assets/img/sources.json`; the `fetch-images.yml` workflow commits them as WebP. Pages serves `main` from the repo root (`index.html` forwards to `course/`), so only committed files go live.
