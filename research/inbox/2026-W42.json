@@ -873,6 +873,239 @@
     "speech"
    ],
    "score": 8.0
+  },
+  {
+   "title": "NVIDIA Nemotron 3.5 Super VL Powers Specialized Agents with Multimodal Reasoning",
+   "summary": "Always-on agents are taking on longer, more complex enterprise workflows. A single request can involve reading a document, checking information across sources,...",
+   "url": "https://developer.nvidia.com/blog/nvidia-nemotron-3-5-super-vl-powers-specialized-agents-with-multimodal-reasoning/",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "multimodal",
+    "reasoning"
+   ],
+   "score": 7.0
+  },
+  {
+   "title": "Stack Overflow for Agents triples signups with ChatGPT plugin",
+   "summary": "Two engineers shipped Stack Overflow for Agents in a few weeks with Codex, and its ChatGPT plugin helped drive up to 10× growth in agent creation.",
+   "url": "https://openai.com/index/stack-overflow-chatgpt-plugin",
+   "date": "2026-10-16",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Higgsfield takes AI video from 1 minute to over 10",
+   "summary": "Higgsfield brings creators longer videos with GPT-6 Astra, precise visuals with GPT-Image-2.5, and a path to voice filmmaking with GPT-Live.",
+   "url": "https://openai.com/index/higgsfield-longer-videos-voice",
+   "date": "2026-10-13",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "a1"
+   ],
+   "matched": [
+    "voice"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Scaling Indic Pretraining: 2.8 Trillion Tokens and an Open Data Generation Pipeline",
+   "summary": "",
+   "url": "https://huggingface.co/blog/nvidia/scaling-indic-pretraining",
+   "date": "2026-10-16",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "m2"
+   ],
+   "matched": [
+    "pretraining"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Granite Switch 4.1: Chat, Decisions, and Speech from One Endpoint",
+   "summary": "",
+   "url": "https://huggingface.co/blog/ibm-granite/granite-switch-4-1",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "a1"
+   ],
+   "matched": [
+    "speech"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Welcome Muse Spark Open: open-weight frontier multimodal mixture-of-experts model from Meta",
+   "summary": "",
+   "url": "https://huggingface.co/blog/meta-muse-spark-open",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "mm"
+   ],
+   "matched": [
+    "multimodal"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Scale Agentic Coding Workflows with Meta’s Muse Spark Open on NVIDIA GB300 NVL72",
+   "summary": "Meta launches Muse Spark Open, a coding-optimized 816B mixture-of-experts (MoE) model with 42B active parameters and a 1M token context window. Trained on...",
+   "url": "https://developer.nvidia.com/blog/scale-agentic-coding-workflows-with-metas-muse-spark-open-on-nvidia-gb300-nvl72/",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "ar"
+   ],
+   "matched": [
+    "moe"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Optimizing Agent Reliability and Tool Calling Efficiency for Chip Design Using NVIDIA NeMo Gym",
+   "summary": "AI agents offer remarkable productivity gains in complex chip design workflows, but their tendency to generate plausible yet incorrect artifacts makes...",
+   "url": "https://developer.nvidia.com/blog/optimizing-agent-reliability-and-tool-calling-efficiency-for-chip-design-using-nvidia-nemo-gym/",
+   "date": "2026-10-14",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "ReplaySSM: Rethinking State Storage for Faster Hybrid-Model Decoding",
+   "summary": "Hybrid models interleave state-space model (SSM) layers with a few attention layers. NVIDIA Nemotron 3, Qwen3.5 through Qwen3.8, Kimi-K3, and GLM-5.3-Flash are...",
+   "url": "https://developer.nvidia.com/blog/replayssm-rethinking-state-storage-for-faster-hybrid-model-decoding/",
+   "date": "2026-10-12",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "m1"
+   ],
+   "matched": [
+    "attention"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "How Itaú is building generative AI for its entire customer base",
+   "summary": "With ia.i, a conversational interface, and the IARA governance platform, Itaú is applying its AI First strategy to customers and employees — in one of Brazil’s most regulated sectors.",
+   "url": "https://openai.com/index/itau-generative-ai",
+   "date": "2026-10-16",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Benefit Street Partners answers questions faster with Codex",
+   "summary": "Anant Kumar builds tools to compare loan valuations and analyze credit agreements, using Codex for code review and faster follow-ups.",
+   "url": "https://openai.com/index/benefit-street-partners",
+   "date": "2026-10-16",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Bringing GPT-Rosalind to academic research labs",
+   "summary": "Introducing the Rosalind Academic Plan, offering eligible academic labs sponsored access to GPT-Rosalind and tools to advance life sciences research.",
+   "url": "https://openai.com/index/introducing-the-rosalind-academic-plan",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Teaching students to think and learn through questions",
+   "summary": "Celebrate Teachers’ Day with AI for Educators in Brazilian Portuguese and see how Study Mode can help teachers support active, step-by-step learning.",
+   "url": "https://openai.com/index/teaching-students-to-think-and-learn-through-questions",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Sullivan & Cromwell brings legal expertise into agreement review",
+   "summary": "In collaboration with OpenAI, Sullivan & Cromwell developed Agreement Analyzer, an AI tool for identifying issues in a draft agreement.",
+   "url": "https://openai.com/index/sullivan-cromwell",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Amp puts AI agents to work beyond code with OpenAI models",
+   "summary": "See how Amp pushes the frontier of what agents can do with GPT-6 Astra, Ultrafast, GPT-Live-1, and Sign in with ChatGPT.",
+   "url": "https://openai.com/index/amp-beyond-coding",
+   "date": "2026-10-14",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
   }
  ]
 }
