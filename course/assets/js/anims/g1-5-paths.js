@@ -11,7 +11,7 @@
     steps: [
       "Orange dots are <strong>noise</strong> samples $x_0$; the grey bands are where the <strong>data</strong> $x_1$ lives. A generator must carry every noise point onto the data.",
       "Diffusion's training path for one (noise, image) pair is a <strong>curve</strong>: $\\sqrt{\\bar\\alpha}\\,x_1 + \\sqrt{1-\\bar\\alpha}\\,\\varepsilon$ sweeps an arc from the noise point to its data point (blue).",
-      "Flow matching connects the same pairs with <strong>straight lines</strong>, $x_t = (1-t)\\,x_0 + t\\,x_1$, and trains the network to predict the constant velocity $x_1 - x_0$.",
+      "Flow matching connects the same pairs with <strong>straight lines</strong> $x_t = (1-t)\\,x_0 + t\\,x_1$ and trains the network to predict the constant velocity $x_1 - x_0$.",
       "But pairs are <strong>random</strong>, so the lines cross. At a crossing the network can only learn the <em>average</em> direction, and the paths it actually follows (blue) <strong>bend</strong> instead.",
       "So a single Euler step fails: at $t = 0$ the average velocity points every sample at the <strong>mean of the data</strong>. All 60 samples land in one spot, the toy version of a blurry average image.",
       "<strong>Reflow</strong>: run the learned flow, then pair each noise point with <em>where it actually ended up</em> (orange lines). These new pairs don't cross much, so retraining on them gives much straighter paths.",

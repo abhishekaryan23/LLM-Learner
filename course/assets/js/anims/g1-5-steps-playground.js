@@ -6,7 +6,7 @@
   function regime(n) {
     if (n === 1) return "One step: every sample jumps to where the average velocity at t = 0 points, the mean of the data.";
     if (n <= 3) return "A few straight jumps can't follow the curved paths: samples land between and around the moons.";
-    if (n <= 8) return "The moons appear, but slightly smeared: each jump still cuts the corners of the curved paths.";
+    if (n <= 6) return "The moons appear, but slightly smeared: each jump still cuts the corners of the curved paths.";
     return "Enough steps to follow the curves: samples sit on the moons. More steps now cost time without visible gain.";
   }
   function init(root) {
@@ -40,7 +40,7 @@
       G.place(dots, fin, fr);
       for (var i = 0; i < NT; i++) trails[i].setAttribute("d", G.polyline(tr[i], fr));
       fin.forEach(function (p) { dist += G.nearest(p[0], p[1]).d; });
-      readout.textContent = "Euler steps = network calls = " + n + " · avg distance to data " + (dist / NS).toFixed(2) + " (real data ≈ 0.13)";
+      readout.textContent = "Euler steps = network calls = " + n + " · avg distance to data " + (dist / NS).toFixed(2) + " (real data ≈ 0.12)";
       hint.textContent = regime(n);
       root.querySelectorAll("[data-n]").forEach(function (c) { c.setAttribute("aria-pressed", String(+c.dataset.n === n)); });
     }

@@ -72,7 +72,7 @@
       var cS = S("circle", { cx: fr.sx(ps[0]), cy: fr.sy(ps[1]), r: 4, class: "f-ink" }, trn);
       var cT = S("circle", { cx: fr.sx(pt[0]), cy: fr.sy(pt[1]), r: 6, class: "f-orange", stroke: "var(--a-ink)", "stroke-width": 1.5 }, trn);
       var l0 = S("text", { x: fr.sx(p0[0]), y: fr.sy(p0[1]) - 12, class: "t t-sm t-mid", text: "x₀ (data)" }, trn);
-      var lT = S("text", { x: fr.sx(pt[0]) + 10, y: fr.sy(pt[1]) + 18, class: "t t-sm", text: "x_t (t = 250)" }, trn);
+      var lT = S("text", { x: fr.sx(pt[0]) + 10, y: fr.sy(pt[1]) + 18, class: "t t-sm", text: "xₜ (t = 250)" }, trn);
       var lE = S("text", { x: (fr.sx(ps[0]) + fr.sx(pt[0])) / 2 + 12, y: (fr.sy(ps[1]) + fr.sy(pt[1])) / 2, class: "t t-sm t-orange", text: compact ? "target: ε" : "noise ε: the target" }, trn);
       trn.style.opacity = 0;
 

@@ -7,7 +7,7 @@
   LC.anims["g1-2-gan"] = {
     title: "A GAN's tug of war, on the two-moons toy",
     steps: [
-      "The <strong>real data</strong>: points on two moons. The generator never sees these directly; it only hears from the discriminator.",
+      "The <strong>real data</strong>: points on two moons. The generator never sees these directly; it only hears from the discriminator. (This animation is schematic; the diffusion ones later use the exact toy.)",
       "The <strong>generator</strong> $G$ turns random noise $z$ into points. At the start its fakes (orange) look nothing like the data.",
       "The <strong>discriminator</strong> $D$ learns to tell real from fake. Its decision boundary (the dark line) puts the fakes on the <em>fake</em> side.",
       "The generator takes a step to <strong>fool $D$</strong>: it follows $D$'s gradient, moving its fakes toward where $D$ says “real”.",

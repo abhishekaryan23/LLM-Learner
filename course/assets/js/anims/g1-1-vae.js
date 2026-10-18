@@ -31,7 +31,7 @@
     steps: [
       "An <strong>autoencoder</strong> squeezes an image $x$ into a short code $z$ and rebuilds it. Here $z$ has just 2 numbers, so we can draw it as a point on a plane.",
       "A VAE's <strong>encoder</strong> $q(z\\mid x)$ outputs a whole Gaussian, not a point: a <strong>mean</strong> $\\mu = (0.9, 0.6)$ and a <strong>spread</strong> $\\sigma = (0.35, 0.25)$, drawn as the ellipse.",
-      "<strong>Reparameterization</strong>: draw $\\varepsilon \\sim \\mathcal{N}(0, I)$ and set $z = \\mu + \\sigma \\odot \\varepsilon$. The randomness lives in $\\varepsilon$, so gradients flow through $\\mu$ and $\\sigma$.",
+      "<strong>Reparameterization</strong>: draw $\\varepsilon \\sim \\mathcal{N}(0, I)$ and set $z = \\mu + \\sigma \\odot \\varepsilon$. The randomness lives in $\\varepsilon$, so gradients flow through $\\mu$ and $\\sigma$ to the encoder.",
       "The <strong>decoder</strong> $p(x\\mid z)$ rebuilds the image from $z$. Because $z$ wobbles inside the ellipse, the decoder learns to give nearby codes similar images, and its reconstructions come out a little <strong>soft</strong>.",
       "The loss has two parts: <strong>reconstruction</strong> (make $\\hat x$ match $x$) plus a <strong>KL term</strong> pulling each ellipse toward the prior $\\mathcal{N}(0, I)$, the dashed circles (1σ and 2σ).",
       "Across the dataset, the KL term packs every image's ellipse into the prior's disk, overlapping and <strong>leaving no holes</strong>. That is what makes the latent space smooth.",

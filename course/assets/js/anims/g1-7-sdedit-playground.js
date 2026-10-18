@@ -8,7 +8,8 @@
   function regime(s) {
     if (s === 0) return "Strength 0: nothing happens. The output is the sketch, which isn't on the data.";
     if (s <= 0.1) return "Low strength: a little noise, then denoising pulls each point onto the nearest bit of the moons. The layout of the sketch survives.";
-    if (s <= 0.3) return "Middle strength: realistic, and still roughly where the sketch was. This is the usual sweet spot.";
+    if (s <= 0.2) return "Middle strength: realistic, and the outputs still sit roughly where the sketch was. On this toy that is the sweet spot; on real images it is usually higher and depends on the model.";
+    if (s <= 0.35) return "Higher strength: the outputs start drifting off the sketch toward the rest of the moons, so its layout is fading.";
     return "High strength: almost all of the sketch is drowned in noise, so the output is realistic but ignores where you drew.";
   }
   function init(root) {
