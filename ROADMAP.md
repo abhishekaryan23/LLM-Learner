@@ -10,7 +10,7 @@ Goal: one end-to-end course for anyone who wants to learn modern AI from its roo
 4. **Current, and honest about it.** Each lesson shows a "Reviewed" month. A weekly pipeline gathers new papers and lab posts; a reviewer turns the few that matter into short field notes that appear on *What's new* and in the matching lessons.
 5. **Same quality bar as Phase 1.** Animations legible at every step on every device (see `CLAUDE.md`), real numbers, cited papers, Colab where it helps.
 
-## Syllabus (118 lessons, 25 modules, 6 tracks)
+## Syllabus (126 lessons, 26 modules, 6 tracks)
 
 | Module | Title | Lessons | Live |
 |---|---|---|---|
@@ -37,18 +37,20 @@ Goal: one end-to-end course for anyone who wants to learn modern AI from its roo
 | RL | Reinforcement learning from scratch | 6 | 0 |
 | RS | Reasoning & test-time compute | 4 | 0 |
 | SY | Building with LLMs | 7 | 0 |
+| AG | The agent toolkit: MCP, skills & more | 8 | 0 |
 | IN | Interpretability | 3 | 0 |
 | ★ | More capstones | 2 | 0 |
 
-Ten goal paths are built from these modules: understand LLMs, image generation, audio & speech, video, multimodal, reinforcement learning, building apps, evaluation, efficiency, and the history of AI.
+Eleven goal paths are built from these modules: understand LLMs, image generation, audio & speech, video, multimodal, reinforcement learning, building apps, building agents (MCP, skills & more), evaluation, efficiency, and the history of AI.
 
 ## Delivery
 
 | Step | What | Status |
 |---|---|---|
 | Infrastructure | New syllabus with prerequisite graph; byte engine with focus mode and deep links; goal paths and today's byte on the home page; "Reviewed" dates; *What's new* page; research pipeline | done |
-| Wave A | H1 history, P5 generative-model math, P6 classic architectures, RL from scratch, RS reasoning | next |
-| Wave B | V1 vision, G1 image generation, A1 audio, MM multimodal, VD video | planned |
+| Wave A | H1 history, P5 generative-model math, P6 classic architectures, RL from scratch, RS reasoning | in progress |
+| Wave B | V1 vision, G1 image generation, A1 audio, MM multimodal, VD video | in progress |
+| Agent toolkit | AG: where to use what (a one-page map for builders), context engineering, MCP, Agent Skills, AGENTS.md and memory files, the LLM wiki, subagents/multi-agent/A2A, a hands-on starter kit | in progress |
 | Wave C | AR beyond dense transformers (MoE, SSMs, long context), SY building with LLMs, IN interpretability, two more capstones | planned |
 | Retrofit | One-question byte checks inside the 51 existing lessons | planned |
 

@@ -20,7 +20,7 @@ LC.course = {
     {"id": "core", "title": "Language models", "modules": ["m1", "m2", "m3", "m4", "m5", "ar", "cap"]},
     {"id": "beyond", "title": "Beyond text", "note": "Images, sound, video and models that mix them.", "modules": ["v1", "g1", "a1", "mm", "vd"]},
     {"id": "rlrs", "title": "Reinforcement learning & reasoning", "modules": ["rl", "rs"]},
-    {"id": "build", "title": "Building with LLMs", "modules": ["sy", "in", "cx"]}
+    {"id": "build", "title": "Building with LLMs", "modules": ["sy", "ag", "in", "cx"]}
   ],
   goals: [
     {"id": "llm", "title": "Understand LLMs from scratch", "modules": ["m1", "m2", "m3", "m4", "m5", "cap"]},
@@ -30,6 +30,7 @@ LC.course = {
     {"id": "multimodal", "title": "Multimodal models", "modules": ["v1", "mm"]},
     {"id": "rl", "title": "RL & reasoning", "modules": ["rl", "rs"]},
     {"id": "apps", "title": "Build apps with LLMs", "modules": ["sy"], "extra": ["cap-3"]},
+    {"id": "agents", "title": "Build agents: MCP, skills & more", "modules": ["ag"], "extra": ["sy-5", "cap-3"]},
     {"id": "eval", "title": "Evaluate models properly", "modules": ["m4"]},
     {"id": "efficient", "title": "Fast & efficient models", "modules": ["m5", "ar"]},
     {"id": "history", "title": "The big picture first", "modules": ["h1"]}
@@ -193,6 +194,16 @@ LC.course = {
       { id: "sy-5", title: "Agents: loops, memory & planning", mins: 12, pre: ["sy-4", "sy-3"] },
       { id: "sy-6", title: "Prompt, RAG or fine-tune?", mins: 8, pre: ["sy-3", "m3-7"] },
       { id: "sy-7", title: "Guardrails & safety in products", mins: 10, pre: ["sy-5", "m4-8"] }
+    ]},
+    ag: { code: "AG", title: "The agent toolkit: MCP, skills & more", tags: ["model context protocol", "mcp", "agent skills", "agents.md", "context engineering", "multi-agent", "agent2agent", "a2a", "llm wiki", "computer use", "coding agent", "subagent"], lessons: [
+      { id: "ag-1", title: "Where to use what: the agent toolkit on one page", mins: 8, pre: [] },
+      { id: "ag-2", title: "Context engineering: what the model sees", mins: 8, pre: ["ag-1", "sy-1"] },
+      { id: "ag-3", title: "MCP: one plug for every tool", mins: 10, pre: ["ag-1", "sy-4"] },
+      { id: "ag-4", title: "Agent Skills: expertise loaded on demand", mins: 8, pre: ["ag-2"] },
+      { id: "ag-5", title: "AGENTS.md & project memory files", mins: 8, pre: ["ag-2"] },
+      { id: "ag-6", title: "The LLM wiki: knowledge that compounds", mins: 8, pre: ["ag-5", "sy-3"] },
+      { id: "ag-7", title: "Subagents, multi-agent systems & A2A", mins: 10, pre: ["ag-3", "sy-5"] },
+      { id: "ag-8", title: "Starter kit: a server, a skill and a rules file", mins: 12, pre: ["ag-3", "ag-4", "ag-5"] }
     ]},
     in: { code: "IN", title: "Interpretability", tags: ["interpretability", "sparse autoencoder", "circuits", "probing", "superposition"], lessons: [
       { id: "in-1", title: "Features & superposition", mins: 10, pre: ["m1-4", "p1-1"] },
