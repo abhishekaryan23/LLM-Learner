@@ -14,5 +14,6 @@
     {"name": "NVIDIA Technical Blog", "url": "https://developer.nvidia.com/blog/feed"}
   ],
   "days": 8,
-  "top_n": 40
+  "top_n": 40,
+  "lab_top_n": 15
 }

@@ -10,7 +10,7 @@ Keeps the course current without letting anything unverified onto the site.
 - Hugging Face Daily Papers (with upvotes);
 - lab blogs: OpenAI, Google DeepMind, Google Research, Hugging Face, BAIR, Microsoft Research, NVIDIA.
 
-Sources live in `tools/research/sources.json`. Items are ranked by how many module `tags` (in `course/assets/js/course-data.js`) they mention, plus upvotes and a bonus for lab posts. The top 40 go to `inbox/<year>-W<week>.md` and `.json`. These are **candidates**, not facts.
+Sources live in `tools/research/sources.json`. Items are ranked by how many module `tags` (in `course/assets/js/course-data.js`) they mention, plus upvotes and a bonus for lab posts. The top 40 papers and top 15 lab announcements (each list ranked separately, so a busy arXiv week cannot crowd out releases) go to `inbox/<year>-W<week>.md` and `.json`. These are **candidates**, not facts.
 
 Run it yourself: `python3 tools/research/fetch_inbox.py` (add `--out DIR` to write elsewhere, or `--offline items.json` to test without the network).
 

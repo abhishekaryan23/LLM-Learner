@@ -170,9 +170,20 @@ def write(ranked, modules, out_dir, today):
         {"generated": today.isoformat(), "items": ranked}, indent=1, ensure_ascii=False) + "\n")
     lines = [f"# Research inbox {stem}", "",
              f"Generated {today.isoformat()}. Candidates only: verify against the primary source before writing a field note.", ""]
-    for i, it in enumerate(ranked, 1):
+    papers = [x for x in ranked if not x.get("lab")]
+    labs = [x for x in ranked if x.get("lab")]
+    for title, group in (("Papers", papers), ("Lab announcements", labs)):
+        lines += [f"## {title} ({len(group)})", ""]
+        lines += entries(group, modules)
+    (out_dir / f"{stem}.md").write_text("\n".join(lines))
+    return out_dir / f"{stem}.md"
+
+
+def entries(group, modules):
+    lines = []
+    for i, it in enumerate(group, 1):
         mods = ", ".join(f"{m} ({modules[m]['title']})" for m in it["modules"]) or "lab post, no tag match"
-        lines += [f"## {i}. {it['title']}", "",
+        lines += [f"### {i}. {it['title']}", "",
                   f"- {it['url']} · {', '.join(it['sources'])} · {it['date'] or 'undated'} · score {it['score']}",
                   f"- Modules: {mods}"]
         if it["matched"]:
@@ -180,8 +191,7 @@ def write(ranked, modules, out_dir, today):
         if it.get("summary"):
             lines += ["", "> " + it["summary"][:400]]
         lines.append("")
-    (out_dir / f"{stem}.md").write_text("\n".join(lines))
-    return out_dir / f"{stem}.md"
+    return lines
 
 
 def main():
@@ -193,7 +203,10 @@ def main():
     modules = module_tags()
     today = dt.datetime.now(dt.timezone.utc)
     raw = json.loads(Path(args.offline).read_text()) if args.offline else gather(cfg)
-    ranked = score(merge(raw), modules, today - dt.timedelta(days=cfg["days"]))[: cfg["top_n"]]
+    ranked = score(merge(raw), modules, today - dt.timedelta(days=cfg["days"]))
+    # Lab announcements get their own quota so a busy arXiv week can't crowd out releases.
+    ranked = ([x for x in ranked if not x.get("lab")][: cfg["top_n"]] +
+              [x for x in ranked if x.get("lab")][: cfg.get("lab_top_n", 15)])
     path = write(ranked, modules, Path(args.out), today.date())
     print(f"{len(ranked)} items -> {path}")
     if not raw:
