@@ -111,7 +111,8 @@
         tl.to(totLabels[lastTot], { opacity: 0, duration: 0.2 }, "<");
         tl.to(totLabels[s], { opacity: 1, duration: 0.3 }, "<0.2");
         lastTot = s;
-        tl.addLabel("s" + s, "+=0.1");
+        tl.to({}, { duration: 0.1 }); // short pause; the label sits at the true end so the next step hasn't started
+        tl.addLabel("s" + s);
       }
       function findStart(r, val, s) {
         // index of the step where row r first took value val, looking back from s

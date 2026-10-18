@@ -206,7 +206,7 @@
   <div class="q-explain">Conventions that apply to <em>every</em> task belong in the rules file, which is read at the start of every session. A skill is for know-how needed only sometimes. (To make the test run truly guaranteed, you could add a hook too.)</div>
 </div></div>
 
-<h2>Three common mistakes, and how to avoid them</h2>
+<h2>Three common mistakes (and a quieter fourth)</h2>
 <p>Most early agent projects stumble in the same few places. All three come from using a good tool for the wrong job.</p>
 <p><strong>1. Stuffing everything into the system prompt.</strong> It starts small: a paragraph of instructions. Then the refund policy goes in, then the style guide, then 40 example answers, then every tool you might ever need. Soon the prompt is tens of thousands of tokens, each request costs more, and the model starts missing instructions buried in the middle (you will see why in <a href="ag-2.html">AG.2</a>). <em>Instead:</em> keep standing instructions short; fetch documents with retrieval when a question needs them; move occasional procedures into skills.</p>
 <p><strong>2. Building an MCP server for something a rules file would solve.</strong> A team wants the agent to “know our build commands”, so it builds a server with a <code>get_build_commands</code> tool. Now there is a program to host, secure and update, and the agent has to remember to call it. Three lines in AGENTS.md would do the same job, always present and free. <em>Rule of thumb:</em> MCP is for <em>live</em> systems the agent must read or change (databases, tickets, calendars), not for facts that fit on an index card.</p>

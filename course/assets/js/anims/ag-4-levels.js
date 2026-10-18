@@ -22,7 +22,7 @@
       "You ask: <em>“Review this NDA with our checklist.”</em> The request matches the description of <strong>contract-review</strong>.",
       "<strong>Level 2</strong>: the agent reads that skill's full <strong>SKILL.md</strong> instructions (here 2,000 tokens). The other three stay as one-liners.",
       "<strong>Level 3</strong>, only as needed: the instructions point to a checklist file, which the agent reads (1,500 tokens), and a script, which it <strong>runs</strong>. The script's code never enters the context; only its short output does (about 200 tokens).",
-      "Total: about <strong>4,100 tokens</strong>. Loading all four skills with their reference files up front would cost about <strong>20,000</strong>, and the gap grows with every skill you install."
+      "Total: about <strong>4,100 tokens</strong>. Loading all four skills up front, each with its full instructions and all its reference files (about 3,000 tokens per skill), would cost about <strong>20,000</strong>, and the gap grows with every skill you install."
     ],
     size: function (layout) { return layout === "compact" ? { w: 360, h: 420 } : { w: 640, h: 384 }; },
     build: function (svg, ctx) {

@@ -160,7 +160,7 @@ description: Drafts user-facing release notes from merged pull requests since th
 # Release notes
 
 1. Find the previous tag: `git describe --tags --abbrev=0`.
-2. List merged PRs since then: `git log &lt;tag&gt;..HEAD --merges --oneline`.
+2. List merged PRs since then: `git log &lt;tag&gt;..HEAD --oneline` (add `--merges` if your PRs land as merge commits).
 3. Group them under Added, Changed and Fixed. Skip internal-only changes (CI, refactors).
 4. One line per change, in plain words a user understands. No PR numbers in the text.
 5. Fill in `template.md` from this folder and show the draft. Don't publish anything.</code></pre>

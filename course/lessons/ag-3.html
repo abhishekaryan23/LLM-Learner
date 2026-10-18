@@ -138,7 +138,7 @@
     <tr><td>Prompts</td><td data-l="Control">The user: picks them, often as slash commands</td><td data-l="Example"><code>/summarize-ticket</code>, a bug-report template</td></tr>
   </tbody>
 </table>
-<p>Tools are by far the most used. Communication also runs the other way: a server can ask the client for help. The main client feature in the current specification is <strong>elicitation</strong>: mid-task, the server asks the user for missing information (“Which shipping address?”) through the host's interface. For anything sensitive, such as a password or payment, the server must send the user to a web page instead of asking through the chat. Two older client features, <strong>sampling</strong> (the server borrows the host's model) and <strong>roots</strong> (the host tells the server which folders it may use), still work but were marked deprecated in the July 2026 revision.</p>
+<p>Tools are by far the most used. A server can also pause a task to ask the user something; this is <strong>elicitation</strong>. Instead of a finished result, the server replies with <code>"resultType": "input_required"</code> and a question (“Which shipping address?”); the host asks the user through its interface and sends the request again with the answer. For anything sensitive, such as a password or payment, the server must send the user to a web page instead of asking through the chat. Two older client features, <strong>sampling</strong> (the server borrows the host's model) and <strong>roots</strong> (the host tells the server which folders it may use), still work but were marked deprecated in the July 2026 revision, along with protocol-level logging.</p>
 
 <div class="byte-check"><div class="q" data-answer="0">
   <p class="q-prompt">A server exposes the contents of <code>schema.sql</code> so the app can attach it as background context. Which primitive is that?</p>
@@ -207,13 +207,13 @@
     "isError": false
   }
 }</code></pre>
-<p>The <code>ttlMs</code> and <code>cacheScope</code> fields tell the client how long it may cache the tool list (here 5 minutes) and whether shared caches may keep it. Notice that the model never sees JSON-RPC. The host turns the tool list into tool definitions for the model, exactly as in plain function calling, and turns the model's choice into a <code>tools/call</code>.</p>
+<p>A finished result says <code>"resultType": "complete"</code>; the only other value, <code>input_required</code>, is the elicitation pause described above. The <code>ttlMs</code> and <code>cacheScope</code> fields tell the client how long it may cache the tool list (here 5 minutes) and whether shared caches may keep it. Notice that the model never sees JSON-RPC. The host turns the tool list into tool definitions for the model, exactly as in plain function calling, and turns the model's choice into a <code>tools/call</code>.</p>
 
 <figure class="anim wide" data-anim="ag-3-flow"></figure>
 
 <p><strong>Transports.</strong> The same messages can travel two standard ways. <strong>stdio</strong>: the host starts the server as a local program and they exchange one JSON message per line through its standard input and output; good for tools on your own machine, such as files or git. <strong>Streamable HTTP</strong>: each message is an HTTP POST to one endpoint, and replies come back as JSON or a stream; good for remote servers shared by many users. It replaced the older “HTTP+SSE” transport in the March 2025 revision.</p>
 <p><strong>Signing in.</strong> A remote server usually needs to know who you are. MCP's authorization follows OAuth 2.1, the same “Sign in with…” flow you know from the web: the user approves access once and the client gets a token that it sends with each request. Local stdio servers take credentials from their environment instead.</p>
-<p><strong>Stateless since July 2026.</strong> Earlier revisions opened every connection with an <code>initialize</code> handshake and kept a session. The 2026-07-28 revision removed both: each request carries its own version and capabilities, so any copy of a server behind a load balancer can answer it, and a client that wants to know a server's features up front can ask <code>server/discover</code>.</p>
+<p><strong>Stateless since July 2026.</strong> Earlier revisions opened every connection with an <code>initialize</code> handshake and kept a session. The 2026-07-28 revision removed both: each request carries its own version and capabilities, so any copy of a server behind a load balancer can answer it, and a client that wants to know a server's features up front can ask <code>server/discover</code> (every server must answer it; clients may skip it).</p>
 
 <div class="byte-check"><div class="q" data-answer="2">
   <p class="q-prompt">You want an MCP server that reads files on the user's own laptop. Which transport fits best?</p>

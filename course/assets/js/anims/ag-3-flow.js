@@ -1,5 +1,5 @@
 /* AG.3: one MCP round trip as a sequence diagram (spec revision 2026-07-28, which is
-   stateless: there is no initialize handshake; server/discover is optional).
+   stateless: there is no initialize handshake; server/discover is optional for clients, required for servers).
    Example: a support bot with an "orders" MCP server. */
 (function () {
   var LC = window.LC;
