@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ar-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hybrid &amp; linear-attention models · LLMs, Animated</title>
+<meta name="description" content="Linear attention's kernel trick and why it turns into an RNN; decay, gates and the delta rule in RetNet, RWKV, GLA and (Gated) DeltaNet; and hybrid models that keep a few full-attention layers for recall, from Jamba to Qwen3-Next and Kimi Linear.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Hybrid &amp; linear-attention models</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Beyond the dense transformer</span></div>
+<p class="lede">Attention compares every token with every other, so its cost grows with the square of the length. Drop the softmax, reorder one matrix product, and attention becomes an RNN with a fixed-size memory. This lesson follows that idea from 2020's linear attention to today's delta-rule layers, and explains why the models that ship mostly keep a few ordinary attention layers in the mix.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Derive linear attention from the kernel trick $\phi(Q)\big(\phi(K)^\top V\big)$ and show why its causal form is a recurrence.</li>
+    <li>Compare the state updates of linear attention, RetNet, gated linear attention and DeltaNet, and compute a delta-rule update by hand.</li>
+    <li>Explain why hybrids keep a few full-attention layers, and estimate their memory and compute against full attention.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="ar-3.html">AR.3 State-space models &amp; Mamba</a> (fixed-size states, parallel scans, the recall weakness). Helpful but optional: <a href="m1-1.html">M1.1 Attention</a>, for the softmax formula this lesson modifies.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">$Q$, $K$ and $V$ are $n \times d$ matrices with $n = 8192$ and $d = 128$. Which costs fewer multiplications: $(QK^\top)V$ or $Q(K^\top V)$?</p>
+    <ol class="q-src">
+      <li>$(QK^\top)V$, because it's the standard order</li>
+      <li>$Q(K^\top V)$, about 64× fewer, because $K^\top V$ is only $d \times d$</li>
+      <li>They cost exactly the same</li>
+      <li>Neither can be computed</li>
+    </ol>
+    <div class="q-explain">$QK^\top$ is $n \times n$: about $n^2 d$ multiplies. $K^\top V$ is $d \times d$: about $n d^2$. The ratio is $n/d = 64$. Softmax attention can't use this reordering, because the softmax sits between $QK^\top$ and $V$. Linear attention removes it.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A hybrid model has 48 layers: 6 full-attention layers and 42 linear-attention layers. Roughly how big is its KV cache at long context, compared with an all-attention model of the same shape?</p>
+    <ol class="q-src">
+      <li>The same size</li>
+      <li>Half the size</li>
+      <li>Zero</li>
+      <li>About 1/8 of the size, since only the 6 attention layers keep a per-token cache</li>
+    </ol>
+    <div class="q-explain">Linear layers keep a fixed-size state instead of a growing cache. At long context, the 6 attention layers dominate memory: $6/48 = 1/8$.</div>
+  </div>
+</section>
+
+<h2>Linear attention: drop the softmax, reorder the product</h2>
+<p>By 2020, long inputs were hitting attention's $n^2$ wall, and a wave of "efficient Transformers" tried to get around it (Linformer, Reformer, Performer and more). Katharopoulos, Vyas, Pappas &amp; Fleuret (2020, "Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention") made the simplest move. Write softmax attention for one query $i$ as a weighted average:</p>
+$$y_i = \frac{\sum_j \mathrm{sim}(q_i, k_j)\,v_j}{\sum_j \mathrm{sim}(q_i, k_j)}, \qquad \mathrm{sim}(q, k) = e^{q^\top k / \sqrt{d}}$$
+<p>Now replace the exponential with a <strong>kernel</strong>, $\mathrm{sim}(q, k) = \phi(q)^\top \phi(k)$, where $\phi$ is a simple feature map that keeps things positive (they used $\phi(x) = \mathrm{elu}(x) + 1$). Since $\phi(q_i)$ doesn't depend on $j$, it moves outside the sums:</p>
+$$y_i = \frac{\phi(q_i)^\top \sum_j \phi(k_j)\,v_j^\top}{\phi(q_i)^\top \sum_j \phi(k_j)} \qquad\Longleftrightarrow\qquad Y \propto \phi(Q)\,\big(\phi(K)^\top V\big)$$
+<p>The sum $\sum_j \phi(k_j)v_j^\top$ is a $d \times d$ matrix computed once and shared by every query. Cost drops from about $n^2 d$ to about $n d^2$: <strong>linear in length</strong>.</p>
+<p>The causal version is the punchline. Token $i$ may only see $j \le i$, so the shared sum becomes a running sum, which is a recurrence:</p>
+$$S_i = S_{i-1} + \phi(k_i)\,v_i^\top, \qquad z_i = z_{i-1} + \phi(k_i), \qquad y_i = \frac{\phi(q_i)^\top S_i}{\phi(q_i)^\top z_i}$$
+<p>$S_i$ ($d \times d$ per head) and $z_i$ (length $d$) are a fixed-size state: hence "Transformers are RNNs". Generation costs the same for every token, with no KV cache.</p>
+
+<h3>Worked example</h3>
+<p>Two-dimensional features. Token 1: $\phi(k_1) = (1, 0)$, $v_1 = (2, 1)$. Token 2: $\phi(k_2) = (0, 1)$, $v_2 = (0, 4)$. Query $\phi(q) = (1, 1)$.</p>
+<ol class="steps">
+  <li>State: $S = \phi(k_1)v_1^\top + \phi(k_2)v_2^\top = \begin{pmatrix}2 &amp; 1\\ 0 &amp; 4\end{pmatrix}$, and $z = (1, 1)$.</li>
+  <li>Numerator: $\phi(q)^\top S = (2, 5)$. Denominator: $\phi(q)^\top z = 2$.</li>
+  <li>$y = (1, 2.5)$. Check the slow way: both similarities are $\phi(q)^\top\phi(k_j) = 1$, so $y$ is the plain average of $v_1$ and $v_2$, which is $(1, 2.5)$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same state $S$ and $z$, new query $\phi(q) = (2, 1)$.</p>
+  <ol class="steps">
+    <li>Second entry of $\phi(q)^\top S$: <span class="blank" data-answer="6" data-tol="0.01" data-hint="(2, 1) times the second column (1, 4)."></span></li>
+    <li>Denominator $\phi(q)^\top z$: <span class="blank" data-answer="3" data-tol="0.01" data-hint="2 + 1."></span></li>
+    <li>First entry of $y$: <span class="blank" data-answer="1.333" data-tol="0.005" data-hint="First entry of φ(q)ᵀS is 2 × 2 + 1 × 0 = 4; divide by 3."></span></li>
+  </ol>
+</section>
+
+<p>Plain linear attention trailed softmax attention on language. Two reasons: without the exponential, attention is less sharp (it can't put nearly all its weight on one token), and the state is a sum that never forgets, so after thousands of tokens it's a blur of everything.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why can't ordinary softmax attention use the cheap order $Q(K^\top V)$?</p>
+  <ol class="q-src">
+    <li>Because $V$ is too large</li>
+    <li>Because matrix multiplication isn't associative</li>
+    <li>Because the softmax is applied to each row of $QK^\top$ before multiplying by $V$, so $QK^\top$ must be formed first</li>
+    <li>It can; it just doesn't for historical reasons</li>
+  </ol>
+  <div class="q-explain">The nonlinear softmax sits between the two products. A kernel $\phi(q)^\top\phi(k)$ factorizes the similarity, which is what lets the product be regrouped.</div>
+</div></div>
+
+<h2>Decay, gates and the delta rule</h2>
+<p>Since 2023, a family of layers has fixed linear attention's "never forgets" problem by changing <em>how the state is updated</em>. Written with a state matrix $S_t$ and $y_t = S_t^\top q_t$ (normalizers dropped, as most of these models do):</p>
+<ul>
+  <li><strong>Linear attention</strong> (2020): $S_t = S_{t-1} + k_t v_t^\top$. Pure accumulation.</li>
+  <li><strong>RetNet</strong> (Sun et al., 2023, "Retentive Network"): $S_t = \gamma\,S_{t-1} + k_t v_t^\top$, with a fixed decay $\gamma &lt; 1$ per head, so old entries fade. It can be computed in parallel, recurrently, or chunk by chunk.</li>
+  <li><strong>RWKV</strong> (Peng et al., 2023, "Reinventing RNNs for the Transformer Era"): an RNN with learned per-channel time decay; later versions made the decay depend on the input (RWKV-6, 2024) and adopted a delta-style update (RWKV-7, 2025).</li>
+  <li><strong>Gated linear attention</strong> (GLA; Yang et al., 2023): $S_t = G_t \odot S_{t-1} + k_t v_t^\top$, where the gate $G_t$ is computed from the current token. Like Mamba's $\Delta_t$, the model decides what to forget. Mamba-2 (<a href="ar-3.html">AR.3</a>) is close to the special case of one scalar gate per head.</li>
+  <li><strong>DeltaNet</strong> (Schlag, Irie &amp; Schmidhuber, 2021; made fast to train by Yang et al., 2024): $S_t = S_{t-1} - \beta_t\,k_t\big(S_{t-1}^\top k_t - v_t\big)^\top$. Read what the memory currently returns for key $k_t$, compare with the new value $v_t$, and correct the difference, with strength $\beta_t \in [0, 1]$. This is the classic delta (Widrow–Hoff) learning rule, applied at every token.</li>
+  <li><strong>Gated DeltaNet</strong> (Yang, Kautz &amp; Hatamizadeh, 2024) combines both: a decay gate to clear old memory quickly, and the delta rule for precise overwrites.</li>
+</ul>
+
+<h3>Worked example: add versus overwrite</h3>
+<p>Two-dimensional keys and values, $S$ starts at zero. Store $v = (3, 1)$ under key $k = (1, 0)$: $S = k v^\top$, and reading with $k$ returns $S^\top k = (3, 1)$.</p>
+<ol class="steps">
+  <li>Now store a <em>new</em> value $v' = (0, 2)$ under the same key. <strong>Linear attention</strong> adds: reading returns $(3, 1) + (0, 2) = (3, 3)$, a mix of old and new.</li>
+  <li><strong>Delta rule</strong> with $\beta = 1$: the error is $S^\top k - v' = (3, -1)$, and $S \leftarrow S - k\,(3, -1)$. Reading now returns exactly $(0, 2)$: the old value was overwritten.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>Same start, but the delta rule with $\beta = 0.5$: $S \leftarrow S - 0.5\,k\,(3, -1)$.</p>
+  <ol class="steps">
+    <li>First entry of the new read-out $S^\top k$: <span class="blank" data-answer="1.5" data-tol="0.01" data-hint="3 − 0.5 × 3."></span></li>
+    <li>Second entry: <span class="blank" data-answer="1.5" data-tol="0.01" data-hint="1 − 0.5 × (−1)."></span></li>
+  </ol>
+</section>
+
+<figure class="anim wide" data-anim="ar-4-linear"></figure>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What does the delta rule add that plain linear attention lacks?</p>
+  <ol class="q-src">
+    <li>It checks what the memory already returns for a key and corrects it toward the new value, so it can overwrite instead of piling values on top of each other</li>
+    <li>A softmax over all past tokens</li>
+    <li>A KV cache</li>
+    <li>A fixed decay that is the same for every token</li>
+  </ol>
+  <div class="q-explain">Pure accumulation mixes old and new values stored under similar keys. The delta update $-\beta k(S^\top k - v)^\top$ removes the old association in proportion to the error, which is why delta-rule layers do better on recall-heavy tasks.</div>
+</div></div>
+
+<h2>Hybrids: a few attention layers go a long way</h2>
+<p>However clever the update, a fixed-size state is still a compressed memory (<a href="ar-3.html">AR.3</a>). Full attention keeps every token, so one attention layer can look up any earlier detail exactly. The hybrid recipe: <strong>use cheap linear or SSM layers for most of the stack, and keep a few full-attention layers for retrieval</strong>. Studies like Zoology (Arora et al., 2023) and NVIDIA's 8B comparison (Waleffe et al., 2024) found that a small share of attention layers recovers most of the recall gap. At long context, memory is dominated by the attention layers' KV cache, so a 1-in-8 hybrid needs roughly 1/8 of the cache.</p>
+<p>Some notable hybrids (figures as reported by their makers):</p>
+<ul>
+  <li><strong>Jamba</strong> (AI21 Labs, 2024): one attention layer per 8, the rest Mamba, plus MoE; 52B total, 12B active, 256K context, designed to fit long inputs on a single 80 GB GPU.</li>
+  <li><strong>Griffin / RecurrentGemma</strong> (De et al., 2024, Google DeepMind): gated linear recurrences mixed with <em>local</em> (sliding-window) attention.</li>
+  <li><strong>MiniMax-01</strong> (MiniMax, Jan 2025): 7 linear ("lightning") attention layers per softmax attention layer; 456B total, 45.9B active; trained at up to 1M tokens of context.</li>
+  <li><strong>Nemotron-H</strong> (NVIDIA, 2025): about 8% attention layers, the rest Mamba-2 and MLPs; reported up to 3× faster inference than similar-size Transformers.</li>
+  <li><strong>Qwen3-Next</strong> (Alibaba, Sept 2025): 3 Gated DeltaNet layers per gated attention layer, 80B total, about 3B active; the Qwen3.5 family (2026) is reported to use the same 3:1 pattern.</li>
+  <li><strong>Kimi Linear</strong> (Moonshot AI, Oct 2025): 3 Kimi Delta Attention layers per attention layer; reports up to 75% less KV cache and up to 6× decoding throughput at 1M context. IBM's <strong>Granite 4.0</strong> (Oct 2025) mixes mostly Mamba-2 layers with a few attention layers.</li>
+</ul>
+<p>It isn't settled. MiniMax's next model, M2 (Oct 2025), went back to full attention; its team wrote that hybrids that matched on standard benchmarks fell short on complex multi-hop reasoning at scale, and that the inference software for efficient attention was less mature. As of late 2026, hybrids are a serious, shipping option for long-context efficiency, but most frontier models still rely mainly on full attention, often with sliding windows (<a href="ar-5.html">AR.5</a>).</p>
+
+<section class="playground" id="ar4-cost" aria-labelledby="ar4pg">
+  <h3 id="ar4pg">Playground: cost versus context length</h3>
+  <p class="math-note" style="margin:0">A 48-layer model (32 heads of size 128, 8 KV heads, bf16). Attention layers keep a KV cache; linear layers keep a $128 \times 128$ state per head. Pick a mix and a length. Log scales: each grid line is 10×.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Context length = <output data-out="n">32K</output> tokens</span>
+      <input type="range" data-in="n" min="0" max="10" step="1" value="5">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Layer mix" style="margin-top:12px">
+    <button type="button" class="chip" data-mix="48" aria-pressed="false">All attention</button>
+    <button type="button" class="chip" data-mix="12" aria-pressed="false">Hybrid 1:3</button>
+    <button type="button" class="chip" data-mix="6" aria-pressed="true">Hybrid 1:7</button>
+    <button type="button" class="chip" data-mix="0" aria-pressed="false">All linear</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</section>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>A class listens to a very long story. Most children keep <strong>one summary card</strong> each: when something new happens they rub out a bit and write the new part in. The card never gets bigger, so it's light to carry.</p>
+      <p>A few children keep a <strong>photo album</strong> with a picture of every single page. It gets heavy, but when the teacher asks "what was the dog's name on page 3?", they can flip straight to it.</p>
+      <p>Put a few photo-album children in a class of summary-card children and you get both: light bags, and someone who can answer exact questions.</p>
+      <p>Where it breaks: in a real model the "children" are layers stacked one after another, each passing its result to the next, and the summary card is a matrix the model learns how to update.</p>
+    </div>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters in practice:</strong> when a model card mentions "linear attention", "Gated DeltaNet", "Mamba-2 layers" or a ratio like 3:1, it is trading some exact recall for a much smaller long-context memory bill and faster long generations. Check the attention-layer count to estimate KV memory, and look at long-context recall benchmarks (<a href="ar-5.html">AR.5</a>), not just perplexity, before relying on it for document lookup.</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why do hybrid models keep a few full-attention layers instead of going all-linear?</p>
+  <ol class="q-src">
+    <li>Linear layers can't be trained in parallel</li>
+    <li>Full attention can look up any earlier token exactly, which rescues the recall and copying that fixed-size states compress away</li>
+    <li>Attention layers use less memory than linear layers</li>
+    <li>It's required for positional encodings</li>
+  </ol>
+  <div class="q-explain">The linear layers do most of the work cheaply; the few attention layers hold the full KV cache that exact retrieval needs. Their cache then dominates memory, so the attention ratio sets the bill.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">How does dropping the softmax turn attention into an RNN, and why do production models still keep some softmax attention?</p>
+  <div class="model-answer"><strong>Model answer:</strong> With a kernel similarity $\phi(q)^\top\phi(k)$, attention becomes $\phi(Q)(\phi(K)^\top V)$, and in the causal case the shared sum $\sum_{j \le i}\phi(k_j)v_j^\top$ is a running state $S_i = S_{i-1} + \phi(k_i)v_i^\top$: a fixed-size recurrence with linear cost and no KV cache. Decay, gates and the delta rule make that state forget and overwrite sensibly. But any fixed-size state compresses the past, so exact recall suffers; a few full-attention layers keep the whole context available for lookups at a fraction of the KV memory.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which update gives a fixed decay that is the same for every token?</p>
+    <ol class="q-src">
+      <li>$S_t = S_{t-1} + k_t v_t^\top$</li>
+      <li>$S_t = G_t \odot S_{t-1} + k_t v_t^\top$ with $G_t$ from the input</li>
+      <li>$S_t = S_{t-1} - \beta_t k_t (S_{t-1}^\top k_t - v_t)^\top$</li>
+      <li>$S_t = \gamma S_{t-1} + k_t v_t^\top$ (RetNet)</li>
+    </ol>
+    <div class="q-explain">RetNet's $\gamma$ is fixed per head. GLA's gate depends on the token, plain linear attention never decays, and the delta rule corrects instead of decaying.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In the playground's model, an attention layer stores 4,096 bytes per token. At 262,144 tokens, how much KV cache does a 1:7 hybrid (6 attention layers) need, ignoring the small linear states?</p>
+    <ol class="q-src">
+      <li>About 6.4 GB</li>
+      <li>About 51.5 GB</li>
+      <li>About 1 GB</li>
+      <li>About 0.8 GB</li>
+    </ol>
+    <div class="q-explain">$6 \times 4096 \times 262{,}144 \approx 6.44 \times 10^9$ bytes. All 48 layers as attention would be 8× more, about 51.5 GB.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Interleaving with <a href="ar-3.html">AR.3</a>: how is Mamba-2 related to gated linear attention?</p>
+    <ol class="q-src">
+      <li>They are unrelated: one is an SSM, the other is attention</li>
+      <li>Mamba-2 uses softmax attention internally</li>
+      <li>By state-space duality, Mamba-2 is a linear-attention-style layer with an input-dependent scalar decay per head, close to GLA with a scalar gate</li>
+      <li>GLA is a mixture of experts</li>
+    </ol>
+    <div class="q-explain">Mamba-2's $C$, $B$ and $x$ play the roles of query, key and value, and its $\bar A_t$ is a data-dependent decay: the same template $S_t = g_t S_{t-1} + k_t v_t^\top$.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">For prefill, causal full attention costs about $2n^2 d$ FLOPs per layer and linear attention about $4 n d\,d_h$ (head size $d_h = 128$). Beyond roughly what length $n$ is linear attention cheaper?</p>
+    <ol class="q-src">
+      <li>About 8 tokens</li>
+      <li>About 256 tokens</li>
+      <li>About 1 million tokens</li>
+      <li>Never</li>
+    </ol>
+    <div class="q-explain">Set $2n^2 d = 4 n d\,d_h$: $n = 2 d_h = 256$. Beyond that, attention's mixing cost grows quadratically while linear attention's grows linearly. (Real kernels shift the crossover, but the shape holds.)</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Linear attention</strong> swaps $e^{q^\top k}$ for $\phi(q)^\top\phi(k)$, regroups to $\phi(Q)(\phi(K)^\top V)$, and in causal form becomes a recurrence with a $d \times d$ state.</li>
+    <li>The family differs in the state update: accumulate (linear), fixed decay (RetNet), learned decay (RWKV), input gates (GLA, Mamba-2), the <strong>delta rule</strong> (DeltaNet) or both (Gated DeltaNet).</li>
+    <li>Fixed-size states compress, so exact recall suffers; a few <strong>full-attention layers</strong> rescue it.</li>
+    <li><strong>Hybrids</strong> (Jamba, MiniMax-01, Nemotron-H, Qwen3-Next, Kimi Linear) cut KV memory roughly in proportion to their attention ratio, though some labs (MiniMax M2) have gone back to full attention.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ar-4-a","front":"What is the kernel trick in linear attention, and what does it cost?","back":"Replace $e^{q^\\top k}$ with $\\phi(q)^\\top\\phi(k)$, then compute $\\phi(Q)(\\phi(K)^\\top V)$: about $n d^2$ instead of $n^2 d$ (Katharopoulos et al., 2020)."},
+  {"id":"ar-4-b","front":"Why is causal linear attention an RNN?","back":"The shared sum becomes a running state: $S_i = S_{i-1} + \\phi(k_i) v_i^\\top$, $z_i = z_{i-1} + \\phi(k_i)$, $y_i = \\phi(q_i)^\\top S_i / \\phi(q_i)^\\top z_i$. Fixed-size state, constant cost per token."},
+  {"id":"ar-4-c","front":"Write the delta-rule (DeltaNet) update and what it does.","back":"$S_t = S_{t-1} - \\beta_t k_t (S_{t-1}^\\top k_t - v_t)^\\top$: read the memory at $k_t$, compare with $v_t$, correct the error. It overwrites old associations instead of summing them."},
+  {"id":"ar-4-d","front":"RetNet vs gated linear attention: the state update?","back":"RetNet: $S_t = \\gamma S_{t-1} + k_t v_t^\\top$ (fixed decay per head). GLA: $S_t = G_t \\odot S_{t-1} + k_t v_t^\\top$ (gate computed from the input). Gated DeltaNet adds a gate to the delta rule."},
+  {"id":"ar-4-e","front":"Why hybrids, and what sets their KV memory?","back":"Linear/SSM layers compress the past; a few full-attention layers keep every token for exact recall. KV memory scales with the number of attention layers (e.g. 1:7 → about 1/8 of an all-attention cache). Examples: Jamba, MiniMax-01, Qwen3-Next, Kimi Linear."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ar-4-linear.js"></script>
+<script src="../assets/js/anims/ar-4-cost-playground.js"></script>
+</body>
+</html>

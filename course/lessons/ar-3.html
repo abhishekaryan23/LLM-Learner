@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ar-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>State-space models &amp; Mamba · LLMs, Animated</title>
+<meta name="description" content="State-space models carry a fixed-size state instead of a growing KV cache: the discretized recurrence, S4's convolution view for parallel training, Mamba's selective parameters and parallel scan, memory at a million tokens, Mamba-2's duality with attention, and the recall weakness.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>State-space models &amp; Mamba</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Beyond the dense transformer</span></div>
+<p class="lede">A Transformer remembers by keeping <em>everything</em>: every token's keys and values, in a cache that grows without end. A state-space model remembers like a reader with a notebook: one fixed-size state, updated as each token goes by. This lesson builds that recurrence from scratch, shows how S4 trains it in parallel and how Mamba made it selective, and is honest about what a fixed-size memory can't do.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Run the recurrence $h_t = \bar A h_{t-1} + \bar B x_t,\ y_t = C h_t$ by hand, and compute the same outputs as a convolution.</li>
+    <li>Explain what Mamba's input-dependent ("selective") parameters add, and how a parallel scan keeps training fast.</li>
+    <li>Compare the memory of a KV cache and an SSM state at a million tokens, and say why SSMs struggle with exact recall.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="p6-3.html">P6.3 RNNs &amp; LSTMs</a> (hidden states, gates, why recurrence lost to attention) and <a href="m1-4.html">M1.4 The decoder-only transformer</a> (the block an SSM layer replaces). Helpful but optional: <a href="m1-5.html">M1.5 KV cache &amp; sampling</a> and <a href="p5-4.html">P5.4 Convolution</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A model generates its 1,000,000th token. Which needs more memory for that sequence: a Transformer's KV cache or a state-space model's state?</p>
+    <ol class="q-src">
+      <li>They need the same</li>
+      <li>The SSM state, since it must summarize a million tokens</li>
+      <li>The KV cache, by orders of magnitude: it stores every past token, while the SSM state has a fixed size</li>
+      <li>Neither stores anything about the past</li>
+    </ol>
+    <div class="q-explain">A KV cache grows by one entry per token per layer, reaching roughly 100+ GB for a mid-size model at a million tokens. An SSM's state is the same size at token 10 and at token 1,000,000, typically megabytes.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">You paste a 50,000-token phone book into a pure state-space model and ask for one person's number. What is the likely problem?</p>
+    <ol class="q-src">
+      <li>The fixed-size state can't hold every entry exactly, so the number may be lost or garbled</li>
+      <li>It will run out of memory</li>
+      <li>It will be much slower than a Transformer</li>
+      <li>Nothing; SSMs are perfect at lookups</li>
+    </ol>
+    <div class="q-explain">Compression is the price of a fixed-size memory. Exact recall of arbitrary earlier content is where pure SSMs fall behind attention, which is why most production designs are hybrids (<a href="ar-4.html">AR.4</a>).</div>
+  </div>
+</section>
+
+<h2>A fixed-size memory: the state-space recurrence</h2>
+<p><a href="p6-3.html">P6.3</a> ended with a trade-off. RNNs keep a fixed-size hidden state but train one step at a time and forget; Transformers train in parallel and recall anything, but every generated token adds keys and values to a cache that grows forever. In 2020–2021, Albert Gu and colleagues looked for a recurrence that could have both, and found it in control theory. A <strong>state-space model</strong> (as in Kalman's work from 1960) describes a system whose hidden state $h(t)$ evolves continuously under an input $x(t)$:</p>
+$$h'(t) = A\,h(t) + B\,x(t), \qquad y(t) = C\,h(t)$$
+<p>Text comes in discrete tokens, so the model <strong>discretizes</strong> this with a step size $\Delta$. In words: pretend each input is held constant for a time $\Delta$, and work out exactly where the state ends up. (The usual "zero-order hold" rule gives $\bar A = e^{\Delta A}$ and a matching $\bar B$.) A large $\Delta$ lets the state move far toward the new input, forgetting more of the old; a small $\Delta$ barely changes the state. The result is a <strong>linear recurrence</strong>:</p>
+$$h_t = \bar A\,h_{t-1} + \bar B\,x_t, \qquad y_t = C\,h_t$$
+<ul>
+  <li>$x_t$ is one input channel at step $t$ (an SSM layer runs one such recurrence per channel, in parallel), and $y_t$ the output.</li>
+  <li>$h_t$ is the <strong>state</strong>, a vector of $N$ numbers ($N = 16$ in Mamba, 64–256 in Mamba-2). It is the model's entire memory of the past.</li>
+  <li>$\bar A$ ($N \times N$, diagonal in practice) decides how the state decays and mixes; $\bar B$ writes the input into the state; $C$ reads the output out.</li>
+</ul>
+<p>Unlike the RNN in P6.3 there is <strong>no tanh</strong> between steps. That linearity is what makes the parallel tricks below possible. Early structured SSMs initialized $A$ with HiPPO (Gu et al., 2020), a matrix designed so the state keeps a compressed summary of the whole history.</p>
+
+<h3>Worked example</h3>
+<p>One-number state: $\bar A = 0.5$, $\bar B = 1$, $C = 2$, inputs $x = (1, 0, 0, 1)$, starting from $h_0 = 0$.</p>
+<ol class="steps">
+  <li>$h_1 = 0.5 \cdot 0 + 1 = 1$, so $y_1 = 2$.</li>
+  <li>$h_2 = 0.5$, $y_2 = 1$. Then $h_3 = 0.25$, $y_3 = 0.5$: the memory of the first input halves each step.</li>
+  <li>$h_4 = 0.5 \times 0.25 + 1 = 1.125$, so $y_4 = 2.25$: new input plus a fading echo of the old.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>$\bar A = 0.9$, $\bar B = 0.5$, $C = 1$, inputs $x = (2, 0, 1)$, $h_0 = 0$.</p>
+  <ol class="steps">
+    <li>$h_1 =$ <span class="blank" data-answer="1" data-tol="0.001" data-hint="0.9 × 0 + 0.5 × 2."></span></li>
+    <li>$h_2 =$ <span class="blank" data-answer="0.9" data-tol="0.001" data-hint="0.9 × h₁ + 0.5 × 0."></span></li>
+    <li>$y_3 =$ <span class="blank" data-answer="1.31" data-tol="0.002" data-hint="h₃ = 0.9 × 0.9 + 0.5 × 1, and C = 1."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In the discretized SSM, what happens when the step size $\Delta$ is large?</p>
+  <ol class="q-src">
+    <li>The state ignores the new input</li>
+    <li>The state moves strongly toward the new input and forgets more of what it held</li>
+    <li>The state grows by one entry</li>
+    <li>The output becomes zero</li>
+  </ol>
+  <div class="q-explain">$\Delta$ is how long the input is "held". Long hold: the decay $e^{\Delta A}$ shrinks the old state a lot and the input dominates. Short hold: the state barely changes. Mamba makes $\Delta$ depend on the token.</div>
+</div></div>
+
+<h2>S4: train as a convolution, generate as an RNN</h2>
+<p>A recurrence looks sequential, but this one isn't, because it's linear and its parameters don't change over time. Unroll it (with $h_0 = 0$):</p>
+$$y_t = C\bar B\,x_t + C\bar A\bar B\,x_{t-1} + C\bar A^2\bar B\,x_{t-2} + \dots = \sum_{j=0}^{t-1} \bar K_j\,x_{t-j}, \qquad \bar K = \big(C\bar B,\ C\bar A\bar B,\ C\bar A^2\bar B,\ \dots\big)$$
+<p>So the whole output is one long <strong>convolution</strong> of the input with a fixed kernel $\bar K$ (<a href="p5-4.html">P5.4</a>). The kernel can be computed once, and the convolution done for every position at once with an FFT in about $L \log L$ steps for a length-$L$ sequence. That's the trick of <strong>S4</strong> (Gu, Goel &amp; Ré, 2021, "Efficiently Modeling Long Sequences with Structured State Spaces"):</p>
+<ul>
+  <li><strong>Training:</strong> use the <strong>convolution view</strong>, parallel over the sequence, like a Transformer.</li>
+  <li><strong>Generation:</strong> use the <strong>recurrent view</strong>: each new token costs a fixed amount of work and the memory is just $h_t$, whatever the length.</li>
+</ul>
+<p>S4's other contribution was a structured $A$ (diagonal plus low-rank) that made computing $\bar K$ fast and stable. It was the first model to solve Path-X, a 16,384-step task in the Long Range Arena benchmark where earlier efficient Transformers did no better than chance. Follow-ups (DSS, S4D, 2022) showed a plain diagonal $A$ works nearly as well, which is what later models use.</p>
+
+<h3>Worked example: the same numbers, as a convolution</h3>
+<p>For $\bar A = 0.5$, $\bar B = 1$, $C = 2$: $\bar K = (2,\ 1,\ 0.5,\ 0.25)$. With $x = (1, 0, 0, 1)$:</p>
+<p>$y_4 = \bar K_0 x_4 + \bar K_1 x_3 + \bar K_2 x_2 + \bar K_3 x_1 = 2 \cdot 1 + 1 \cdot 0 + 0.5 \cdot 0 + 0.25 \cdot 1 = 2.25$, exactly what the recurrence gave.</p>
+
+<p>But on language, S4-style models still trailed Transformers. Their kernel is the same for every input: the model weighs "3 tokens ago" identically whether that token was "the" or a person's name. It can't decide, based on <em>content</em>, what to keep.</p>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>Kernel for $\bar A = 0.9$, $\bar B = 0.5$, $C = 1$.</p>
+  <ol class="steps">
+    <li>$\bar K_1 = C\bar A\bar B =$ <span class="blank" data-answer="0.45" data-tol="0.001" data-hint="1 × 0.9 × 0.5."></span></li>
+    <li>$\bar K_2 =$ <span class="blank" data-answer="0.405" data-tol="0.001" data-hint="1 × 0.9² × 0.5."></span></li>
+    <li>With $x = (2, 0, 1)$: $y_3 = \bar K_0 x_3 + \bar K_1 x_2 + \bar K_2 x_1 =$ <span class="blank" data-answer="1.31" data-tol="0.002" data-hint="0.5 × 1 + 0.45 × 0 + 0.405 × 2. It should match the recurrence."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">Why can S4 be trained as a convolution?</p>
+  <ol class="q-src">
+    <li>Because it uses attention internally</li>
+    <li>Because its state is very small</li>
+    <li>Because it processes only short sequences</li>
+    <li>Because the recurrence is linear and $\bar A$, $\bar B$, $C$ are the same at every step, so the output is the input convolved with a fixed kernel $C\bar A^j \bar B$</li>
+  </ol>
+  <div class="q-explain">Time-invariant and linear means "the effect of the input $j$ steps ago" is a fixed number $\bar K_j$. That's the definition of a convolution, which runs in parallel.</div>
+</div></div>
+
+<h2>Mamba: making the state selective</h2>
+<p><strong>Mamba</strong> (Gu &amp; Dao, 2023, "Mamba: Linear-Time Sequence Modeling with Selective State Spaces") lets the parameters depend on the current token:</p>
+$$\Delta_t = \mathrm{softplus}(W_\Delta x_t), \qquad B_t = W_B\,x_t, \qquad C_t = W_C\,x_t, \qquad \bar A_t = e^{\Delta_t A}$$
+<p>$A$ itself stays a learned diagonal matrix with negative entries (so $e^{\Delta_t A}$ is a decay between 0 and 1). Now each token decides how it is treated: a large $\Delta_t$ means "reset and store me", a small $\Delta_t$ means "skip me, keep the memory". $B_t$ and $C_t$ choose what to write and what to read. This is the LSTM's gating idea (<a href="p6-3.html">P6.3</a>) in a linear recurrence, and Mamba showed it solves synthetic tasks S4 couldn't, such as selectively copying tokens and induction-head-style lookups.</p>
+<p>The cost: with parameters that change every step, there's no fixed kernel and no convolution. Mamba's answer is a <strong>hardware-aware parallel scan</strong>. Each step has the form $h_t = a_t h_{t-1} + b_t$, and two such steps compose into one of the same form: applying $(a_1, b_1)$ then $(a_2, b_2)$ equals $(a_2 a_1,\ a_2 b_1 + b_2)$. Because that combination is associative, the steps can be combined in a tree, so a GPU computes all $L$ states in about $\log_2 L$ rounds instead of $L$. In the spirit of FlashAttention (<a href="m5-4.html">M5.4</a>), Mamba's kernel keeps the large expanded states in fast on-chip SRAM, never writes them to main GPU memory, and recomputes them in the backward pass.</p>
+<p>The Mamba paper reported about 5× higher generation throughput than a Transformer of similar size, linear scaling in sequence length, and a 3B-parameter Mamba matching Transformers about twice its size on the language-modelling benchmarks it tested.</p>
+
+<figure class="anim wide" data-anim="ar-3-state"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ar-3.webp" alt="Two children reading a long storybook: one keeps flipping back through every page amid piles of books, the other reads forward keeping one small notebook of running notes." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Two children read the same very long storybook. The first one, every time they read a new page, <strong>flips back through every page so far</strong>. Their desk disappears under piles of books, and each page takes longer than the last. That's a Transformer.</p>
+      <p>The second child reads forward and keeps <strong>one small notebook</strong> of running notes: who's who, where they are, what's happening. Each page takes the same time, and the notebook never gets bigger. That's a state-space model. Mamba's trick is a child who decides, page by page, what's worth writing down and what to rub out.</p>
+      <p>Where it breaks: ask the second child for the exact words on page 12, and if they didn't note them, they're gone. Real models also have dozens of "notebooks", one set per layer.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What does making $\Delta$, $B$ and $C$ input-dependent cost Mamba, and how does it pay?</p>
+  <ol class="q-src">
+    <li>It loses the fixed convolution kernel, so it trains with a hardware-aware parallel scan instead</li>
+    <li>It loses the fixed-size state, so it needs a KV cache</li>
+    <li>It becomes quadratic in sequence length</li>
+    <li>Nothing; the convolution still works</li>
+  </ol>
+  <div class="q-explain">A time-varying recurrence has no single kernel. But $h_t = a_t h_{t-1} + b_t$ steps combine associatively, so a parallel scan computes all states in about $\log L$ rounds, and the state stays fixed-size at inference.</div>
+</div></div>
+
+<h2>A million tokens, Mamba-2 and the recall problem</h2>
+<p>Here is the payoff in numbers. A Transformer's KV cache stores $2 \times L \times n_{kv} \times d_{\text{head}} \times b$ bytes <em>per token</em> (<a href="m1-5.html">M1.5</a>). An SSM layer stores its state, $d_{\text{inner}} \times N$ numbers (one $N$-sized state per channel), plus a few recent inputs for Mamba's short convolution, and that's it.</p>
+<h3>Worked example</h3>
+<ol class="steps">
+  <li><strong>Transformer</strong> (Llama 3.1 8B: 32 layers, 8 KV heads, head size 128, bf16): $2 \times 32 \times 8 \times 128 \times 2 = 131{,}072$ bytes per token. At 1,000,000 tokens: about <strong>131 GB</strong>, for one sequence.</li>
+  <li><strong>Mamba</strong> (the 2.8B model: 64 layers, $d_{\text{inner}} = 5120$, $N = 16$): state $64 \times 5120 \times 16 \approx 5.2$M numbers, plus about 1.3M for the convolution buffers. About 6.6M numbers, roughly <strong>26 MB</strong> even in 32-bit floats.</li>
+  <li>The SSM's 26 MB is the same at token 10 and token 1,000,000. And each new token costs a fixed amount of work, while attention must read all $t$ cached keys.</li>
+</ol>
+<p>These models are different sizes, so read it as a scaling comparison, not a contest: one grows linearly with the context, the other is flat.</p>
+
+<section class="card" aria-labelledby="ft3">
+  <div class="card-label" id="ft3">Your turn · faded example</div>
+  <p>A Mamba-2-style model has 64 layers, $d_{\text{inner}} = 5120$ and a larger state, $N = 128$. Ignore the convolution buffers.</p>
+  <ol class="steps">
+    <li>State size, in millions of numbers: <span class="blank" data-answer="41.9" data-tol="0.1" data-hint="64 × 5120 × 128."></span></li>
+    <li>In bf16 (2 bytes), in MB: <span class="blank" data-answer="83.9" data-tol="0.2" data-hint="Millions of numbers × 2 bytes."></span></li>
+    <li>How many times smaller than the 131 GB KV cache above? <span class="blank" data-answer="1563" data-tol="10" data-hint="131,072 MB / 83.9 MB."></span></li>
+  </ol>
+</section>
+
+<h3>Mamba-2, the duality with attention, and the recall problem</h3>
+<p><strong>Mamba-2</strong> (Dao &amp; Gu, 2024, "Transformers are SSMs") restricted $\bar A_t$ to a single number per head times the identity. Then the whole layer can be written as $y = M x$, where $M$ is a lower-triangular matrix whose entry for output $t$ and input $s \le t$ is $C_t^\top B_s$ times the product of the decays between them. That is exactly the shape of causal attention with a decay mask, with $C$ playing the query, $B$ the key and $x$ the value. Dao and Gu call this <strong>structured state-space duality</strong>: the same layer can run as a recurrence (constant memory) or as masked, attention-like matrix multiplies over chunks of the sequence, which use GPU tensor cores well. Mamba-2 used much larger states ($N$ of 64 to 256) and reported a core layer 2–8× faster than Mamba-1's scan. Work continues: Mamba-3 (Lahoti et al., 2026) revisits the discretization and the state update with inference speed in mind.</p>
+<p>Now the weakness. A fixed-size state must <strong>compress</strong> the past, and compression loses detail. Tasks that need exact recall of arbitrary earlier content, like copying a long string, looking up a number in a pasted table, or associative recall ("what came after <em>this</em> key?"), are where pure SSMs fall behind:</p>
+<ul>
+  <li>Jelassi et al. (2024, "Repeat After Me") proved a small Transformer can copy strings of exponential length, while any fixed-state model is limited by its state size, and found trained Transformers learned copying much faster in practice.</li>
+  <li>The Zoology study (Arora et al., 2023) found that most of the language-modelling gap between attention and efficient recurrent models came from associative recall.</li>
+  <li>An NVIDIA study (Waleffe et al., 2024) trained 8B pure Mamba and Mamba-2 models alongside a Transformer on the same data; the pure SSMs lagged on tasks needing in-context recall, like five-shot MMLU and phone-book lookup, while a hybrid with a few attention layers matched or beat the Transformer.</li>
+</ul>
+<p>Hence the next lesson: mix a few attention layers in.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> SSM layers buy constant memory and constant time per generated token, which matters for very long inputs, long agent sessions and cheap high-batch serving. As of 2026 they show up mainly <em>inside hybrids</em>, models that interleave Mamba-style layers with a few attention layers, rather than as pure SSM LLMs. When a model card says "Mamba-2 layers" or "linear attention", expect a smaller long-context memory bill and check its long-context recall scores (<a href="ar-5.html">AR.5</a>).</div>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">According to Mamba-2's state-space duality, an SSM layer with scalar decay is equivalent to…</p>
+  <ol class="q-src">
+    <li>A convolutional network with a fixed kernel</li>
+    <li>A form of causal linear attention with a decay mask, where $C$ acts like the query and $B$ like the key</li>
+    <li>A mixture of experts</li>
+    <li>Standard softmax attention</li>
+  </ol>
+  <div class="q-explain">The matrix $M_{ts} = C_t^\top B_s \times$ (decays from $s$ to $t$) has the form of masked attention scores without a softmax. That's why SSMs and linear attention (AR.4) turn out to be close relatives.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">How can an SSM train in parallel yet generate with constant memory, and what does Mamba add?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The SSM recurrence $h_t = \bar A h_{t-1} + \bar B x_t$, $y_t = C h_t$ is linear, so the outputs can be computed for all positions at once: as a convolution with the kernel $C\bar A^j\bar B$ when the parameters are fixed (S4), or with an associative parallel scan when they vary. At generation time the same layer runs as a recurrence, carrying only the fixed-size state $h_t$. Mamba makes $\Delta$, $B$ and $C$ depend on each token, so the model can choose what to store and what to skip, at the price of needing the scan instead of a convolution; the fixed-size state still makes exact recall of distant details hard.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">$\bar A = 0.8$, $\bar B = 1$, $C = 1$, inputs $x = (1, 1)$, $h_0 = 0$. What is $y_2$?</p>
+    <ol class="q-src">
+      <li>2</li>
+      <li>1.8</li>
+      <li>1.64</li>
+      <li>0.8</li>
+    </ol>
+    <div class="q-explain">$h_1 = 1$, $h_2 = 0.8 \times 1 + 1 = 1.8$, and $y_2 = C h_2 = 1.8$. As a convolution: $\bar K = (1, 0.8)$, so $y_2 = 1 \cdot 1 + 0.8 \cdot 1$.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Interleaving with <a href="p6-3.html">P6.3</a>: what is the key difference between an SSM layer and the classic RNN $h_t = \tanh(W h_{t-1} + U x_t)$?</p>
+    <ol class="q-src">
+      <li>The SSM has no hidden state</li>
+      <li>The SSM uses attention between steps</li>
+      <li>The RNN's state is larger</li>
+      <li>The SSM's step is linear (no tanh between steps), which allows the convolution and parallel-scan tricks for parallel training</li>
+    </ol>
+    <div class="q-explain">The nonlinearity forces an RNN to compute $h_1$, then $h_2$, and so on. A linear recurrence can be unrolled algebraically. SSMs put their nonlinearities around the recurrence (projections, gates, MLPs), not inside it.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In Mamba, a token produces a very small $\Delta_t$. What happens to the state at that step?</p>
+    <ol class="q-src">
+      <li>It barely changes: $e^{\Delta_t A}$ is close to 1 and little of the token is written, so the token is effectively skipped</li>
+      <li>It resets to zero</li>
+      <li>It doubles in size</li>
+      <li>It copies the token exactly</li>
+    </ol>
+    <div class="q-explain">Small $\Delta$ means a short "hold": almost no decay and almost no input. That's how Mamba ignores filler tokens and keeps its memory for what matters.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which task is a pure SSM most likely to get wrong compared with a Transformer of similar size?</p>
+    <ol class="q-src">
+      <li>Continuing a story in the same style</li>
+      <li>Generating text quickly at very long context</li>
+      <li>Returning the exact 40-character ID that appeared once, 30,000 tokens earlier</li>
+      <li>Next-token prediction on ordinary prose</li>
+    </ol>
+    <div class="q-explain">Exact recall of arbitrary distant content needs that content to be stored. Attention keeps it in the KV cache; a fixed-size state may have overwritten it.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A discretized SSM is a <strong>linear recurrence</strong>: $h_t = \bar A h_{t-1} + \bar B x_t$, $y_t = C h_t$, with step size $\Delta$ controlling how much each input moves the state.</li>
+    <li><strong>S4</strong>: fixed parameters make it a convolution with kernel $C\bar A^j \bar B$, so it trains in parallel and generates as an RNN with constant memory.</li>
+    <li><strong>Mamba</strong> makes $\Delta$, $B$, $C$ input-dependent (selective) and trains with a hardware-aware parallel scan.</li>
+    <li>At a million tokens a KV cache can reach ~100+ GB per sequence; an SSM state stays at megabytes. <strong>Mamba-2</strong> shows SSMs are a form of masked linear attention.</li>
+    <li>The price is <strong>lossy memory</strong>: exact recall and copying from far back are weak spots, which hybrids fix.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Python</div>
+    <p>Discretize a tiny SSM in NumPy, compute its outputs by recurrence and by convolution and check they match, build a selective (input-dependent) version that holds on to an important token through a stretch of filler, and compare its memory with a KV cache. About 25 minutes, CPU only, runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="ar-3-ssm-scan.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ar-3-a","front":"Write the discretized SSM recurrence and name each part.","back":"$h_t = \\bar A h_{t-1} + \\bar B x_t$, $y_t = C h_t$. State $h_t$ ($N$ numbers), decay/mixing $\\bar A = e^{\\Delta A}$, input matrix $\\bar B$, readout $C$, step size $\\Delta$."},
+  {"id":"ar-3-b","front":"Why can S4 train as a convolution?","back":"The recurrence is linear and time-invariant, so $y_t = \\sum_j \\bar K_j x_{t-j}$ with fixed kernel $\\bar K_j = C\\bar A^j\\bar B$; computed for all positions at once (FFT). Generation uses the recurrent view with constant memory."},
+  {"id":"ar-3-c","front":"What is 'selective' about Mamba?","back":"$\\Delta_t$, $B_t$, $C_t$ are computed from the current token, so the model chooses per token what to write, keep or skip (Gu & Dao, 2023). No fixed kernel, so it trains with a hardware-aware parallel scan."},
+  {"id":"ar-3-d","front":"Why can a linear recurrence be computed with a parallel scan?","back":"Steps $h_t = a_t h_{t-1} + b_t$ compose associatively: $(a_1,b_1)$ then $(a_2,b_2)$ = $(a_2 a_1, a_2 b_1 + b_2)$. Combine in a tree: about $\\log_2 L$ rounds."},
+  {"id":"ar-3-e","front":"Memory at 1M tokens: KV cache vs SSM state?","back":"Llama 3.1 8B KV cache: 128 KiB/token → ~131 GB per sequence. Mamba-2.8B state: 64 × 5120 × 16 numbers + conv buffers ≈ 26 MB in fp32, independent of length."},
+  {"id":"ar-3-f","front":"Main weakness of pure SSMs, and the evidence?","back":"Lossy fixed-size memory → weak exact recall/copying (Jelassi et al., 2024; Zoology, Arora et al., 2023; NVIDIA 8B study, Waleffe et al., 2024). A few attention layers (hybrids) fix most of it."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ar-3-state.js"></script>
+</body>
+</html>

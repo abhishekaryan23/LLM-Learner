@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ar-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MoE deep dive: routing &amp; expert design · LLMs, Animated</title>
+<meta name="description" content="How MoE routers really work: noisy top-k gating, GShard and Switch, the load-balancing loss worked by hand, capacity and dropped tokens, the router z-loss, what experts learn, and DeepSeek's fine-grained, shared and bias-balanced experts.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>MoE deep dive: routing &amp; expert design</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Beyond the dense transformer</span></div>
+<p class="lede">You know the headline: a router sends each token to a few expert MLPs, so a model can be huge but cheap per token. This lesson opens the router up. Where top-k gating came from, how the balancing losses and capacity limits actually behave, what experts end up learning, and the design choices behind DeepSeek-V3's 671 billion parameters with only 37 billion active.</p>
+
+<div class="cover"><img src="../assets/img/cover-ar.webp" alt="Illustration: a machine of small specialist modules arranged in a ring, with a glowing switchboard routing tokens to two modules at a time while a long scroll flows through." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write noisy top-k, top-2 and Switch top-1 gating, and say why the gate value multiplies the expert's output.</li>
+    <li>Compute the load-balancing loss, an expert's capacity, the number of dropped tokens and the router z-loss by hand.</li>
+    <li>Explain fine-grained and shared experts and auxiliary-loss-free balancing, and count DeepSeek-V3's total and active parameters.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="m5-3.html">M5.3 Mixture of experts</a>, which introduces the router, top-k experts, total versus active parameters and the basic idea of load balancing. This lesson goes underneath each of those. Helpful but optional: <a href="p3-2.html">P3.2 Softmax</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">The Switch Transformer sends each token to just <em>one</em> expert. Its output is $p_i\,E_i(x)$, the expert's output times the router's probability $p_i$. Why multiply by $p_i$ at all?</p>
+    <ol class="q-src">
+      <li>To make the output smaller and more stable</li>
+      <li>Because $p_i$ is always close to 1 anyway</li>
+      <li>So the router gets a gradient: picking the winner is a hard choice, but $p_i$ is a smooth number the loss can push up or down</li>
+      <li>It is needed to count dropped tokens</li>
+    </ol>
+    <div class="q-explain">If the output were just $E_i(x)$, nothing downstream would depend smoothly on the router's weights, and the router could not learn. Scaling by $p_i$ lets the loss say "trust this expert more (or less) for tokens like this".</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You split every expert into 4 smaller experts (each a quarter of the size) and route each token to 4× as many of them. What happens to the compute per token?</p>
+    <ol class="q-src">
+      <li>It goes up 4×</li>
+      <li>It stays about the same, but there are far more possible combinations of experts</li>
+      <li>It drops to a quarter</li>
+      <li>It drops to a sixteenth</li>
+    </ol>
+    <div class="q-explain">Four quarter-size experts cost about what one full-size expert cost. What changes is flexibility: choosing 8 of 64 small experts allows billions of combinations, versus 120 for 2 of 16. This is DeepSeekMoE's "fine-grained" design.</div>
+  </div>
+</section>
+
+<h2>Where routing came from: noisy top-k to Switch</h2>
+<p>The idea of a gating network choosing among experts is old (Jacobs, Jordan, Nowlan &amp; Hinton, 1991, "Adaptive Mixtures of Local Experts"), but those mixtures ran <em>every</em> expert and blended the outputs. The problem in 2016 was different: Google wanted far bigger language models without paying for every parameter on every word. Shazeer et al. (2017, "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer") made the gate <strong>sparse</strong>, so most experts are skipped, and put thousands of experts between the layers of an LSTM, reaching 137 billion parameters. Their router is <strong>noisy top-k gating</strong>:</p>
+$$H(x)_i = (x W_g)_i + \varepsilon_i \cdot \mathrm{softplus}\big((x W_{\text{noise}})_i\big), \qquad G(x) = \mathrm{softmax}\big(\mathrm{KeepTopK}(H(x), k)\big)$$
+<ul>
+  <li>$x$ is the token's hidden vector; $W_g$ gives one clean score per expert.</li>
+  <li>$\varepsilon_i$ is fresh standard normal noise, scaled by a learned amount ($W_{\text{noise}}$, made positive by softplus). The noise shakes up which experts win, which helps spread the load during training.</li>
+  <li>$\mathrm{KeepTopK}$ keeps the $k$ largest scores and sets the rest to $-\infty$, so after the softmax they get exactly 0 weight and their experts never run.</li>
+</ul>
+<p><strong>GShard</strong> (Lepikhin et al., 2020) brought this to the Transformer: every other MLP became an MoE layer with <strong>top-2</strong> gating, and the experts were spread over 2,048 TPU v3 cores to train a 600-billion-parameter translation model. GShard also introduced the expert <strong>capacity</strong> and an auxiliary balancing loss that later work kept. Then the <strong>Switch Transformer</strong> (Fedus, Zoph &amp; Shazeer, 2021) asked whether one expert is enough. With $k = 1$, the layer is just</p>
+$$p = \mathrm{softmax}(W_r x), \qquad i^* = \arg\max_i p_i, \qquad y = p_{i^*}\,E_{i^*}(x)$$
+<p>Top-1 halves the expert compute and the token traffic of top-2, and it worked: Switch scaled to 1.6 trillion parameters. Keeping $p_{i^*}$ as a multiplier is essential. The $\arg\max$ has no gradient, but $p_{i^*}$ does, so the loss can tell the router whether that expert helped.</p>
+
+<h3>Worked example: top-1 versus top-2</h3>
+<p>A router gives logits $(2.0,\ 1.0,\ 0.5,\ -1.0)$ for four experts.</p>
+<ol class="steps">
+  <li>Softmax: $p \approx (0.609,\ 0.224,\ 0.136,\ 0.030)$.</li>
+  <li><strong>Switch, top-1:</strong> expert 1 runs, and $y = 0.609\,E_1(x)$. The gates don't sum to 1; that's fine, the residual connection carries the rest.</li>
+  <li><strong>Top-2, renormalized</strong> (as in Mixtral): experts 1 and 2 run with gates $0.609/0.833 = 0.731$ and $0.224/0.833 = 0.269$.</li>
+  <li>Check: a softmax over just the two kept logits, $e^{2}/(e^{2} + e^{1}) = 0.731$, gives the same gates. Renormalizing the full softmax and "top-k, then softmax" are identical.</li>
+</ol>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ar-1.webp" alt="A conductor robot at a train station sends each passenger to just two of eight platforms, keeping all platforms evenly busy while some rest." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A busy train station has <strong>eight platforms</strong> and a <strong>conductor robot</strong> at the entrance. Each passenger who arrives gets sent to just <strong>two</strong> platforms that suit their trip. The other six platforms can rest for that passenger.</p>
+      <p>A good conductor also watches the crowds. If everyone gets sent to platform 3, it overflows and people miss their train. So the robot learns to <strong>keep every platform evenly busy</strong>.</p>
+      <p>Where it breaks: a real router isn't told where anyone is going. It learns its rules from scratch, there's a separate conductor at every layer, and the "platforms" end up handling patterns in words that no one planned.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In Shazeer's noisy top-k gating, what does KeepTopK do before the softmax?</p>
+  <ol class="q-src">
+    <li>Sets every score outside the top $k$ to $-\infty$, so those experts get exactly zero weight and are never run</li>
+    <li>Adds noise to the top $k$ scores only</li>
+    <li>Divides the scores by $k$</li>
+    <li>Picks $k$ experts at random</li>
+  </ol>
+  <div class="q-explain">$e^{-\infty} = 0$, so the softmax spreads all the weight over the $k$ survivors. Zero weight means the expert can be skipped entirely, which is where the compute saving comes from.</div>
+</div></div>
+
+<h2>Balancing the load: the auxiliary loss, capacity and dropped tokens</h2>
+<p><a href="m5-3.html">M5.3</a> showed that routers collapse onto favourite experts unless something pushes back. Shazeer et al. pushed back with an "importance" loss, the squared coefficient of variation of each expert's total gate weight. Switch simplified it to the form most systems still use:</p>
+$$\mathcal{L}_{\text{aux}} = \alpha \cdot E \sum_{i=1}^{E} f_i\,P_i$$
+<p>$E$ is the number of experts, $f_i$ the fraction of the batch's tokens dispatched to expert $i$ (a hard count, no gradient), $P_i$ the router's mean probability for expert $i$ (smooth, so the gradient flows through it), and $\alpha$ a small weight (0.01 in Switch). With top-$k$ routing, $f_i$ counts assignments, normalized so the $f_i$ still sum to 1.</p>
+
+<h3>Worked example</h3>
+<p>Four experts, top-1, a batch of 8 tokens. Counts $(4, 2, 1, 1)$ give $f = (0.5,\ 0.25,\ 0.125,\ 0.125)$, and the mean router probabilities are $P = (0.4,\ 0.3,\ 0.15,\ 0.15)$.</p>
+<ol class="steps">
+  <li>$\sum_i f_i P_i = 0.2 + 0.075 + 0.01875 + 0.01875 = 0.3125$.</li>
+  <li>Times $E = 4$: $1.25$. (Then times $\alpha$; we'll leave it out.)</li>
+  <li>Perfect balance, $f_i = P_i = 0.25$: $4 \times 4 \times 0.0625 = 1.0$, the minimum. The gradient on $P_1$ is $\alpha E f_1 = 2\alpha$, the biggest of the four, so the router lowers expert 1's probability most.</li>
+</ol>
+
+<p>Balance on average isn't enough, because hardware needs fixed-size buffers. Each expert gets a <strong>capacity</strong>:</p>
+$$C = \text{capacity factor} \times \frac{k \times T}{E}$$
+<p>where $T$ is the number of tokens in the batch (or group) and $k \times T$ the number of assignments. With $T = 1024$, $k = 2$, $E = 8$ and capacity factor 1.25, each expert takes $C = 1.25 \times 2048/8 = 320$ slots. If 400 assignments arrive at one expert, <strong>80 are dropped</strong>: those tokens skip that expert and only the residual stream carries them through the layer. Switch typically trained with factors of 1.0 to 1.25. Raising the factor drops fewer tokens but pads every expert's buffer, wasting compute and memory.</p>
+<p>Two later ideas sidestep dropping. <strong>Dropless</strong> MoE (MegaBlocks; Gale et al., 2022) uses block-sparse kernels that handle any number of tokens per expert. <strong>Expert-choice routing</strong> (Zhou et al., 2022) flips the choice: each expert picks its top-$C$ tokens, so loads are perfectly even by construction, but a token may get zero experts, and the expert's choice depends on other tokens in the batch, which is awkward for token-by-token generation.</p>
+
+<section class="playground" id="ar1-router" aria-labelledby="ar1pg">
+  <h3 id="ar1pg">Playground: a toy router</h3>
+  <p class="math-note" style="margin:0">64 tokens, 8 experts. The router starts with favourites. Change $k$ and the capacity factor, then switch on the balance loss: it trains the router for 400 steps on $E\sum_i f_i P_i$ and shows a fresh batch.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr))">
+    <label><span>Experts per token, $k$ = <output data-out="k">2</output></span>
+      <input type="range" data-in="k" min="1" max="4" step="1" value="2">
+    </label>
+    <label><span>Capacity factor = <output data-out="cf">1.25</output></span>
+      <input type="range" data-in="cf" min="0" max="4" step="1" value="2">
+    </label>
+  </div>
+  <div class="pg-buttons" style="margin-top:12px">
+    <button type="button" class="btn btn-primary" data-act="aux" aria-pressed="false">Balance loss: off</button>
+    <button type="button" class="btn" data-act="batch">New batch</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</section>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>Four experts, top-1, $f = (0.375,\ 0.375,\ 0.125,\ 0.125)$ and $P = (0.35,\ 0.35,\ 0.15,\ 0.15)$. $E \sum_i f_i P_i =$ <span class="blank" data-answer="1.2" data-tol="0.005" data-hint="0.375 × 0.35 twice, plus 0.125 × 0.15 twice, then × 4."></span></li>
+    <li>$T = 512$ tokens, $E = 16$ experts, $k = 2$, capacity factor 1.0. Capacity per expert: <span class="blank" data-answer="64" data-tol="0.5" data-hint="1.0 × 2 × 512 / 16."></span></li>
+    <li>One expert receives 90 assignments. How many are dropped? <span class="blank" data-answer="26" data-tol="0.5" data-hint="Everything above the capacity of 64."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">You raise the capacity factor from 1.0 to 2.0. What do you gain and what do you pay?</p>
+  <ol class="q-src">
+    <li>Better balance, paid for with a larger auxiliary loss</li>
+    <li>Fewer active parameters, paid for with more memory</li>
+    <li>Nothing changes unless $k$ changes too</li>
+    <li>Fewer dropped tokens, paid for with bigger padded buffers: more memory and wasted compute on empty slots</li>
+  </ol>
+  <div class="q-explain">Capacity is a buffer size. Doubling it means an expert can absorb twice the average load before dropping, but every expert reserves that space whether it's used or not.</div>
+</div></div>
+
+<h2>Stability and specialization: the z-loss, and what experts learn</h2>
+<p>Large sparse models were notoriously unstable: loss spikes that never recovered. The Switch paper's fixes included computing the router in float32 even when the rest of the model ran in bfloat16 ("selective precision"), and a smaller weight initialization. ST-MoE (Zoph et al., 2022, "Designing Effective Sparse Expert Models") traced many spikes to the router's logits growing large, and added the <strong>router z-loss</strong>:</p>
+$$\mathcal{L}_z = \frac{1}{B}\sum_{t=1}^{B}\Big(\log \sum_{j=1}^{E} e^{z_{t,j}}\Big)^2$$
+<p>$z_{t,j}$ is token $t$'s router logit for expert $j$, and $B$ the number of tokens. The inner term is the log-sum-exp, roughly the largest logit. Squaring it penalizes big logits, which keeps the exponentials in a range where low-precision arithmetic is accurate. ST-MoE used a weight of 0.001 and reported that it fixed instability without hurting quality.</p>
+
+<h3>Worked example</h3>
+<ol class="steps">
+  <li>Logits $(2, 1, 0, -1)$: $\log(e^2 + e^1 + e^0 + e^{-1}) \approx 2.44$, so this token adds $2.44^2 \approx 5.95$.</li>
+  <li>The same logits ×10, $(20, 10, 0, -10)$: log-sum-exp $\approx 20.0$, adding about 400. The softmax has gone from $(0.64, 0.24, 0.09, 0.03)$ to essentially one-hot, and the exponentials are now huge numbers where rounding errors bite. The z-loss pushes back hard on exactly this.</li>
+</ol>
+
+<p><strong>So what do the experts learn?</strong> Less than the name suggests. ST-MoE inspected its encoder experts and found they specialized in token types: one handled punctuation, others proper nouns, numbers or verbs. Decoder experts showed much less specialization, and in multilingual training, experts did <em>not</em> specialize by language. The Mixtral paper (Jiang et al., 2024) checked whether experts specialize by topic across sources like arXiv papers, biology and philosophy, and found no obvious pattern. What it did find was syntax: tokens like <code>self</code> in Python or indentation tended to go to the same experts, and consecutive tokens were often routed together. A fair summary, hedged because analyses differ by model and layer: <strong>experts tend to carve up token- and syntax-level patterns, not human subjects</strong>. That's also why "the medicine expert" is a myth.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">What does the router z-loss penalize?</p>
+  <ol class="q-src">
+    <li>Uneven loads across experts</li>
+    <li>Large router logits, via the squared log-sum-exp per token, which keeps the router numerically stable</li>
+    <li>Tokens that get dropped</li>
+    <li>Experts that specialize too much</li>
+  </ol>
+  <div class="q-explain">Balancing is the auxiliary loss's job. The z-loss is about scale: big logits make the softmax brittle and the arithmetic inaccurate in low precision, which ST-MoE linked to training instability.</div>
+</div></div>
+
+<h2>Fine-grained, shared and bias-balanced experts: DeepSeekMoE to V3</h2>
+<p>DeepSeekMoE (Dai et al., 2024) argued that a few big experts each have to learn a muddle of unrelated things. Its two fixes:</p>
+<ul>
+  <li><strong>Fine-grained experts.</strong> Split each expert into $m$ smaller ones (hidden size divided by $m$) and activate $m$ times as many. Compute stays the same, but choosing 8 of 64 small experts allows $\binom{64}{8} = 4{,}426{,}165{,}368$ combinations, versus $\binom{16}{2} = 120$ for 2 of 16.</li>
+  <li><strong>Shared experts.</strong> A few experts that <em>every</em> token uses, to hold common knowledge, so routed experts don't each relearn it. To keep compute fixed, one fewer routed expert is activated per shared one.</li>
+</ul>
+<p>DeepSeekMoE 16B (16.4B total, about 2.8B active) matched Llama 2 7B on most benchmarks with about 40% of its computation.</p>
+
+<figure class="anim wide" data-anim="ar-1-fine"></figure>
+
+<p>DeepSeek-V3 (DeepSeek-AI, 2024) kept both ideas: 1 shared plus 256 routed experts per layer, 8 routed per token. It scores experts with a sigmoid, $s_i = \sigma(u^\top e_i)$, and also caps each token at 4 server nodes to limit traffic (<a href="ar-2.html">AR.2</a>). Its balancing is <strong>auxiliary-loss-free</strong> (Wang et al., 2024): each expert has a bias $b_i$ that is used <em>only</em> to choose the top-k, by ranking $s_i + b_i$. The gate values still use $s_i$, normalized over the chosen experts. After each step, $b_i$ drops by $\gamma$ if expert $i$ was overloaded and rises by $\gamma$ if underloaded ($\gamma = 0.001$ for most of training). No balancing gradient fights the language-modelling gradient; V3 keeps only a tiny sequence-level balance loss (weight 0.0001) as a safety net.</p>
+
+<h3>Worked example: counting DeepSeek-V3</h3>
+<p>From the released config: hidden size 7168, 61 layers (the first 3 have a dense MLP), routed and shared experts with hidden size 2048.</p>
+<ol class="steps">
+  <li><strong>One expert</strong> (SwiGLU, three matrices): $3 \times 7168 \times 2048 \approx 44.0$M.</li>
+  <li><strong>All experts:</strong> $58$ MoE layers $\times\ 257 \times 44.0\text{M} \approx 656.5$B.</li>
+  <li><strong>Everything else:</strong> attention (multi-head latent attention) $\approx 11.4$B, the 3 dense MLPs $\approx 1.2$B, embeddings and output head $\approx 1.9$B, routers $\approx 0.1$B. <strong>Total $\approx 671$B.</strong></li>
+  <li><strong>Active:</strong> $58 \times 9 \times 44.0\text{M} \approx 23.0$B in experts (8 routed + 1 shared), plus the same $\approx 14.6$B of everything else, $\approx 37.6$B. DeepSeek reports 37B.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>A model has 24 MoE layers with hidden size 2048. Each layer has 64 routed experts and 1 shared expert, each a SwiGLU MLP with hidden size 1024. Each token uses 6 routed experts plus the shared one. Attention, embeddings and the rest add 2B.</p>
+  <ol class="steps">
+    <li>Parameters in one expert, in millions: <span class="blank" data-answer="6.29" data-tol="0.02" data-hint="3 × 2048 × 1024."></span></li>
+    <li>Total parameters, in billions: <span class="blank" data-answer="11.8" data-tol="0.05" data-hint="2B + 24 × 65 × 6.29M."></span></li>
+    <li>Active parameters per token, in billions: <span class="blank" data-answer="3.06" data-tol="0.03" data-hint="2B + 24 × 7 × 6.29M."></span></li>
+  </ol>
+</section>
+
+<div class="why"><strong>Why this matters in practice:</strong> as of 2026, the router recipe in many open models looks like DeepSeek's: many small experts, top-8 or so, often one shared expert, sigmoid or softmax scores, and some form of bias-based or very light loss-based balancing. Kimi K2 (Moonshot AI, 2025), for example, reports 384 experts with 8 active plus 1 shared. When a model card says "A22B" or "37B active", the routing design is what makes that number small.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">In DeepSeek-V3's auxiliary-loss-free balancing, what is the per-expert bias $b_i$ used for?</p>
+  <ol class="q-src">
+    <li>It is added to the gate value that multiplies the expert's output</li>
+    <li>It is learned by backpropagation like any other weight</li>
+    <li>Only for choosing which experts win the top-k; it is nudged by $\pm\gamma$ after each step depending on whether the expert was over- or under-loaded</li>
+    <li>It decides how many tokens each expert may drop</li>
+  </ol>
+  <div class="q-explain">Selection uses $s_i + b_i$; the output still uses gates from $s_i$. So balancing changes <em>who</em> gets tokens without distorting <em>how much</em> each expert's output counts, and without an extra gradient.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does an MoE need both a balancing mechanism and a capacity limit, and how does DeepSeek-V3 balance without an auxiliary loss?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Routers drift toward favourite experts, which starves the others and overloads the GPUs holding the favourites, so something must push the load toward even (the Switch loss $\alpha E\sum f_i P_i$, minimized at uniform routing). Even with balance on average, each batch fluctuates, and hardware needs fixed buffers, so each expert takes at most $C = \text{cf} \times kT/E$ tokens and the overflow is dropped onto the residual path. DeepSeek-V3 instead adds a per-expert bias only when ranking experts for the top-k, lowering it for overloaded experts and raising it for idle ones after each step, so no extra gradient competes with the language-modelling loss.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A batch has 2,048 tokens, 32 experts, top-2 routing and a capacity factor of 1.25. What is each expert's capacity?</p>
+    <ol class="q-src">
+      <li>64</li>
+      <li>160</li>
+      <li>80</li>
+      <li>128</li>
+    </ol>
+    <div class="q-explain">$C = 1.25 \times 2 \times 2048 / 32 = 160$. 128 forgets the capacity factor, and 80 forgets that top-2 doubles the number of assignments.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which statement about expert specialization is best supported by the published analyses (ST-MoE, Mixtral)?</p>
+    <ol class="q-src">
+      <li>Experts mostly pick up token- and syntax-level patterns (punctuation, numbers, code indentation) rather than clean topics like "biology"</li>
+      <li>Each expert becomes an expert in one human subject</li>
+      <li>In multilingual models, each expert handles one language</li>
+      <li>Experts are assigned their specialty by the engineers before training</li>
+    </ol>
+    <div class="q-explain">ST-MoE saw token-type specialization in encoder experts and no language specialization; Mixtral saw no obvious topic pattern but clear syntactic regularities. Results vary by model and layer, so treat any "topic expert" story with suspicion.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Interleaving with <a href="m2-5.html">M2.5</a>: the Switch Transformer trained in bfloat16 but kept the router's computation in float32. Why the router?</p>
+    <ol class="q-src">
+      <li>The router has the most parameters</li>
+      <li>bfloat16 can't represent probabilities</li>
+      <li>It made the experts run faster</li>
+      <li>The router's softmax exponentiates its logits, and bfloat16's short mantissa (about 2–3 significant decimal digits) makes those exponentials and the resulting routing decisions noisy and unstable</li>
+    </ol>
+    <div class="q-explain">bf16 keeps fp32's range but only 8 bits of precision (7 stored). A softmax amplifies rounding errors in its inputs, and the router is tiny, so computing it in fp32 costs almost nothing. The z-loss attacks the same problem by keeping the logits small.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why does DeepSeekMoE split experts into many smaller ones while activating proportionally more of them?</p>
+    <ol class="q-src">
+      <li>To reduce the total number of parameters</li>
+      <li>To reduce the compute per token by 4×</li>
+      <li>To keep compute the same while allowing far more combinations of experts, so each expert can specialize more narrowly</li>
+      <li>Because small experts never need load balancing</li>
+    </ol>
+    <div class="q-explain">8 of 64 small experts costs about what 2 of 16 big ones did, but the number of combinations grows from 120 to about 4.4 billion. More flexible combinations let knowledge be split more finely.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Sparse gating (Shazeer et al., 2017) keeps the top-$k$ scores; GShard (2020) used top-2 in Transformers; Switch (2021) showed top-1 works, with output $p_{i^*} E_{i^*}(x)$ so the router gets a gradient.</li>
+    <li>Balance with $\alpha E \sum_i f_i P_i$ (minimum 1 at uniform routing); cap each expert at $C = \text{cf} \times kT/E$, and overflow tokens are <strong>dropped</strong> onto the residual path.</li>
+    <li>The <strong>router z-loss</strong> squares the log-sum-exp of the logits to keep routing numerically stable.</li>
+    <li>Experts tend to specialize in token and syntax patterns, not human topics.</li>
+    <li>DeepSeek's recipe: <strong>fine-grained</strong> experts, <strong>shared</strong> experts and <strong>bias-based</strong> balancing. DeepSeek-V3: about 671B total, 37B active.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Python</div>
+    <p>Build a top-k router in NumPy, compute the load-balancing loss and z-loss, enforce capacity and count dropped tokens, then train a tiny MoE on a toy task with and without balancing and watch the router collapse. About 25 minutes, runs free in your browser in under a minute of CPU time.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="ar-1-moe-routing.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ar-1-a","front":"Write Switch (top-1) routing, and say why the output is scaled by the router probability.","back":"$p = \\mathrm{softmax}(W_r x)$, $i^* = \\arg\\max_i p_i$, $y = p_{i^*} E_{i^*}(x)$. The argmax has no gradient; scaling by $p_{i^*}$ lets the loss train the router."},
+  {"id":"ar-1-b","front":"Compute $E\\sum_i f_i P_i$ for $f = (0.5, 0.25, 0.125, 0.125)$, $P = (0.4, 0.3, 0.15, 0.15)$. What is the minimum?","back":"$4 \\times 0.3125 = 1.25$. The minimum is 1, at perfectly uniform routing ($f_i = P_i = 1/E$)."},
+  {"id":"ar-1-c","front":"Expert capacity formula, and what happens to overflow?","back":"$C = \\text{capacity factor} \\times kT/E$. Assignments beyond $C$ are dropped: the token skips that expert and only the residual connection carries it through the layer. Dropless kernels (MegaBlocks) avoid this."},
+  {"id":"ar-1-d","front":"What is the router z-loss and why use it?","back":"$\\frac{1}{B}\\sum_t (\\log\\sum_j e^{z_{t,j}})^2$ (ST-MoE, Zoph et al., 2022; weight ≈ 0.001). It keeps router logits small so the softmax stays numerically stable in low precision."},
+  {"id":"ar-1-e","front":"Fine-grained and shared experts (DeepSeekMoE): what and why?","back":"Split experts into $m$ smaller ones and activate $m\\times$ as many (same compute, far more combinations: $\\binom{64}{8} \\approx 4.4$B vs $\\binom{16}{2} = 120$). Shared experts are always on and hold common knowledge."},
+  {"id":"ar-1-f","front":"How does DeepSeek-V3 balance experts without an auxiliary loss?","back":"A per-expert bias $b_i$ is added to scores only for top-k selection; after each step $b_i \\mathrel{-}= \\gamma$ if overloaded, $+\\gamma$ if underloaded ($\\gamma = 0.001$). Gates still come from the raw scores. 671B total, 37B active."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ar-1-fine.js"></script>
+<script src="../assets/js/anims/ar-1-router-playground.js"></script>
+</body>
+</html>

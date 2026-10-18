@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ar-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Training &amp; serving MoE at scale · LLMs, Animated</title>
+<meta name="description" content="How mixture-of-experts models run on many GPUs: expert parallelism and the all-to-all exchange, communication versus compute, serving with all experts in memory, batching and uneven expert load, offloading and quantizing experts, and what MoE scaling laws say.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Training &amp; serving MoE at scale</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Beyond the dense transformer</span></div>
+<p class="lede">A mixture of experts saves arithmetic, but it doesn't make the parameters disappear. Hundreds of experts have to live somewhere, usually on many GPUs, and every MoE layer becomes a burst of network traffic. This lesson follows a token across the machines, counts the bytes, and shows why serving MoE is a batching and memory puzzle.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Trace expert parallelism through its two all-to-all exchanges, and compute the bytes a token sends per MoE layer.</li>
+    <li>Compare an MoE layer's compute with its communication, and explain node-limited routing and overlap.</li>
+    <li>Estimate how many experts a decode batch touches, and choose between more GPUs, offloading and quantization for serving.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="ar-1.html">AR.1 MoE deep dive</a> (routers, capacity, fine-grained experts) and <a href="m2-5.html">M2.5 Distributed training &amp; mixed precision</a> (data, tensor and pipeline parallelism, all-reduce). Helpful but optional: <a href="m5-1.html">M5.1 Quantization</a> and <a href="m5-6.html">M5.6 Batching &amp; serving metrics</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Experts are spread over 8 GPUs. In an MoE layer, each GPU's tokens must reach whichever GPUs hold their chosen experts. Which communication pattern is that?</p>
+    <ol class="q-src">
+      <li>All-reduce: every GPU ends with the sum of everyone's data</li>
+      <li>Broadcast: one GPU sends the same data to all</li>
+      <li>No communication; each GPU only uses its own experts</li>
+      <li>All-to-all: every GPU sends a different slice of its data to every other GPU</li>
+    </ol>
+    <div class="q-explain">Each GPU has a different set of tokens for each destination, so everyone sends personalized packets to everyone. That's an all-to-all, and an MoE layer needs two of them: one to dispatch tokens, one to bring results back.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A model has 256 experts per layer and each token uses 8. You decode a batch of 64 sequences at once, one token each. Roughly what share of the experts in a layer does that step use?</p>
+    <ol class="q-src">
+      <li>Most of them, close to 90%</li>
+      <li>About 3%, since each token uses 8 of 256</li>
+      <li>Exactly 25%</li>
+      <li>About 50%</li>
+    </ol>
+    <div class="q-explain">Each token touches 8/256 ≈ 3%, but 64 different tokens pick different experts. If routing were uniform, the share untouched would be $(1 - 8/256)^{64} \approx 13\%$, so about 87% get used. Batching erases MoE's "read only a few experts" advantage.</div>
+  </div>
+</section>
+
+<h2>Expert parallelism and the all-to-all</h2>
+<p>When GShard (Lepikhin et al., 2020) trained a 600-billion-parameter MoE across 2,048 TPU cores, the experts could not possibly sit on one chip. Its answer, now called <strong>expert parallelism</strong> (EP), is to give each device a different subset of the experts. Everything else in the model runs the usual way, typically data-parallel, so each device holds its own batch of tokens (<a href="m2-5.html">M2.5</a>). Then, in every MoE layer:</p>
+<ol class="steps">
+  <li><strong>Route:</strong> each device runs the router on its own tokens.</li>
+  <li><strong>Dispatch (all-to-all #1):</strong> each token's hidden vector is sent to the devices holding its $k$ experts.</li>
+  <li><strong>Compute:</strong> each device runs its experts on whatever arrived, as one batched matrix multiply per expert.</li>
+  <li><strong>Combine (all-to-all #2):</strong> outputs are sent back to each token's home device and summed with the gate weights.</li>
+</ol>
+<p>The backward pass repeats the pattern in reverse, so training does four all-to-alls per MoE layer per step. Unlike the all-reduce of data parallelism, which sums identical-shaped tensors, an all-to-all sends <em>different</em> data to each destination, and how much depends on what the router chose.</p>
+
+<figure class="anim wide" data-anim="ar-2-alltoall"></figure>
+
+<h3>Worked example: bytes per token</h3>
+<p>A Mixtral-like layer: hidden size $d = 4096$, top-2 routing, activations in bf16 (2 bytes).</p>
+<ol class="steps">
+  <li><strong>Dispatch:</strong> $k \times d \times 2 = 2 \times 4096 \times 2 = 16{,}384$ bytes (16 KiB) per token.</li>
+  <li><strong>Combine:</strong> the same again, so 32 KiB per token per MoE layer, forward only.</li>
+  <li><strong>Per device:</strong> with 4,096 tokens per device, that's $4096 \times 32$ KiB $= 128$ MiB per layer, and with 32 MoE layers, about 4 GiB per forward pass. (A slightly high estimate: tokens whose expert happens to be local don't travel.)</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>DeepSeek-V3-like layer: $d = 7168$, 8 routed experts per token. DeepSeek dispatches activations in FP8 (1 byte) and combines in BF16 (2 bytes).</p>
+  <ol class="steps">
+    <li>Dispatch per token per layer, in KiB: <span class="blank" data-answer="56" data-tol="0.5" data-hint="8 × 7168 × 1 byte, divided by 1024."></span></li>
+    <li>Combine per token per layer, in KiB: <span class="blank" data-answer="112" data-tol="0.5" data-hint="Same count, 2 bytes each."></span></li>
+  </ol>
+</section>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>Imagine a big school where every class writes letters, and each letter needs a stamp from a special teacher. There are lots of special teachers, and they're spread across different classrooms.</p>
+      <p>So twice an hour, every class sends runners down the hall carrying letters to the right classrooms, the teachers stamp them, and the runners carry them all back. The stamping is quick. The <strong>running back and forth in a crowded hallway</strong> is what takes time, and if one teacher gets a huge pile, everybody waits for that classroom.</p>
+      <p>Where it breaks: real "letters" are lists of thousands of numbers, the hallway is a network cable with a fixed speed, and the runners leave all at once in a carefully choreographed exchange.</p>
+    </div>
+  </div>
+</details>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why does an expert-parallel MoE layer need <em>two</em> all-to-alls in the forward pass?</p>
+  <ol class="q-src">
+    <li>One for the router weights and one for the expert weights</li>
+    <li>One to send tokens to the devices holding their experts, and one to bring the expert outputs back to each token's home device</li>
+    <li>One for even layers and one for odd layers</li>
+    <li>To average the gradients twice</li>
+  </ol>
+  <div class="q-explain">Tokens live with their sequence (for attention), experts live on fixed devices. Dispatch moves tokens to experts, combine moves results home. The weights themselves don't move.</div>
+</div></div>
+
+<h2>Communication versus compute</h2>
+<p>Is that traffic a problem? Compare the work an expert does on a token with the bytes the token costs to move. For one token at one expert (SwiGLU, hidden size $d_{ff}$), the forward pass does about $2 \times 3 \times d \times d_{ff}$ FLOPs, while dispatch plus combine move $2 \times d \times b$ bytes, with $b$ bytes per number. The ratio is</p>
+$$\frac{\text{FLOPs}}{\text{byte}} \approx \frac{6\,d\,d_{ff}}{2\,d\,b} = \frac{3\,d_{ff}}{b}$$
+<p>It depends only on the expert's hidden size, not the model width. Two cases in bf16:</p>
+<ul>
+  <li><strong>Big experts</strong> (Mixtral, $d_{ff} = 14{,}336$): $3 \times 14336 / 2 \approx 21{,}500$ FLOPs per byte.</li>
+  <li><strong>Fine-grained experts</strong> (DeepSeek-V3, $d_{ff} = 2048$): $3 \times 2048 / 2 = 3{,}072$ FLOPs per byte.</li>
+</ul>
+<p>Now the hardware. An H100 GPU's spec sheet gives roughly 1,000 TFLOP/s of dense bf16 compute, while a 400 Gb/s InfiniBand link carries 50 GB/s. To keep the GPU busy over that link you need about $10^{15} / (5 \times 10^{10}) = 20{,}000$ FLOPs per byte. Big experts roughly break even across servers; fine-grained experts would spend about 6× longer communicating than computing. Inside one server, NVLink is about 9× faster, so the same traffic is much cheaper. (These are peak numbers; real systems reach less of both.)</p>
+<p>That is why large MoE training leans on a few tricks:</p>
+<ul>
+  <li><strong>Keep traffic local.</strong> DeepSeek-V3 limits each token to experts on at most 4 servers: it crosses InfiniBand at most once per server and then fans out over NVLink.</li>
+  <li><strong>Send fewer bytes:</strong> FP8 dispatch, as in the faded example above.</li>
+  <li><strong>Overlap.</strong> Split the work into micro-batches so one computes while another is on the network. DeepSeek's DualPipe schedule overlaps forward and backward chunks so that, by their report, most all-to-all time is hidden.</li>
+  <li><strong>Balance.</strong> An all-to-all finishes only when the slowest device does, so one overloaded expert stalls everyone. That is the hardware reason for the balancing in <a href="ar-1.html">AR.1</a>.</li>
+</ul>
+<p>Specialized libraries (such as DeepSeek's open-source DeepEP for the all-to-alls) and "grouped GEMM" kernels that run many small expert matrix multiplies at once are now standard parts of MoE training stacks.</p>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <ol class="steps">
+    <li>Experts with $d_{ff} = 4096$, bf16. FLOPs per byte moved: <span class="blank" data-answer="6144" data-tol="1" data-hint="3 × d_ff / b with b = 2."></span></li>
+    <li>The link needs about 20,000 FLOPs per byte to keep up. Communication takes about how many times as long as compute? <span class="blank" data-answer="3.26" data-tol="0.06" data-hint="20,000 / 6,144."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why do fine-grained experts make expert parallelism <em>harder</em> on the network?</p>
+  <ol class="q-src">
+    <li>They have more parameters in total</li>
+    <li>Their router is bigger</li>
+    <li>Each token visits more, smaller experts, so it does less arithmetic per byte it sends ($3d_{ff}/b$ shrinks with $d_{ff}$)</li>
+    <li>They need all-reduce instead of all-to-all</li>
+  </ol>
+  <div class="q-explain">Top-8 of tiny experts sends a token's vector 8 times for the same total compute that top-2 of big experts does with 2 sends. Hence DeepSeek's node limit, FP8 dispatch and heavy overlap.</div>
+</div></div>
+
+<h2>Serving MoE: memory, batching and uneven load</h2>
+<p><strong>Memory first.</strong> Any token may pick any expert, so all of them must be ready. DeepSeek-V3's 671B parameters in FP8 are about 671 GB before any KV cache: more than a full server of 8 × 80 GB GPUs, and most of a server of 8 × 141 GB GPUs (1,128 GB). Mixtral 8x7B computes like a 13B model but needs about 93 GB in bf16.</p>
+<p><strong>Then batching.</strong> Decoding one token is limited by how fast weights stream from memory (<a href="m5-6.html">M5.6</a>). A single sequence reads only its active experts, which is MoE's speed advantage. But a batch of $B$ tokens picks experts independently. If routing were uniform, the share of a layer's experts that <em>no</em> token picks is $(1 - k/E)^B$, so the share that must be read is</p>
+$$\text{touched} = 1 - \left(1 - \frac{k}{E}\right)^{B}$$
+<h3>Worked example</h3>
+<p>$E = 256$ experts, $k = 8$:</p>
+<ol class="steps">
+  <li>$B = 1$: $8/256 \approx 3.1\%$ of experts read.</li>
+  <li>$B = 16$: $1 - 0.96875^{16} \approx 39.8\%$.</li>
+  <li>$B = 64$: $1 - 0.96875^{64} \approx 86.9\%$, and each touched expert sees on average only $64 \times 8 / 256 = 2$ tokens: tiny, inefficient matrix multiplies.</li>
+</ol>
+<p>So at real batch sizes the whole model streams through memory every step, yet each expert has almost nothing to do. Large deployments fix this by spreading experts over many GPUs so each GPU holds few experts and sees many tokens. DeepSeek's V3 report describes a decoding setup on 320 GPUs with one expert per GPU (plus GPUs for redundant and shared experts). Real routing isn't uniform, so some experts run hot: serving systems duplicate the busiest ones ("redundant experts", DeepSeek's open-source EPLB balancer) to keep any GPU from becoming the straggler.</p>
+<p><strong>On smaller hardware</strong>, two tricks dominate:</p>
+<ul>
+  <li><strong>Offloading:</strong> keep experts in CPU memory and copy them to the GPU when needed, caching the recently used ones (e.g. Eliseev &amp; Mazur, 2023, ran Mixtral this way on consumer GPUs). Runtimes such as llama.cpp can likewise keep expert weights on the CPU while attention stays on the GPU. It works because routing is sparse and consecutive tokens often reuse experts, but the PCIe link (tens of GB/s) makes it far slower than an all-GPU setup.</li>
+  <li><strong>Quantizing experts</strong> (<a href="m5-1.html">M5.1</a>): experts are the vast majority of the weights, so shrinking them pays off most. OpenAI's gpt-oss-120b (2025) ships its MoE weights in a 4-bit format (MXFP4, about 4.25 bits per parameter), which lets its roughly 117B parameters fit on one 80 GB GPU. QMoE (Frantar &amp; Alistarh, 2023) went further, compressing the 1.6-trillion-parameter Switch model to under 1 bit per parameter.</li>
+</ul>
+
+<section class="card" aria-labelledby="ft3">
+  <div class="card-label" id="ft3">Your turn · faded example</div>
+  <p>Mixtral-style routing, $E = 8$, $k = 2$, uniform routing assumed.</p>
+  <ol class="steps">
+    <li>Share of experts touched by a batch of 4 tokens (as a decimal): <span class="blank" data-answer="0.684" data-tol="0.005" data-hint="1 − (1 − 2/8)⁴ = 1 − 0.75⁴."></span></li>
+    <li>Average tokens per expert for a batch of 64 tokens: <span class="blank" data-answer="16" data-tol="0.1" data-hint="64 × 2 / 8."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">Why does MoE's "only a few experts are read" speed advantage fade as the decode batch grows?</p>
+  <ol class="q-src">
+    <li>Different tokens pick different experts, so with enough tokens nearly every expert's weights must be read each step</li>
+    <li>The router gets slower with batch size</li>
+    <li>Larger batches use top-1 routing</li>
+    <li>The KV cache stores the experts</li>
+  </ol>
+  <div class="q-explain">With $E = 256$ and $k = 8$, a batch of 64 already touches about 87% of experts if routing is uniform. The MoE then costs about as much memory bandwidth per step as a dense model of its total size, while each expert gets very few tokens.</div>
+</div></div>
+
+<h2>Does MoE scale better? Why the open frontier went sparse</h2>
+<p>For a fixed training budget, is it better to spend it on a dense model or an MoE? Clark et al. (2022, "Unified Scaling Laws for Routed Language Models", DeepMind) fitted loss as a function of both parameter count and number of experts, across models up to hundreds of experts and hundreds of billions of parameters, and summarized routing as an "effective parameter count". Their fits suggested routing helps, but by less as the dense base model grows. Ludziejewski, Krajewski et al. (2024, "Scaling Laws for Fine-Grained Mixture of Experts") added expert size ("granularity") and training length to the fit and reported the opposite trend: tuned properly, MoE's efficiency advantage over dense <em>grows</em> with budget, and experts the size of a full dense MLP are rarely the best choice. Treat the exact exponents as setup-dependent; the practical consensus is that well-tuned, fine-grained MoE beats dense at equal training compute.</p>
+<p>The market moved accordingly. As of late 2026, many leading open-weight models are MoE, usually with many small experts and a shared expert:</p>
+<ul>
+  <li><strong>DeepSeek-V3 and R1</strong> (DeepSeek, Dec 2024 / Jan 2025): 671B total, 37B active. The report lists 2.788M H800 GPU-hours for full training on 14.8T tokens.</li>
+  <li><strong>Llama 4</strong> (Meta, April 2025): Scout with 109B total and 17B active over 16 experts; Maverick with 400B total and 17B active over 128.</li>
+  <li><strong>Qwen3-235B-A22B</strong> (Alibaba, 2025): 235B total, 22B active, as the name says.</li>
+  <li><strong>Kimi K2</strong> (Moonshot AI, 2025): about 1T total, 32B active, 384 experts with 8 routed plus 1 shared.</li>
+  <li><strong>gpt-oss-120b</strong> (OpenAI, Aug 2025): about 117B total, 5.1B active, 128 experts with 4 active.</li>
+</ul>
+<p>The reasons line up with this lesson. Training cost per token follows the active parameters, so labs get a bigger model for the same GPU-hours. Serving at scale amortizes the memory over large batches spread across many GPUs. The costs are real too: all-to-all engineering, load imbalance, more memory per unit of quality, and models that are harder to fine-tune and to run on one small GPU, which is why small on-device models are often still dense.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> when you pick a model to self-host, read both numbers on the card. Total parameters, times bytes per parameter, tells you how many GPUs you need just to load it; active parameters and your batch size tell you the speed. A "30B-A3B" model fits where a 30B dense one fits, but at batch size 1 it decodes roughly like a 3B one.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">A lab has a fixed training budget in GPU-hours. What is the main argument for making its next model an MoE?</p>
+  <ol class="q-src">
+    <li>MoE models need less memory to serve</li>
+    <li>MoE models have no load-balancing problems</li>
+    <li>MoE avoids all inter-GPU communication</li>
+    <li>Training cost per token follows active parameters, so it can train a model with far more total parameters, and better loss, for the same compute</li>
+  </ol>
+  <div class="q-explain">That's the capacity-per-FLOP argument, and fine-grained scaling-law work suggests the advantage holds or grows with scale. Memory, communication and balancing are the price.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Follow one token through an expert-parallel MoE layer, and say what makes this layer slow at scale.</p>
+  <div class="model-answer"><strong>Model answer:</strong> The token's home GPU runs the router, then an all-to-all dispatches its hidden vector to the GPUs holding its $k$ experts; those run their experts on everything that arrived, and a second all-to-all sends the outputs home to be summed with the gate weights. The slow parts are the network (fine-grained experts do only about $3d_{ff}/b$ FLOPs per byte moved, often less than the link needs) and imbalance, since the all-to-all waits for the busiest GPU. Node-limited routing, low-precision dispatch, overlapping communication with compute and balanced or duplicated experts address them.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A layer has $d = 5120$ and top-4 routing, with bf16 dispatch and combine. How many bytes does one token send per MoE layer, forward pass (ignoring local experts)?</p>
+    <ol class="q-src">
+      <li>20,480</li>
+      <li>81,920</li>
+      <li>40,960</li>
+      <li>163,840</li>
+    </ol>
+    <div class="q-explain">Dispatch: $4 \times 5120 \times 2 = 40{,}960$ bytes; combine the same; total 81,920 (80 KiB). 40,960 counts only one direction; 163,840 adds the backward pass.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Interleaving with <a href="m2-5.html">M2.5</a>: how does expert parallelism differ from tensor parallelism?</p>
+    <ol class="q-src">
+      <li>They are the same thing with different names</li>
+      <li>Tensor parallelism moves tokens between GPUs; expert parallelism splits each matrix</li>
+      <li>Tensor parallelism splits each layer's matrices across GPUs and combines partial results with all-reduce; expert parallelism puts whole experts on different GPUs and moves tokens to them with all-to-all</li>
+      <li>Expert parallelism only works inside one server</li>
+    </ol>
+    <div class="q-explain">TP cuts a matrix into slices that every token uses; EP keeps each expert whole and routes tokens to it. Large MoE runs combine EP with data, pipeline and sometimes tensor parallelism.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Serving traffic makes a few experts much busier than the rest. What is the standard fix in large expert-parallel deployments?</p>
+    <ol class="q-src">
+      <li>Duplicate the hot experts on extra GPUs and split their tokens between the copies</li>
+      <li>Retrain the model with a higher capacity factor</li>
+      <li>Drop all tokens routed to hot experts</li>
+      <li>Switch to top-1 routing at inference time</li>
+    </ol>
+    <div class="q-explain">"Redundant experts" (as in DeepSeek's EPLB) balance work across GPUs without changing the model's outputs. Dropping tokens or changing $k$ would change what the model computes.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Interleaving with <a href="m5-1.html">M5.1</a>: why does 4-bit quantization of just the expert weights let gpt-oss-120b fit on one 80 GB GPU?</p>
+    <ol class="q-src">
+      <li>It reduces the number of active parameters to 5.1B</li>
+      <li>It removes the attention layers</li>
+      <li>It lets the GPU skip unused experts in memory</li>
+      <li>The experts hold over 90% of the parameters, so storing them in about 4.25 bits instead of 16 cuts the total footprint roughly 3–4×</li>
+    </ol>
+    <div class="q-explain">About 117B parameters in bf16 would be roughly 234 GB. With the experts at about 4.25 bits and the small remainder in higher precision, the checkpoint is around 60 GB. Active parameters don't change; only their bytes.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Expert parallelism</strong> puts different experts on different devices; each MoE layer needs a <strong>dispatch</strong> and a <strong>combine</strong> all-to-all (four per training step).</li>
+    <li>Per token per layer, dispatch moves $k \times d \times b$ bytes; an expert does about $3d_{ff}/b$ FLOPs per byte moved, so fine-grained experts are network-hungry.</li>
+    <li>Node-limited routing, FP8 dispatch, overlap and balance keep the network from dominating.</li>
+    <li>Serving needs <strong>all experts in memory</strong>; a batch touches $1 - (1 - k/E)^B$ of them, so large deployments spread experts over many GPUs and duplicate hot ones. Offloading and quantizing experts help on small hardware.</li>
+    <li>Scaling-law work suggests well-tuned, fine-grained MoE beats dense at equal compute, and many open frontier models of 2025–2026 are MoE.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ar-2-a","front":"What happens in an expert-parallel MoE layer, communication-wise?","back":"Route locally → all-to-all dispatch (tokens to the devices holding their experts) → experts compute → all-to-all combine (outputs back home, weighted by gates). Backward repeats it: four all-to-alls per layer per training step."},
+  {"id":"ar-2-b","front":"Bytes a token sends per MoE layer (forward)?","back":"Dispatch $k \\times d \\times b$ plus combine $k \\times d \\times b$. Example: $d = 4096$, top-2, bf16 → 16 KiB + 16 KiB = 32 KiB."},
+  {"id":"ar-2-c","front":"FLOPs per byte moved for one expert, and why it matters?","back":"$\\approx 3 d_{ff}/b$. Mixtral experts (14,336, bf16) ≈ 21,500; DeepSeek-V3 experts (2,048) ≈ 3,072. An inter-node link needs ~20,000 to keep up, so fine-grained MoE needs node-limited routing, FP8 dispatch and overlap."},
+  {"id":"ar-2-d","front":"Share of experts a decode batch touches (uniform routing)?","back":"$1 - (1 - k/E)^B$. With $E = 256$, $k = 8$: 3% at $B = 1$, 40% at $B = 16$, 87% at $B = 64$. Batching erases the 'read few experts' advantage."},
+  {"id":"ar-2-e","front":"Three ways to serve a big MoE on limited hardware or with skewed load.","back":"Redundant (duplicated) hot experts across GPUs; offload experts to CPU memory and fetch on demand; quantize the experts (e.g. MXFP4 in gpt-oss), since they hold most of the parameters."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ar-2-alltoall.js"></script>
+</body>
+</html>

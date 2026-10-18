@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ar-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Long context · LLMs, Animated</title>
+<meta name="description" content="What it takes to read a million tokens: KV-cache memory maths with GQA, MQA and MLA, stretching RoPE with position interpolation, NTK-aware scaling and YaRN, sliding-window attention, ring attention across GPUs, and why needle-in-a-haystack is too easy compared with RULER and lost-in-the-middle tests.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Long context</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Beyond the dense transformer</span></div>
+<p class="lede">GPT-3 could read 2,048 tokens. By 2024 Gemini 1.5 advertised a million. Getting there took four separate fixes: shrinking the KV cache, teaching positions to stretch, splitting a single sequence across GPUs, and building tests honest enough to tell whether the model actually <em>uses</em> what it's given. This lesson covers each one, with the numbers.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute a model's KV-cache memory at any context length, and the savings from GQA, MQA, MLA and sliding windows.</li>
+    <li>Explain position interpolation, NTK-aware scaling and YaRN, and how ring attention spreads one sequence over many GPUs.</li>
+    <li>Say why needle-in-a-haystack overstates long-context ability, what RULER and lost-in-the-middle measure, and when retrieval beats a long prompt.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="m1-3.html">M1.3 Positional encodings</a> (RoPE and the first look at context extension) and <a href="m5-4.html">M5.4 FlashAttention &amp; paged attention</a> (online softmax, tiling, KV-cache memory management). Helpful but optional: <a href="m1-5.html">M1.5 KV cache &amp; sampling</a> and <a href="ar-4.html">AR.4 Hybrid &amp; linear-attention models</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Llama 3.1 70B (80 layers, 8 KV heads of size 128, bf16) reads one 128K-token document. Roughly how big is the KV cache for that single sequence?</p>
+    <ol class="q-src">
+      <li>About 400 MB</li>
+      <li>About 4 GB</li>
+      <li>About 40 GB</li>
+      <li>About 400 GB</li>
+    </ol>
+    <div class="q-explain">$2 \times 80 \times 8 \times 128 \times 2 = 327{,}680$ bytes per token, times 131,072 tokens, is about 43 GB (40 GiB). That's one user, on top of 140 GB of weights.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model scores almost 100% on "needle in a haystack": find one planted sentence in a million tokens of filler. What does that tell you?</p>
+    <ol class="q-src">
+      <li>It can reason over its whole context as well as over a short one</li>
+      <li>Mainly that it can find a single, literally matching fact; harder tasks over the same length can still fail badly</li>
+      <li>Its context window is effectively unlimited</li>
+      <li>It never suffers from lost-in-the-middle effects</li>
+    </ol>
+    <div class="q-explain">The needle usually shares words with the question and sticks out from unrelated filler. Benchmarks like RULER add multiple needles, distractors, tracing and aggregation, and most models' scores drop well before their advertised length.</div>
+  </div>
+</section>
+
+<h2>The KV cache is the bill</h2>
+<p>Context windows grew fast: 2,048 tokens for GPT-3 (2020), 32K for GPT-4 (2023), 200K for Claude 2.1 (late 2023) and 1M for Gemini 1.5 (2024). As of 2026, several APIs offer windows around a million tokens. The first obstacle isn't the attention arithmetic (FlashAttention, <a href="m5-4.html">M5.4</a>, already avoids the $n \times n$ matrix). It's <strong>memory</strong>: during generation, every layer keeps a key and a value for every token (<a href="m1-5.html">M1.5</a>):</p>
+$$\text{KV bytes} = 2 \times L \times n_{kv} \times d_{\text{head}} \times b \times n_{\text{tokens}}$$
+<p>The 2 counts keys and values, $L$ is the number of layers, $n_{kv}$ the number of key/value heads, $d_{\text{head}}$ their size, and $b$ the bytes per number (2 for bf16, 1 for an 8-bit cache).</p>
+
+<h3>Worked example: Llama 3.1 70B at 128K</h3>
+<ol class="steps">
+  <li>Per token: $2 \times 80 \times 8 \times 128 \times 2 = 327{,}680$ bytes $= 320$ KiB.</li>
+  <li>Times 131,072 tokens: $40$ GiB (about 43 GB), for <strong>one</strong> sequence.</li>
+  <li>With plain multi-head attention (all 64 heads cached) it would be 8× more, 320 GiB. <strong>Grouped-query attention</strong> (GQA, 8 KV heads shared by 64 query heads) is what makes 128K practical; <strong>multi-query attention</strong> (MQA, 1 KV head) would cut it to 5 GiB at some cost in quality.</li>
+</ol>
+<p>DeepSeek's <strong>multi-head latent attention</strong> (MLA, DeepSeek-V2, 2024) goes further: it caches one compressed 512-number latent plus a 64-number positional key per layer and token, and reconstructs the heads' keys and values from it. For DeepSeek-V3 that's $(512 + 64) \times 61 \times 2 \approx 70$ KB per token, roughly a fifth of Llama 3.1 70B's, for a much larger model. Quantizing the cache to 8 bits halves any of these.</p>
+
+<section class="playground" id="ar5-kv" aria-labelledby="ar5pg">
+  <h3 id="ar5pg">Playground: KV-cache calculator</h3>
+  <p class="math-note" style="margin:0">Pick a model and a context length. Bars compare the KV cache for <em>one</em> sequence with the model's weights in bf16; the dashed line is one 80 GB GPU.</p>
+  <div class="chips" role="group" aria-label="Model" style="margin-top:10px">
+    <button type="button" class="chip" data-model="0" aria-pressed="false">Llama 3.1 8B</button>
+    <button type="button" class="chip" data-model="1" aria-pressed="true">Llama 3.1 70B</button>
+    <button type="button" class="chip" data-model="2" aria-pressed="false">Llama 3.1 405B</button>
+    <button type="button" class="chip" data-model="3" aria-pressed="false">Mistral 7B (window 4K)</button>
+  </div>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Context length = <output data-out="n">128K</output> tokens</span>
+      <input type="range" data-in="n" min="0" max="10" step="1" value="7">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Options" style="margin-top:12px">
+    <button type="button" class="chip" data-opt="gqa" aria-pressed="true">GQA on</button>
+    <button type="button" class="chip" data-opt="fp8" aria-pressed="false">8-bit cache</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</section>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Llama 3.1 405B: 126 layers, 8 KV heads of size 128, bf16.</p>
+  <ol class="steps">
+    <li>KV cache per token, in KiB: <span class="blank" data-answer="504" data-tol="0.5" data-hint="2 × 126 × 8 × 128 × 2 bytes, divided by 1024."></span></li>
+    <li>At 131,072 tokens, in GiB: <span class="blank" data-answer="63" data-tol="0.2" data-hint="504 KiB × 131,072 = 504 × 128 MiB."></span></li>
+    <li>With an 8-bit cache, in GiB: <span class="blank" data-answer="31.5" data-tol="0.2" data-hint="Half the bytes per number."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">A model switches from 32 KV heads (standard multi-head attention) to GQA with 4 KV heads. Everything else stays the same. Its KV cache…</p>
+  <ol class="q-src">
+    <li>stays the same, because the query heads are unchanged</li>
+    <li>halves</li>
+    <li>grows, because each KV head serves more queries</li>
+    <li>shrinks 8×, since the cache is proportional to $n_{kv}$</li>
+  </ol>
+  <div class="q-explain">Queries aren't cached. The cache holds one key and one value per KV head, so $32 \to 4$ heads is $8\times$ smaller.</div>
+</div></div>
+
+<h2>Stretching RoPE: interpolation, NTK and YaRN</h2>
+<p>The second obstacle is positions. RoPE (<a href="m1-3.html">M1.3</a>) rotates each pair $i$ of a query or key by an angle $m\,\theta_i$ at position $m$, with $\theta_i = b^{-2i/d}$ for base $b$ (often 10,000) and head size $d$. Fast pairs complete a turn every few tokens; the slowest have <strong>wavelengths</strong> $2\pi/\theta_i$ of tens of thousands of tokens (about 54,000 for $b = 10{,}000$, $d = 128$). A model trained on length $L$ has never seen the slow pairs' angles beyond $L$. Run it at $L' = sL$ and those angles are new, and quality collapses. Three fixes, each building on the last:</p>
+<ul>
+  <li><strong>Position interpolation</strong> (PI; Chen et al., 2023): use position $m/s$ instead of $m$, so every angle stays inside the trained range. Chen et al. extended LLaMA models up to 65B to 32,768 tokens with under 1,000 fine-tuning steps. The cost: <em>all</em> pairs slow down by $s$, including the fast ones that encode which neighbour is which, so nearby tokens become harder to tell apart.</li>
+  <li><strong>NTK-aware scaling</strong> (an open-source community proposal, 2023): raise the base instead, $b' = b\,s^{d/(d-2)}$. The slowest pair slows by exactly $s$, the fastest barely changes, and those in between are stretched smoothly. It even worked reasonably without fine-tuning.</li>
+  <li><strong>YaRN</strong> (Peng et al., 2023, "YaRN: Efficient Context Window Extension of Large Language Models") interpolates <em>by parts</em>: pairs whose wavelength is much shorter than $L$ are left alone, pairs longer than $L$ are interpolated by $s$, with a ramp between. It also sharpens attention, which longer contexts tend to flatten: queries and keys are each scaled by $0.1 \ln s + 1$. It reached its target lengths with about 10× fewer training tokens than earlier methods.</li>
+</ul>
+
+<h3>Worked example</h3>
+<p>Extend a model with $d = 128$ and $b = 10{,}000$ by $s = 4$ (say 32K → 128K).</p>
+<ol class="steps">
+  <li><strong>PI:</strong> position 100,000 is fed as 25,000, inside the trained range. Neighbouring tokens now differ by a quarter of the angle they used to.</li>
+  <li><strong>NTK-aware:</strong> $b' = 10{,}000 \times 4^{128/126} \approx 40{,}900$. The slowest pair turns 4× slower; the second-fastest only about 2% slower.</li>
+  <li><strong>YaRN temperature:</strong> $0.1 \ln 4 + 1 \approx 1.139$ on queries and keys, so attention logits are about $1.139^2 \approx 1.30$× larger.</li>
+</ol>
+<p>In practice these come with a stage of training on long documents. DeepSeek-V3 and the Qwen models used YaRN to reach 128K; Llama 3.1 uses its own frequency-dependent rescaling (an 8× factor applied mostly to the slow pairs) after training up to 128K.</p>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <ol class="steps">
+    <li>PI with $s = 8$: position 50,000 is fed as: <span class="blank" data-answer="6250" data-tol="0.5" data-hint="m / s."></span></li>
+    <li>YaRN scale factor on queries and keys for $s = 16$ (3 decimals): <span class="blank" data-answer="1.277" data-tol="0.002" data-hint="0.1 × ln 16 + 1; ln 16 ≈ 2.773."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What is the main drawback of plain position interpolation that NTK-aware scaling and YaRN avoid?</p>
+  <ol class="q-src">
+    <li>It slows down every rotary pair by $s$, including the fast pairs that distinguish nearby tokens</li>
+    <li>It can't extend the context at all</li>
+    <li>It requires a new tokenizer</li>
+    <li>It changes the number of attention heads</li>
+  </ol>
+  <div class="q-explain">The slow pairs need stretching, the fast ones don't. NTK-aware scaling changes the base so the stretch varies smoothly by frequency; YaRN leaves fast pairs untouched and interpolates only the slow ones.</div>
+</div></div>
+
+<h2>Seeing less: sliding windows and local attention</h2>
+<p>Another way to cap the bill is to let most layers look only at nearby tokens. <strong>Longformer</strong> (Beltagy, Peters &amp; Cohan, 2020) gave each token a sliding window of $w$ neighbours plus a few "global" tokens that see everything, so cost grows as $n \times w$ instead of $n^2$. <strong>Mistral 7B</strong> (Jiang et al., 2023) used a 4,096-token window in every layer. Information still travels further, one window per layer: after 32 layers, in principle up to $32 \times 4096 \approx 131{,}000$ tokens back. And the KV cache becomes a <strong>rolling buffer</strong> of 4,096 entries, however long the conversation.</p>
+<p>Pure windows forget exact details from far back, so recent models <strong>interleave</strong> local and global layers. Gemma 3 (Google DeepMind, 2025) uses 5 local layers with a 1,024-token window per global layer; gpt-oss (2025) alternates 128-token windows with full attention. A related trick, <strong>attention sinks</strong> (Xiao et al., 2023, StreamingLLM), keeps the first few tokens in the cache along with the window, because models learn to park spare attention on them, and dropping them destabilizes the output.</p>
+
+<h3>Worked example</h3>
+<p>A Gemma-3-style stack (5 local layers with a 1,024-token window, then 1 global layer) at 128K tokens. Per group of 6 layers, the cache holds $131{,}072 + 5 \times 1{,}024 = 136{,}192$ entries instead of $6 \times 131{,}072 = 786{,}432$: about <strong>17%</strong> of an all-global model's cache.</p>
+
+<section class="card" aria-labelledby="ft3">
+  <div class="card-label" id="ft3">Your turn · faded example</div>
+  <p>A model alternates 3 local layers (4,096-token window) with 1 global layer, at 32,768 tokens.</p>
+  <ol class="steps">
+    <li>Cache entries per group of 4 layers: <span class="blank" data-answer="45056" data-tol="1" data-hint="32,768 + 3 × 4,096."></span></li>
+    <li>As a fraction of an all-global cache (2 decimals): <span class="blank" data-answer="0.34" data-tol="0.006" data-hint="Divide by 4 × 32,768."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Every layer of a 32-layer model uses a 4,096-token sliding window. Can token 20,000 be influenced by token 1?</p>
+  <ol class="q-src">
+    <li>No, never: each token sees only 4,096 tokens back</li>
+    <li>Only if token 1 is a global token</li>
+    <li>Yes, indirectly: information can hop up to one window per layer, so 32 layers can span about 131K tokens, though detail fades along the way</li>
+    <li>Yes, directly, in the first layer</li>
+  </ol>
+  <div class="q-explain">Like a CNN's receptive field (P6.1), windows compound through depth. That reach is real but lossy, which is why interleaved global layers are common.</div>
+</div></div>
+
+<h2>One sequence, many GPUs: ring attention</h2>
+<p>Training at very long context hits a different wall: the activations of a single million-token sequence don't fit on one GPU, even with FlashAttention. <strong>Context parallelism</strong> splits the sequence itself: with $P$ devices, each holds a block of $n/P$ tokens' queries, keys and values. Most of the layer (MLPs, norms) is per-token and needs no communication. Attention is the exception, because every query needs every earlier key and value.</p>
+<p><strong>Ring attention</strong> (Liu, Zaharia &amp; Abbeel, 2023) arranges the devices in a ring. Each device computes attention between its queries and the key/value block it currently holds, while passing that block to its neighbour and receiving the next one. After $P$ rounds, every query block has met every key/value block. The partial results are merged with the same <strong>online softmax</strong> that FlashAttention uses inside one GPU (<a href="m5-4.html">M5.4</a>), so the answer is exact. If computing on a block takes longer than sending one, the communication is completely hidden, and memory per device falls to about $1/P$ of the total.</p>
+
+<figure class="anim wide" data-anim="ar-5-ring"></figure>
+
+<p>Two refinements matter in practice. With a causal mask and contiguous blocks, the device holding the first block has almost nothing to do while the last does the most, so implementations assign each device a mix of early and late tokens (striped or "zigzag" layouts). And a second scheme, DeepSpeed-Ulysses (Jacobs et al., 2023), uses all-to-all exchanges to switch from splitting by sequence to splitting by attention head. Meta reported using context parallelism to train Llama 3 at 128K (<a href="m2-5.html">M2.5</a>).</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In ring attention, what lets each device combine partial results from different key/value blocks into exact attention?</p>
+  <ol class="q-src">
+    <li>Averaging the outputs of the blocks</li>
+    <li>The online softmax: keep a running max and running sum per query, rescale the partial output whenever a larger max appears</li>
+    <li>Storing the full $n \times n$ score matrix</li>
+    <li>Approximating the softmax with a kernel</li>
+  </ol>
+  <div class="q-explain">It's the same exact rewrite FlashAttention uses for tiles. Blocks can arrive in any order and the final normalization still matches ordinary softmax attention.</div>
+</div></div>
+
+<h2>Does the model actually use it? Evaluating long context</h2>
+<p>A model that <em>accepts</em> a million tokens may not <em>use</em> them. The popular first test was <strong>needle in a haystack</strong> (Greg Kamradt, 2023): plant one sentence ("the best thing to do in San Francisco is…") at different depths of a long filler document and ask for it. Most current long-context models score near 100%, which is exactly the problem. The needle shares words with the question and stands out from unrelated filler, so this mostly tests literal lookup.</p>
+<ul>
+  <li><strong>RULER</strong> (Hsieh et al., 2024, NVIDIA) adds 13 synthetic tasks in four groups: retrieval with several needles and distractors, multi-hop tracing of variables, aggregation (such as most common words), and question answering. It defines a model's <strong>effective length</strong> as the longest length at which its average score stays above Llama-2-7B's score at 4K (85.6%). Of the 17 models it evaluated, all claiming at least 32K, only about half still met that bar at 32K, even though almost all aced plain needle tests.</li>
+  <li><strong>Lost in the middle</strong> (Liu et al., 2023) gave models 20–30 retrieved documents with the answer in one of them. Accuracy was U-shaped: best when the answer sat at the start or end, worst in the middle. For GPT-3.5-Turbo, the worst middle positions scored below its 56.1% accuracy with <em>no documents at all</em>.</li>
+  <li>Later tests push further: NoLiMa (Modarressi et al., 2025) removes literal word overlap between question and needle, and benchmarks such as HELMET (Yen et al., 2024) use realistic tasks. Scores typically fall well before the advertised window.</li>
+</ul>
+<p>So when should you put everything in the prompt, and when should you retrieve (<a href="sy-3.html">SY.3</a>)? A long prompt is simple, sees everything at once and handles questions that span many documents, but you pay for every token on every call (prompt caching helps), latency grows with the prompt, and accuracy can sag in the middle. Retrieval is far cheaper and scales to collections no window can hold, but it can miss the passage that mattered. Li et al. (2024) found long-context models beat RAG on average when given enough budget, while RAG cost far less, and proposed routing each query to whichever fits. As of 2026 the common practice is both: retrieve or select the most relevant material, then give the model a generous, well-ordered context (<a href="ag-2.html">AG.2</a>).</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ar-5.webp" alt="A child unrolls an enormously long scroll across a room and down a hallway, searching with a flashlight for a small drawing of a key hidden in the middle." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A child unrolls a scroll so long it runs across the room and all the way down the hallway. Somewhere in the middle is a tiny drawing of a <strong>key</strong>, and they have a flashlight to find it.</p>
+      <p>Having a long scroll is one thing. <strong>Finding</strong> the key is another: the beginning and the end are easy to check, but the long middle is dark, and it's easy to rush past. And if you ask "how many keys are there?" or "which key opens which door?", one quick sweep isn't enough.</p>
+      <p>Where it breaks: a model doesn't sweep left to right with one flashlight. Attention looks at every part at once, but it still spreads its focus thinner as the scroll gets longer, which is why the middle gets missed.</p>
+    </div>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters in practice:</strong> the advertised context window is an upper bound on what fits, not a promise about what's used. Before relying on a long prompt, check the model's long-context results on harder tests (multi-needle, aggregation, realistic tasks), put the most important material at the start or the end, and budget the KV memory: at 128K tokens it can rival the weights for a single user.</div>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">What does RULER's "effective length" measure?</p>
+  <ol class="q-src">
+    <li>The maximum number of tokens the API accepts</li>
+    <li>The length at which a single needle can no longer be found</li>
+    <li>The average document length in the benchmark</li>
+    <li>The longest length at which the model's average score across RULER's tasks stays above a fixed bar (Llama-2-7B's score at 4K)</li>
+  </ol>
+  <div class="q-explain">It's the length you can actually rely on for harder tasks. For many models it was well below the claimed window.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What has to change to take a model trained at 8K tokens to a useful 128K, and how would you check that it worked?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The positions must stretch: rescale RoPE (position interpolation, NTK-aware scaling or YaRN) and continue training on long documents. The KV cache must fit, so use GQA or MLA, an 8-bit cache or local-attention layers, and for training spread each sequence over GPUs with context parallelism such as ring attention. To check, don't stop at needle-in-a-haystack: run multi-needle, tracing and aggregation tests like RULER and position-sweep tests like lost-in-the-middle, and find the effective length where scores hold up.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Llama 3.1 8B (32 layers, 8 KV heads of size 128, bf16) serves 8 users, each with a 32,768-token context. How much KV cache in total?</p>
+    <ol class="q-src">
+      <li>32 GiB</li>
+      <li>4 GiB</li>
+      <li>128 GiB</li>
+      <li>16 GiB</li>
+    </ol>
+    <div class="q-explain">Per token $2 \times 32 \times 8 \times 128 \times 2 = 128$ KiB; per user $128 \text{ KiB} \times 32{,}768 = 4$ GiB; times 8 users = 32 GiB, twice the 16 GB of weights.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Interleaving with <a href="m1-3.html">M1.3</a>: why do fast RoPE pairs need no stretching when a context is extended, while slow pairs do?</p>
+    <ol class="q-src">
+      <li>Fast pairs are not used by attention</li>
+      <li>Slow pairs are learned, fast pairs are fixed</li>
+      <li>Fast pairs have already cycled through all their angles many times during training; slow pairs reach angles beyond position $L$ that the model has never seen</li>
+      <li>Fast pairs are stored in the KV cache and slow ones aren't</li>
+    </ol>
+    <div class="q-explain">A pair with a wavelength of a few tokens sees every angle within the first few positions. A pair with a 54,000-token wavelength only covers part of its circle in an 8K or 32K training run, so longer inputs push it somewhere new.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In ring attention over 8 GPUs, how many key/value blocks does each GPU's query block meet before it has full (non-causal) attention?</p>
+    <ol class="q-src">
+      <li>1</li>
+      <li>8, its own plus 7 received around the ring</li>
+      <li>64</li>
+      <li>It depends on the head size</li>
+    </ol>
+    <div class="q-explain">The sequence is split into 8 blocks. Each round, a GPU processes the block it holds and passes it on; after 8 rounds it has seen all 8. With a causal mask, some of those blocks can be skipped.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">You must answer questions over a 5-million-document company archive, cheaply, with fresh data every day. Which approach fits best?</p>
+    <ol class="q-src">
+      <li>Put the whole archive in a 1M-token context window</li>
+      <li>Fine-tune the model nightly on the archive</li>
+      <li>Use needle-in-a-haystack scores to pick the model</li>
+      <li>Retrieval (RAG) to select the relevant passages, then a long-enough context for those</li>
+    </ol>
+    <div class="q-explain">No window holds 5 million documents, and paying for millions of tokens per question is wasteful. Retrieval narrows the input; a long context then lets the model compare several retrieved passages. Long context and RAG are complements.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>KV cache $= 2 \times L \times n_{kv} \times d_{\text{head}} \times b \times n_{\text{tokens}}$; Llama 3.1 70B needs about 40 GiB per 128K-token sequence. GQA, MQA, MLA, 8-bit caches and local layers shrink it.</li>
+    <li>Longer contexts need RoPE stretched: <strong>position interpolation</strong> ($m/s$), <strong>NTK-aware</strong> base scaling, or <strong>YaRN</strong> (by-parts interpolation plus a temperature), followed by long-document training.</li>
+    <li><strong>Sliding windows</strong> cap per-layer cost and cache; interleaving with global layers keeps exact long-range access.</li>
+    <li><strong>Ring attention</strong> splits one sequence across GPUs and rotates K/V blocks, merging with the online softmax.</li>
+    <li>Needle-in-a-haystack is too easy; <strong>RULER</strong>'s effective length and <strong>lost-in-the-middle</strong> show real limits. Combine retrieval with long context.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ar-5-a","front":"KV-cache formula, and Llama 3.1 70B at 128K?","back":"$2 \\times L \\times n_{kv} \\times d_{\\text{head}} \\times b \\times n_{\\text{tokens}}$. 70B: $2 \\times 80 \\times 8 \\times 128 \\times 2 = 320$ KiB/token → 40 GiB at 131,072 tokens (320 GiB without GQA)."},
+  {"id":"ar-5-b","front":"Position interpolation vs NTK-aware scaling vs YaRN?","back":"PI: feed position $m/s$ (all pairs slowed). NTK-aware: base $b' = b\\,s^{d/(d-2)}$ (slow pairs stretched, fast ones barely). YaRN: interpolate only long-wavelength pairs, ramp between, and scale q, k by $0.1\\ln s + 1$."},
+  {"id":"ar-5-c","front":"How do sliding windows save memory, and what do interleaved global layers add?","back":"Each local layer attends to the last $w$ tokens, so its cache is a rolling buffer of $w$ entries (Mistral 7B: 4,096). Reach compounds through depth but is lossy; global layers (e.g. Gemma 3's 5:1 pattern) keep exact long-range access."},
+  {"id":"ar-5-d","front":"What is ring attention?","back":"Context parallelism (Liu et al., 2023): split the sequence over $P$ devices in a ring; each computes attention for its queries against the K/V block it holds while passing it on; after $P$ rounds all pairs are covered, merged exactly with the online softmax."},
+  {"id":"ar-5-e","front":"Why is needle-in-a-haystack too easy, and what do RULER and lost-in-the-middle show?","back":"One literal-match fact in unrelated filler. RULER (Hsieh et al., 2024) adds multi-needle, tracing and aggregation; about half of 17 models claiming ≥32K fell below its bar at 32K. Lost in the middle (Liu et al., 2023): accuracy is U-shaped in the answer's position."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ar-5-ring.js"></script>
+<script src="../assets/js/anims/ar-5-kv-playground.js"></script>
+</body>
+</html>
