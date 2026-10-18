@@ -94,7 +94,7 @@ $$\text{pass@}k = \mathop{\mathbb{E}}_{\text{problems}}\left[\,1 - \frac{\binom{
   <li>pass@1 $= 1 - \binom{7}{1}/\binom{10}{1} = 1 - 7/10 = 0.3$, which is simply $c/n$.</li>
   <li>pass@2 $= 1 - \binom{7}{2}/\binom{10}{2} = 1 - 21/45 \approx 0.533$.</li>
   <li>pass@5 $= 1 - \binom{7}{5}/\binom{10}{5} = 1 - 21/252 \approx 0.917$.</li>
-  <li>The shortcut $1 - (1 - 0.3)^5 \approx 0.832$ comes out lower. Because $1 - (1-p)^k$ is concave in $p$, plugging in a noisy estimate of $p$ underestimates pass@k on average (Jensen's inequality).</li>
+  <li>The shortcut $1 - (1 - 0.3)^5 \approx 0.832$ comes out lower. On any one problem the two numbers just differ, but averaged over problems the shortcut is biased low: because $1 - (1-p)^k$ is concave in $p$, plugging in a noisy estimate of $p$ underestimates pass@k on average (Jensen's inequality).</li>
 </ol>
 
 <section class="card" aria-labelledby="ft">
@@ -135,12 +135,12 @@ $$\text{pass@}k = \mathop{\mathbb{E}}_{\text{problems}}\left[\,1 - \frac{\binom{
 
 <h2>Saturation: why new benchmarks keep appearing</h2>
 <p>Benchmarks follow a life cycle. A new one is hard, models climb it, and eventually the top scores bunch up near the ceiling. Then it is <strong>saturated</strong>: the remaining gaps are within noise, and the ceiling itself is below 100% because some questions have wrong or ambiguous labels. A re-annotation of MMLU (Gema et al., 2024, “Are We Done with MMLU?”) estimated errors in a few percent of questions overall, and far more in some subjects.</p>
-<p>The pace is fast. The GPT-4 technical report (OpenAI, 2023) already reported 86.4% on MMLU, five-shot. When SWE-bench appeared, the best model in the paper resolved under 2% of issues; within about two years, leading agent systems were reporting resolving well over half of SWE-bench Verified. So the field keeps moving to harder or fresher tests: MMLU to MMLU-Pro and GPQA, GSM8K to MATH and competition problems, HumanEval to contamination-resistant sets like LiveCodeBench and to SWE-bench. Contamination (<a href="m4-3.html">M4.3</a>) speeds up saturation too: once test questions leak into training data, high scores stop meaning much.</p>
+<p>The pace is fast. The GPT-4 technical report (OpenAI, 2023) already reported 86.4% on MMLU, five-shot. When SWE-bench appeared, the best model in the paper resolved under 2% of issues; within about two years, leading agent systems were resolving well over half of SWE-bench Verified, and by 2026 third-party leaderboards reported top scores above 90%. Audits suggesting some solutions were memorized mean part of that may be contamination (<a href="m4-3.html">M4.3</a>), but either way Verified is now close to saturated. So the field keeps moving to harder or fresher tests: MMLU to MMLU-Pro and GPQA, GSM8K to MATH and competition problems, HumanEval to contamination-resistant sets like LiveCodeBench and to SWE-bench. Contamination (<a href="m4-3.html">M4.3</a>) speeds up saturation too: once test questions leak into training data, high scores stop meaning much.</p>
 
 <h2>Small protocol changes, big swings</h2>
 <p>LLMs can be surprisingly sensitive to details that shouldn't matter:</p>
 <ul>
-  <li><strong>Format:</strong> Sclar et al. (2023) varied only the prompt formatting (separators, casing, spacing) and found few-shot accuracy differences of up to 76 points on some tasks for an open 13B model. Larger and instruction-tuned models are usually less fragile, but not immune.</li>
+  <li><strong>Format:</strong> Sclar et al. (2023) varied only the prompt formatting (separators, casing, spacing) and found few-shot accuracy differences of up to 76 points on some tasks for an open 13B model. The sensitivity persisted in larger and instruction-tuned models too, though the typical (median) spread across tasks was smaller, about 7.5 points.</li>
   <li><strong>Few-shot examples:</strong> which examples you show, and in what order, can move results (Zhao et al., 2021, “Calibrate Before Use”).</li>
   <li><strong>Scoring:</strong> letter-probability vs generate-and-parse, strict vs lenient answer extraction, with or without step-by-step reasoning.</li>
 </ul>

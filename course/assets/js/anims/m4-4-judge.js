@@ -13,7 +13,7 @@
       "Order 2: swap them, so B goes first. Now the judge picks B, again the <strong>first slot</strong>. Same answers, opposite verdict: <strong>position bias</strong>.",
       "Fix: always judge <strong>both orders</strong>. Count a win only if the two verdicts agree; if they disagree, record a <strong>tie</strong> (or average the two scores).",
       "At scale: on equally good pairs, a judge that picks the first slot 70% of the time makes A “win” <strong>70%</strong> when A is always shown first. Swapping and averaging recovers the honest <strong>50%</strong>.",
-      "Finally, check the judge against people. On 100 labelled answers they agree 70% of the time, but their label rates alone predict 50% agreement by chance. Cohen's $\\kappa = (0.70 - 0.50)/(1 - 0.50) = $ <strong>0.40</strong>: only fair agreement."
+      "Finally, check the judge against people. On 100 labelled answers they agree 70% of the time, but their label rates alone predict 50% agreement by chance. Cohen's $\\kappa = (0.70 - 0.50)/(1 - 0.50) = $ <strong>0.40</strong>: on the border between fair and moderate agreement."
     ],
     size: function (layout) { return layout === "compact" ? { w: 360, h: 284 } : { w: 640, h: 284 }; },
     build: function (svg, ctx) {

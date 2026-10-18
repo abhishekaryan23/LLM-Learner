@@ -16,7 +16,7 @@
       "A test item from a maths benchmark (made up for this demo). It is supposed to be <strong>unseen</strong>: the score should measure solving, not remembering.",
       "But a forum page in the web crawl quotes a near-copy, <em>with the answer</em>. If pretraining reads it, the model can learn “27” for this question.",
       "Detection, when you have the training data: normalise the text (lowercase, drop punctuation), then slide a window of <strong>n = 4 words</strong> across the test item. That gives 12 overlapping <strong>4-grams</strong>.",
-      "Look each 4-gram up in an index of the training corpus. <strong>7 of 12</strong> are found (58%); only the reworded part breaks the match. Above the threshold, so the item is <strong>flagged</strong>. Real filters use longer n-grams, e.g. 13 words in GPT-3 (Brown et al., 2020).",
+      "Look each 4-gram up in an index of the training corpus. <strong>7 of 12</strong> are found (58%); only the reworded part breaks the match. Above a typical threshold (say, half the n-grams), so the item is <strong>flagged</strong>. Real filters use longer n-grams, e.g. 13 words in GPT-3 (Brown et al., 2020).",
       "Fix it on the training side: <strong>decontaminate</strong>. Drop or mask the flagged page before pretraining, and report which test items were affected.",
       "No access to the training data? <strong>Probe</strong> the model instead: change the numbers. The new answer is $3 \\times 15 - 9 = 36$, yet a model that memorised the page may still answer <strong>27</strong>."
     ],

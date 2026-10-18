@@ -120,12 +120,12 @@ LC.course = {
       { id: "m4-8", title: "Safety & agent evals", mins: 12, pre: ["m4-7"], ready: true }
     ]},
     m5: { code: "M5", title: "Optimization", cover: "cover-m5.webp", tags: ["quantization", "distillation", "pruning", "speculative decoding", "inference", "serving", "flashattention"], lessons: [
-      { id: "m5-1", title: "Quantization", mins: 14, pre: ["m1-4"], ready: true, colab: "m5-1-quantization.ipynb" },
-      { id: "m5-2", title: "Distillation & pruning", mins: 10, pre: ["p1-6"], ready: true },
-      { id: "m5-3", title: "Mixture of experts", mins: 10, pre: ["m1-4"], ready: true, colab: "m5-3-moe-router.ipynb" },
+      { id: "m5-1", title: "Quantization", mins: 14, pre: ["m2-5", "m1-5", "m4-1"], ready: true, colab: "m5-1-quantization.ipynb" },
+      { id: "m5-2", title: "Distillation & pruning", mins: 10, pre: ["p1-6", "p3-2", "m3-1", "m5-1"], ready: true },
+      { id: "m5-3", title: "Mixture of experts", mins: 10, pre: ["m1-4", "p3-2", "m2-5"], ready: true, colab: "m5-3-moe-router.ipynb" },
       { id: "m5-4", title: "FlashAttention & paged attention", mins: 12, pre: ["m1-1", "m1-5"], ready: true, colab: "m5-4-online-softmax.ipynb" },
-      { id: "m5-5", title: "Speculative decoding", mins: 10, pre: ["m1-5"], ready: true, colab: "m5-5-speculative-decoding.ipynb" },
-      { id: "m5-6", title: "Batching & serving metrics", mins: 10, pre: ["m1-5"], ready: true }
+      { id: "m5-5", title: "Speculative decoding", mins: 10, pre: ["m1-5", "m5-4"], ready: true, colab: "m5-5-speculative-decoding.ipynb" },
+      { id: "m5-6", title: "Batching & serving metrics", mins: 10, pre: ["m1-5", "m5-4", "m5-5"], ready: true }
     ]},
     ar: { code: "AR", title: "Beyond the dense transformer", cover: "cover-ar.webp", tags: ["mixture of experts", "moe", "state space model", "mamba", "linear attention", "long context", "hybrid architecture"], lessons: [
       { id: "ar-1", title: "MoE deep dive: routing & expert design", mins: 12, pre: ["m5-3"] },

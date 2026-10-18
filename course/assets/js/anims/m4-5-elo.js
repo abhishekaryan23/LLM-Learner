@@ -22,7 +22,7 @@
       "Battle 1: a user prefers <strong>B's answer</strong>. A's actual score is $S_A = 0$, so the <strong>surprise</strong> is $S_A - E_A = -0.64$.",
       "Update with $K = 32$: $R_A \\leftarrow 1600 + 32(0 - 0.64) = 1579.5$. B gains the same <strong>20.5</strong> points. The gap shrinks to 59, so $E_A$ drops to 0.58.",
       "Battle 2: <strong>A wins</strong>. That was expected, so the surprise is small: $32(1 - 0.584) = +13.3$. Upsets move ratings a lot; expected results barely move them.",
-      "After thousands of votes, a leaderboard fits all battles at once (<strong>Bradley–Terry</strong>) and shows each rating with a <strong>confidence interval</strong> (bars, illustrative). Overlapping intervals mean the ranking between them is not settled."
+      "After thousands of votes, a leaderboard fits all battles at once (<strong>Bradley–Terry</strong>) and shows each rating with a <strong>confidence interval</strong> (bars, illustrative). These two overlap, so A's lead is not yet settled; more votes would narrow the bars."
     ],
     size: function (layout) { return layout === "compact" ? { w: 360, h: 362 } : { w: 640, h: 300 }; },
     build: function (svg, ctx) {
@@ -92,7 +92,7 @@
         S("tspan", { dy: -4, class: "t-mono", text: " = " + E(d).toFixed(2) }, t);
         return t;
       }
-      function gLabel(d) { return S("text", { x: mk(d).x, y: P.tick, class: "t t-sm t-mono t-orange t-mid", text: "+" + Math.round(d) }, svg); }
+      function gLabel(d) { return S("text", { x: mk(d).x + 4, y: P.tick, class: "t t-sm t-mono t-orange t-mid", text: "+" + Math.round(d) }, svg); }
       var e0 = eLabel(A0 - B0), e1 = eLabel(A1 - B1), e2 = eLabel(A2 - B2);
       var g0 = gLabel(A0 - B0), g1 = gLabel(A1 - B1), g2 = gLabel(A2 - B2);
       [e1, e2, g1, g2].forEach(function (e) { e.style.opacity = 0; });
@@ -130,13 +130,14 @@
       tl.to(vals2.concat([e2, g2, dA2, dB2]), { opacity: 1, duration: 0.35 });
       tl.addLabel("s5");
 
-      // --- s6: confidence intervals (illustrative ±30 points) ---
-      var half = 30;
-      function ci(r) {
-        var y = L.cy, x0 = lx(r - half), x1 = lx(r + half);
-        return S("path", { d: "M" + x0 + " " + (y - 6) + "V" + (y + 6) + "M" + x0 + " " + y + "H" + x1 + "M" + x1 + " " + (y - 6) + "V" + (y + 6), class: "s-ink", "stroke-width": 2 }, ciG);
+      // --- s6: confidence intervals (illustrative ±50 points; they overlap) ---
+      var half = 50;
+      // A's bar sits just above B's so the overlap shows as two parallel strokes
+      function ci(r, dy, cls) {
+        var y = L.cy + dy, x0 = lx(r - half), x1 = lx(r + half);
+        return S("path", { d: "M" + x0 + " " + (y - 5) + "V" + (y + 5) + "M" + x0 + " " + y + "H" + x1 + "M" + x1 + " " + (y - 5) + "V" + (y + 5), class: cls, "stroke-width": 2 }, ciG);
       }
-      var ciA = ci(A2), ciB = ci(B2);
+      var ciA = ci(A2, -4, "s-orange"), ciB = ci(B2, 4, "s-blue");
       tl.to([badge2, dA2, dB2], { opacity: 0, duration: 0.3 });
       LC.drawIn(tl, ciA, { duration: 0.6 });
       LC.drawIn(tl, ciB, { duration: 0.6 }, "<");

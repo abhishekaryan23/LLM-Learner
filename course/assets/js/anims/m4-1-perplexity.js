@@ -65,7 +65,7 @@
         pBars.push(S("rect", { x: cx(i) - bw / 2, y: base, width: bw, height: 0, rx: 3, class: "f-blue" }, svg));
         pLbls.push(S("text", { x: cx(i), y: base - P[i] * pScale - 6, class: "t t-sm t-mono t-mid", text: P[i].toFixed(2) }, svg));
         sBars.push(S("rect", { x: cx(i) - bw / 2, y: base, width: bw, height: 0, rx: 3, class: "f-orange" }, svg));
-        sLbls.push(S("text", { x: cx(i), y: base - SUR[i] * sScale - 6, class: "t t-sm t-mono t-mid", text: SUR[i].toFixed(2) }, svg));
+        sLbls.push(S("text", { x: cx(i), y: base - SUR[i] * sScale - 10, class: "t t-sm t-mono t-mid", text: SUR[i].toFixed(2) }, svg));
       }
       swapHead(1);
       pBars.forEach(function (b, k) {
