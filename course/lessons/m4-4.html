@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m4-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LLM-as-judge · LLMs, Animated</title>
+<meta name="description" content="Using a strong model to grade other models' outputs: pairwise vs rubric scoring, position, verbosity and self-preference bias, and how to check a judge against humans with Cohen's kappa.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>LLM-as-judge</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Evaluation</span></div>
+<p class="lede">How do you score a summary, an email or a chat answer when there's no single right answer to match? Increasingly, you ask <strong>another model</strong>. LLM judges are fast and cheap, and they agree with people surprisingly often. They also have predictable biases. This lesson covers both, and how to measure whether your judge can be trusted.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Set up pairwise and single-answer (rubric) judging, and say when to use each.</li>
+    <li>Name the main judge biases (position, verbosity, self-preference) and a mitigation for each.</li>
+    <li>Measure judge–human agreement with Cohen's kappa, and explain why raw agreement misleads.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="m4-2.html">M4.2 Benchmarks</a> (scoring against fixed answers, and where that stops working) and <a href="m3-2.html">M3.2 Reward models</a> (a model that scores outputs, used for training). Up next, <a href="m4-5.html">M4.5</a> turns pairwise verdicts from people into Elo-style rankings.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You ask an LLM judge “Which answer is better, the first or the second?”, then ask again with the two answers swapped. It picks whichever answer comes first, both times. This is…</p>
+    <ol class="q-src">
+      <li>Fine: it's being consistent</li>
+      <li>Position bias: the verdict depends on order, not quality</li>
+      <li>Verbosity bias</li>
+      <li>A sign the answers are identical</li>
+    </ol>
+    <div class="q-explain">A fair judge's verdict shouldn't change when you swap the order. Preferring a slot is <strong>position bias</strong>, and swapping is exactly how you detect it.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A judge and a human labeller agree on 90% of items. Is the judge reliable?</p>
+    <ol class="q-src">
+      <li>Yes, 90% is excellent</li>
+      <li>No, anything below 99% is useless</li>
+      <li>Not necessarily: if both say “good” about 95% of the time, they'd agree about 90% of the time by pure chance</li>
+      <li>Only if the judge is a larger model than the one being judged</li>
+    </ol>
+    <div class="q-explain">With such lopsided labels, chance agreement is $0.95^2 + 0.05^2 \approx 0.905$. You need a measure that subtracts chance, such as <strong>Cohen's kappa</strong>.</div>
+  </div>
+</section>
+
+<h2>Why use a model as the judge?</h2>
+<p>Benchmarks (<a href="m4-2.html">M4.2</a>) work when answers can be checked: a letter, a number, unit tests. Most real outputs can't be checked that way. There are many good summaries of an article and many good replies to an email. Human raters handle this well but are slow and expensive, and you want to evaluate every prompt change.</p>
+<p>So you give a strong model the question, the output(s) and instructions, and ask for a verdict. Zheng et al. (2023), “Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena”, found that GPT-4 as a judge agreed with human preferences over 80% of the time, about as often as humans agreed with each other in their study. Their MT-Bench, and later judge-based benchmarks such as AlpacaEval and Arena-Hard, are built on this idea.</p>
+
+<h2>Two set-ups</h2>
+<ul>
+  <li><strong>Pairwise:</strong> show the question with answers A and B, and ask which is better (or a tie). Comparing is easier and more consistent than absolute scoring, and it's the natural fit for “is the new model better than the old one?”. Its weak spots are order effects and needing a pair for every comparison.</li>
+  <li><strong>Single-answer grading:</strong> show one answer plus a <strong>rubric</strong>, e.g. “1–10”, or better, pass/fail on concrete criteria such as “cites the source”, “under 100 words”, “no invented numbers”. It scales to any number of models and gives absolute scores you can track over time, but scores can drift between judge versions and tend to bunch up in a narrow range.</li>
+  <li><strong>Reference-guided</strong> (either set-up): also give the judge a correct reference answer. This matters for maths and facts, where judges can be fooled by a confident wrong answer; Zheng et al. found it markedly reduced grading errors on maths questions.</li>
+</ul>
+
+<h2>Known biases</h2>
+<p>Zheng et al. documented three biases that later work has confirmed in many judges:</p>
+<ul>
+  <li><strong>Position bias:</strong> favouring the answer in a particular slot, often the first. In their tests, even GPT-4 gave the same verdict after a swap in only about two-thirds of cases.</li>
+  <li><strong>Verbosity (length) bias:</strong> preferring longer answers even when the extra words add nothing. They padded answers with rephrased repeats of their own points; weaker judges were fooled most of the time, while GPT-4 was much more robust but not immune.</li>
+  <li><strong>Self-preference:</strong> favouring answers written by itself or its own model family. They saw signs of it, with limited data; Panickssery et al. (2024) later linked self-preference to models <em>recognising</em> their own writing.</li>
+</ul>
+<p>Judges also struggle to grade problems they can't solve themselves, and they can be swayed by a confident tone or by instructions hidden inside the answer being graded.</p>
+
+<figure class="anim wide" data-anim="m4-4-judge"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-judge-bias-cakes.webp" alt="A robot judge at a baking contest leans toward the biggest cake, ignoring a smaller cake that was made much more carefully." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A robot is judging a baking contest. It keeps leaning toward the <strong>biggest cake</strong>, even though the small one next to it was made much more carefully and tastes better. Bigger isn't better, but the robot is easily impressed by size.</p>
+      <p>Two fixes. Give the robot a <strong>score card</strong> that says what counts: taste, texture, decoration, <em>not</em> size. Then let some <strong>people taste the cakes too</strong>, and check how often the robot agrees with them before you trust it on its own.</p>
+      <p class="math-note">Where it breaks: a real judge's biases are subtler than “big cake wins”, and simply telling a model to ignore length doesn't reliably remove the bias. That's why you measure it.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Mitigations</h2>
+<ul>
+  <li><strong>Position:</strong> judge every pair in <strong>both orders</strong>. Count a win only when the verdicts agree, otherwise a tie, or average the two scores. It doubles the cost and removes the order effect from your totals.</li>
+  <li><strong>Length:</strong> tell the judge in the rubric that padding is not a virtue, compare answers of similar length, and check how win rate varies with length. AlpacaEval 2.0 added a <em>length-controlled</em> win rate that statistically removes the length effect (Dubois et al., 2024).</li>
+  <li><strong>Self-preference:</strong> don't let a model judge its own outputs when it's a contestant. Use a judge from another family, or a <strong>panel</strong> of different judges (Verga et al., 2024, “Replacing Judges with Juries”).</li>
+  <li><strong>Vagueness:</strong> use specific rubrics, ask for a short justification <em>before</em> the verdict, use structured output, and provide reference answers where they exist.</li>
+  <li><strong>Calibration:</strong> label 100–200 examples yourself, measure how well the judge agrees with you, and iterate on the judge prompt until agreement approaches human–human agreement. Re-check whenever you change the judge model or prompt.</li>
+</ul>
+
+<h2>Measuring agreement: Cohen's kappa</h2>
+<p>Raw agreement, the fraction of items where judge and human give the same label, is misleading when one label dominates. <strong>Cohen's kappa</strong> (Cohen, 1960) corrects for agreement that would happen by chance:</p>
+$$\kappa = \frac{p_o - p_e}{1 - p_e}$$
+<p>$p_o$ is the observed agreement. $p_e$ is the agreement you'd expect if the two raters labelled independently at their own rates: for each label, multiply the two raters' rates for it, then add these up. $\kappa = 1$ is perfect agreement, $0$ is chance level, and below 0 is worse than chance. A common rough guide (Landis &amp; Koch, 1977) calls 0.21–0.40 “fair”, 0.41–0.60 “moderate” and 0.61–0.80 “substantial”, but treat these labels as conventions rather than rules.</p>
+
+<h3>Worked example</h3>
+<p>100 answers, each labelled good or bad by the judge and by a human: both say good for 40; judge good, human bad for 20; judge bad, human good for 10; both bad for 30.</p>
+<ol class="steps">
+  <li>Observed agreement: $p_o = (40 + 30)/100 = 0.70$.</li>
+  <li>Label rates: judge says good $60/100 = 0.6$; human says good $50/100 = 0.5$.</li>
+  <li>Chance agreement: $p_e = 0.6 \times 0.5 + 0.4 \times 0.5 = 0.50$.</li>
+  <li>$\kappa = (0.70 - 0.50)/(1 - 0.50) = 0.40$. 70% agreement sounded fine; kappa says “fair” at best.</li>
+</ol>
+<p>The trap is worse with lopsided labels. If both raters say “good” 90% of the time and agree on 85% of items, $p_e = 0.9^2 + 0.1^2 = 0.82$ and $\kappa = (0.85 - 0.82)/0.18 \approx 0.17$.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Another 100 items: both good 50; judge good, human bad 15; judge bad, human good 5; both bad 30.</p>
+  <ol class="steps">
+    <li>Observed agreement $p_o =$ <span class="blank" data-answer="0.80" data-tol="0.005" data-hint="Add the two cells where they agree, divide by 100."></span></li>
+    <li>Chance agreement $p_e =$ <span class="blank" data-answer="0.515" data-tol="0.005" data-hint="Judge says good 65/100, human 55/100. So 0.65 × 0.55 + 0.35 × 0.45."></span></li>
+    <li>$\kappa =$ <span class="blank" data-answer="0.59" data-tol="0.01" data-hint="(0.80 − 0.515) / (1 − 0.515)"></span></li>
+  </ol>
+</section>
+
+<div class="why"><strong>Why this matters in practice:</strong> LLM judges are everywhere. They power leaderboards (MT-Bench, AlpacaEval, Arena-Hard), offline checks of every prompt or model change, grading of agent transcripts (<a href="m4-8.html">M4.8</a>), and AI feedback for training (<a href="m3-6.html">M3.6 RLAIF</a>). When a judge's score becomes a <em>training reward</em>, the policy is optimised against the judge and will find and exploit its biases, for example by writing longer and longer answers. Treat the judge as a model that needs its own evaluation: a labelled calibration set, a kappa you track, and swap-order checks.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">You want to use an LLM judge to compare two chatbot versions. Describe how you'd set it up so its verdicts can be trusted.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Use pairwise judging with a specific rubric (and references where possible), run every pair in both orders, and count only consistent wins, treating disagreements as ties. Use a judge from a different model family than the contestants, and watch for length effects. Before relying on it, label a sample of pairs by hand and check agreement with Cohen's kappa, not just raw agreement.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Under the swap-and-check rule, the judge picks A when the order is (A, B) and B when the order is (B, A). What do you record?</p>
+    <ol class="q-src">
+      <li>A wins, because it was judged first</li>
+      <li>B wins, because it was judged last</li>
+      <li>A tie: the verdicts disagree, so the judge has no real preference</li>
+      <li>Discard the question from the benchmark</li>
+    </ol>
+    <div class="q-explain">The verdict followed the slot, not the answer. Recording a tie (or averaging the two scores) removes the order effect from the totals.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A lazy judge labels <em>every</em> answer “pass”. Humans label 80% of answers “pass”. What are the raw agreement and Cohen's kappa?</p>
+    <ol class="q-src">
+      <li>80% agreement, $\kappa = 0$</li>
+      <li>80% agreement, $\kappa = 0.8$</li>
+      <li>100% agreement, $\kappa = 1$</li>
+      <li>20% agreement, $\kappa &lt; 0$</li>
+    </ol>
+    <div class="q-explain">$p_o = 0.8$, and $p_e = 1 \times 0.8 + 0 \times 0.2 = 0.8$, so $\kappa = 0$: the judge adds nothing beyond chance, despite 80% agreement.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">An LLM judge with a length bias is used as the reward in RL fine-tuning (as in RLAIF, M3.6). What is the likely result?</p>
+    <ol class="q-src">
+      <li>Nothing; RL removes judge biases automatically</li>
+      <li>Answers become shorter</li>
+      <li>The judge becomes unbiased over time</li>
+      <li>The policy learns to write longer answers to win reward, without becoming better: a form of reward hacking</li>
+    </ol>
+    <div class="q-explain">Optimising against an imperfect scorer exploits its flaws (as with reward models in M3.2). Length control and calibration matter even more when the judge is a training signal.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which pairing of bias and mitigation is <em>correct</em>?</p>
+    <ol class="q-src">
+      <li>Self-preference: run each pair in both orders</li>
+      <li>Self-preference: use a judge from a different model family, or a panel of judges</li>
+      <li>Position bias: use a length-controlled win rate</li>
+      <li>Verbosity bias: give the judge a reference answer and nothing else</li>
+    </ol>
+    <div class="q-explain">Swapping order fixes position bias; length control targets verbosity bias; a judge that isn't a contestant, or a diverse panel, targets self-preference.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>LLM judges grade open-ended outputs cheaply; strong judges can approach human–human agreement (Zheng et al., 2023).</li>
+    <li><strong>Pairwise</strong> for comparing systems; <strong>rubric</strong> scoring for absolute tracking; add <strong>references</strong> for maths and facts.</li>
+    <li>Watch for <strong>position</strong>, <strong>verbosity</strong> and <strong>self-preference</strong> bias: swap orders, control length, and use a judge that isn't a contestant.</li>
+    <li>Validate the judge against human labels with <strong>Cohen's kappa</strong> $= (p_o - p_e)/(1 - p_e)$, not raw agreement.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Simulate a position-biased judge, watch swap-and-average fix its win rates, and implement Cohen's kappa. About 15 minutes, NumPy only.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m4-4-llm-judge.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m4-4-a","front":"Pairwise vs single-answer (rubric) LLM judging: what is each good for?","back":"Pairwise (which of A/B is better): easier, more consistent relative comparisons between systems, but has order effects. Rubric scoring: absolute scores for many models over time, but scores drift and bunch up. Add reference answers for maths and facts."},
+  {"id":"m4-4-b","front":"Name three known LLM-judge biases (Zheng et al., 2023).","back":"Position bias (prefers a slot, often the first), verbosity/length bias (prefers longer answers), self-preference (favours its own or its family's outputs)."},
+  {"id":"m4-4-c","front":"How do you mitigate position bias?","back":"Judge every pair in both orders; count a win only if the verdicts agree (otherwise a tie), or average the two scores."},
+  {"id":"m4-4-d","front":"Write Cohen's kappa and define its terms.","back":"$\\kappa = (p_o - p_e)/(1 - p_e)$: $p_o$ = observed agreement, $p_e$ = agreement expected by chance from each rater's label rates (sum over labels of the product of the two rates). 1 = perfect, 0 = chance."},
+  {"id":"m4-4-e","front":"Judge vs human: 40 both good, 20 judge-good/human-bad, 10 judge-bad/human-good, 30 both bad. Kappa?","back":"$p_o = 0.70$; $p_e = 0.6 \\times 0.5 + 0.4 \\times 0.5 = 0.50$; $\\kappa = 0.20/0.50 = 0.40$."},
+  {"id":"m4-4-f","front":"Why is judge bias extra dangerous when the judge is used as an RL reward?","back":"The policy is optimised against the judge, so it learns to exploit the bias (e.g. ever-longer answers): reward hacking. Calibrate, length-control and audit the judge."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m4-4-judge.js"></script>
+</body>
+</html>

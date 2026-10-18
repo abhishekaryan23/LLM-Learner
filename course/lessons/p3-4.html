@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p3-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Embeddings · LLMs, Animated</title>
+<meta name="description" content="How token IDs become vectors: the embedding table as a one-hot lookup, cosine similarity, the king − man + woman analogy with honest caveats, and the unembedding with weight tying.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Embeddings</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Neural nets → language</span></div>
+<p class="lede">A token ID like 73700 is just a name tag. Neural networks need numbers they can do math with, so the first layer of every LLM swaps each ID for a learned <strong>vector</strong>. Training arranges those vectors so that similar tokens point in similar directions.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain why an embedding layer is "one-hot times a matrix", and why in practice it's just a row lookup.</li>
+    <li>Compute cosine similarity and say what it does and doesn't tell you about two tokens.</li>
+    <li>Explain how embeddings are learned, and how the output layer (unembedding) and weight tying relate to them.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p3-3.html">Tokenization</a> (where the IDs come from), <a href="p1-1.html">Vectors &amp; dot products</a> (cosine similarity), <a href="p1-2.html">Matrices as transformations</a> and <a href="p3-2.html">Softmax</a> (the output end of the model).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess, then find out.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Where do the numbers in a model's embedding table come from?</p>
+    <ol class="q-src">
+      <li>A dictionary of hand-written word features</li>
+      <li>The characters' Unicode codes</li>
+      <li>They start random and are learned by gradient descent, like every other weight</li>
+      <li>They are recomputed from each sentence</li>
+    </ol>
+    <div class="q-explain">They're ordinary parameters. Training on the next-token objective pushes them into a useful arrangement; nobody designs them.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">GPT-2 small has 50,257 tokens and 768-dimensional vectors. About how many parameters is its embedding table?</p>
+    <ol class="q-src">
+      <li>About 39 million</li>
+      <li>About 50 thousand</li>
+      <li>About 768 thousand</li>
+      <li>About 4 billion</li>
+    </ol>
+    <div class="q-explain">One row of 768 numbers per token: $50{,}257 \times 768 \approx 38.6$ million, roughly 31% of GPT-2 small's 124 million parameters.</div>
+  </div>
+</section>
+
+<h2>From IDs to vectors: a lookup table</h2>
+<p>The <strong>embedding table</strong> is a matrix $E$ with one row per vocabulary entry: $V$ rows and $d$ columns, where $V$ is the vocabulary size and $d$ the model width. Token $i$'s vector is simply row $i$.</p>
+<p>Mathematically, that's a matrix multiply. Write the token as a <strong>one-hot</strong> row vector $x$ (length $V$, a 1 at position $i$, zeros elsewhere). Then</p>
+$$e = xE = E_{i,:}$$
+<p>Every row of $E$ is multiplied by 0 except row $i$, so the product <em>is</em> row $i$. Real code skips the multiply, which would waste $V \times d$ multiplications on zeros, and just indexes the row (PyTorch's <code>nn.Embedding</code>). Thinking of it as $xE$ is still useful: it shows the embedding is a linear layer (P1.2) and tells you how its gradient works.</p>
+
+<figure class="anim wide" data-anim="p3-4-embedding"></figure>
+
+<p>Real sizes: GPT-2 small's table is $50{,}257 \times 768 \approx 38.6$M parameters. Llama 3 8B's is $128{,}256 \times 4{,}096 \approx 525$M. The input embedding has no idea about word <em>order</em>; position information is added separately (M1.3).</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-embedding-map.webp" alt="A town map where similar things share a neighbourhood: animals in a park, fruit at a market, vehicles at a station." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Every word gets a home address on a big town map. Animals live in the park, fruit lives at the market, vehicles live at the station.</p>
+      <p>Nobody planned the town. At first everyone was dropped in a random spot. Then, again and again, words that turned up in the same kinds of sentences were nudged closer together. After a long time, <strong>similar things ended up as neighbours</strong>.</p>
+      <p>So to guess what a word is like, look at who lives next door.</p>
+      <p><em>Where it breaks:</em> the real "town" has hundreds or thousands of directions instead of two, and one word can be near different neighbours along different directions.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Similarity is an angle</h2>
+<p>To compare two embeddings, we usually ignore their lengths and look at the angle between them, the <strong>cosine similarity</strong> from <a href="p1-1.html">P1.1</a>:</p>
+$$\cos(a, b) = \frac{a \cdot b}{\lVert a\rVert\,\lVert b\rVert}$$
+<p>$a \cdot b$ is the dot product and $\lVert a\rVert$ the length of $a$. The result runs from $1$ (same direction) through $0$ (perpendicular, unrelated) to $-1$ (opposite). Lengths are divided out because they often track things other than meaning, such as how frequent a token is.</p>
+
+<h3>Worked example</h3>
+<p>$a = (1,\,2,\,2)$ and $b = (2,\,1,\,2)$.</p>
+<ol class="steps">
+  <li>Dot product: $1\cdot2 + 2\cdot1 + 2\cdot2 = 8$</li>
+  <li>Lengths: $\lVert a\rVert = \sqrt{1+4+4} = 3$, and $\lVert b\rVert = 3$ too</li>
+  <li>$\cos(a,b) = 8 / (3 \times 3) \approx 0.89$: quite similar ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>A table has rows $E_0 = (0.2, 0.5)$, $E_1 = (0.9, -0.3)$, $E_2 = (-0.4, 0.8)$. The one-hot $x = (0, 0, 1)$ times $E$ gives a vector whose second entry is <span class="blank" data-answer="0.8" data-tol="0.001" data-hint="A one-hot with the 1 at position 2 selects row 2."></span></li>
+    <li>$\cos\big((3,4),\,(4,3)\big) =$ <span class="blank" data-answer="0.96" data-tol="0.002" data-hint="Dot product 24; both lengths are 5."></span></li>
+    <li>$\cos\big((1,0,1),\,(1,1,0)\big) =$ <span class="blank" data-answer="0.5" data-tol="0.002" data-hint="Dot product 1; both lengths are √2."></span></li>
+    <li>Toy 2-D vectors: king $= (0.9, 0.8)$, man $= (0.9, 0.1)$, woman $= (0.1, 0.15)$. The second entry of king − man + woman is <span class="blank" data-answer="0.85" data-tol="0.002" data-hint="0.8 − 0.1 + 0.15."></span></li>
+  </ol>
+</section>
+
+<h2>Embeddings are learned</h2>
+<p>The table starts as small random numbers. Training on next-token prediction (M2.2) then adjusts it by backpropagation (P2.3), like any other weight. Because $e = xE$ with a one-hot $x$, the gradient for the input table touches <strong>only the rows of tokens that appeared</strong> in the batch; all other rows get zero gradient for that step.</p>
+<p>Why do similar words end up close? Tokens that appear in similar contexts must lead to similar predictions, and the cheapest way for the network to do that is to give them similar vectors. That is the old <strong>distributional hypothesis</strong> from linguistics: "you shall know a word by the company it keeps" (Firth, 1957).</p>
+<p>One important limit: the input embedding is <strong>static</strong>. "bank" gets the same row whether the sentence is about rivers or money. Making it context-dependent is the job of the attention layers that come next (<a href="m1-1.html">M1.1</a>).</p>
+
+<h2>The famous analogy, with caveats</h2>
+<p>With word2vec (Mikolov et al., 2013), vector arithmetic seemed to capture relations: the nearest word to $\text{king} - \text{man} + \text{woman}$ was "queen", and similarly for capitals and countries or verb tenses. It's a striking result, but read it carefully:</p>
+<ul>
+  <li><strong>The inputs are excluded.</strong> The standard test ignores king, man and woman when searching for the nearest word. Without that rule, the nearest vector is often "king" itself (Nissim, van Noord &amp; van der Goot, 2020).</li>
+  <li><strong>It works for some relations much better than others.</strong> Tidy results like gender or capital cities don't hold up evenly across relation types (Linzen, 2016).</li>
+  <li><strong>Embeddings absorb biases</strong> in their training text: the same arithmetic produced "man : computer programmer :: woman : homemaker" (Bolukbasi et al., 2016).</li>
+  <li><strong>LLM token embeddings are a different setting.</strong> Their tokens are word pieces, and most of the meaning is built up by later layers, so don't expect clean analogies in a raw LLM embedding table.</li>
+</ul>
+
+<h2>The other end: unembedding and weight tying</h2>
+<p>At the top of the model, the final hidden vector $h$ (length $d$) has to become one logit per vocabulary entry for the softmax (P3.2). That's another matrix, the <strong>unembedding</strong> $W_U$ of shape $d \times V$:</p>
+$$\text{logits} = h\,W_U, \qquad \text{logit}_i = h \cdot u_i$$
+<p>where $u_i$ is column $i$ of $W_U$, one vector per token. So the output layer also works by similarity: the next token is likely when the model's final vector points the same way as that token's output vector (and, because it is a dot product rather than a cosine, longer vectors count for more).</p>
+<p>Since $E$ and $W_U$ both hold one $d$-sized vector per token, you can make them the same matrix, $W_U = E^\top$. This <strong>weight tying</strong> (Press &amp; Wolf, 2017; Inan et al., 2017) was used in the original transformer and in GPT-2, and saves $V \times d$ parameters: 38.6M for GPT-2 small. Small models such as Gemma tie their embeddings; Llama 2 and Llama 3 8B keep the two separate.</p>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · count the cost</div>
+  <p>Llama 3 8B: $V = 128{,}256$, $d = 4{,}096$, untied.</p>
+  <ol class="steps">
+    <li>Input embedding parameters, in millions: <span class="blank" data-answer="525.3" data-tol="0.6" data-hint="128,256 × 4,096."></span></li>
+    <li>Embedding plus unembedding together, as a percentage of about 8.03 billion: <span class="blank" data-answer="13.1" data-tol="0.3" data-hint="2 × 525.3M ÷ 8,030M × 100."></span></li>
+  </ol>
+</section>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the vocabulary decisions from P3.3 land here. A bigger vocabulary means a taller $E$ and a wider $W_U$, which is a large share of a small model's parameters, and the $d \times V$ output multiply plus softmax runs at every position. The same "embed, then compare by cosine" idea also powers <strong>vector search</strong> and retrieval-augmented generation, although those use dedicated embedding models that encode whole passages, not this raw token table.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain what an embedding layer does, and why similar tokens end up with similar vectors.</p>
+  <div class="model-answer"><strong>Model answer:</strong> It looks up row $i$ of a learned $V \times d$ table for token $i$, which is the same as multiplying a one-hot vector by the table. The table starts random and is trained with the rest of the model; tokens that appear in similar contexts need to lead to similar predictions, so gradient descent pushes their vectors in similar directions.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">For a vocabulary of size $V$ and model width $d$, multiplying a one-hot vector by the embedding table $E$ gives…</p>
+    <ol class="q-src">
+      <li>a $V \times d$ matrix</li>
+      <li>one row of $E$, a vector of length $d$</li>
+      <li>the sum of all rows of $E$</li>
+      <li>a probability distribution over the vocabulary</li>
+    </ol>
+    <div class="q-explain">$(1 \times V)(V \times d) = 1 \times d$. All rows are multiplied by 0 except the one with the 1, so the result is that row.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Two embeddings have cosine similarity close to 0. That means they are…</p>
+    <ol class="q-src">
+      <li>identical</li>
+      <li>exact opposites</li>
+      <li>both very short vectors</li>
+      <li>roughly perpendicular: they point in unrelated directions</li>
+    </ol>
+    <div class="q-explain">Cosine is the dot product divided by both lengths (P1.1). 1 means same direction, −1 opposite, and 0 perpendicular. Length is divided out, so short vectors don't make it 0.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">During one training step, the batch contains only 3,000 distinct tokens out of a 50,000-token vocabulary. Which rows of the <em>input</em> embedding table get a nonzero gradient?</p>
+    <ol class="q-src">
+      <li>Only the 3,000 rows for tokens in the batch</li>
+      <li>All 50,000 rows equally</li>
+      <li>None. Embeddings are frozen after initialisation.</li>
+      <li>Only the row of the most frequent token</li>
+    </ol>
+    <div class="q-explain">With $e = xE$ and a one-hot $x$, a row only affects the loss if its token appeared. (With weight tying the same matrix also serves as the output layer, whose softmax does send a gradient to every row.)</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">The final hidden vector is $h$, and the unembedding has a column $u_i$ for each token. The next-token probabilities are…</p>
+    <ol class="q-src">
+      <li>the entries of $h$ directly</li>
+      <li>$\cos(h, u_i)$ for each $i$, which already sum to 1</li>
+      <li>$\mathrm{softmax}$ of the logits $h \cdot u_i$ (P3.2)</li>
+      <li>the row of $E$ closest to $h$, with probability 1</li>
+    </ol>
+    <div class="q-explain">The logits are dot products $h\cdot u_i$, and softmax turns them into a distribution. Cosines don't sum to 1, and the model gives every token some probability.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>The embedding table $E$ is $V \times d$; token $i$'s vector is row $i$, the same as one-hot $\times E$.</li>
+    <li>Embeddings are <strong>learned</strong> by the training objective; tokens in similar contexts end up pointing in similar directions.</li>
+    <li><strong>Cosine similarity</strong> compares directions: 1 same, 0 unrelated, −1 opposite.</li>
+    <li>Analogy arithmetic (king − man + woman ≈ queen) is real but fragile: it excludes the inputs, varies by relation and reflects bias.</li>
+    <li>The <strong>unembedding</strong> $W_U$ maps the final vector to logits by dot products; <strong>weight tying</strong> sets $W_U = E^\top$.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>In NumPy: show that one-hot × E is a row lookup, write cosine similarity, find nearest neighbours, solve an analogy (with and without excluding the inputs), and compute tied output logits. About 15 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p3-4-embeddings.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p3-4-a","front":"What is an embedding table, and what does it do with token ID $i$?","back":"A learned $V \\times d$ matrix $E$ (one row per vocabulary entry). Token $i$ becomes row $i$, which equals one-hot$(i) \\times E$; in practice it's an index lookup."},
+  {"id":"p3-4-b","front":"Write cosine similarity and give its range.","back":"$\\cos(a,b) = \\dfrac{a\\cdot b}{\\lVert a\\rVert\\,\\lVert b\\rVert}$, from −1 (opposite) through 0 (perpendicular) to 1 (same direction). Lengths are divided out."},
+  {"id":"p3-4-c","front":"How are embeddings learned, and why do similar tokens get similar vectors?","back":"They start random and are trained by backprop on the model's loss. Tokens in similar contexts must produce similar predictions, so their vectors are pushed in similar directions (distributional hypothesis)."},
+  {"id":"p3-4-d","front":"king − man + woman ≈ queen: name two caveats.","back":"The search excludes the input words (otherwise 'king' often wins); it works much better for some relation types than others; embeddings also encode social biases from the training text."},
+  {"id":"p3-4-e","front":"What is the unembedding, and what is weight tying?","back":"The output matrix $W_U$ ($d \\times V$) turning the final vector $h$ into logits $h\\cdot u_i$. Weight tying sets $W_U = E^\\top$, saving $V \\times d$ parameters (used in GPT-2 and Gemma)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p3-4-embedding.js"></script>
+</body>
+</html>

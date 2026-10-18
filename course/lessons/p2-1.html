@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p2-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Loss functions · LLMs, Animated</title>
+<meta name="description" content="How a model measures how wrong it is: mean squared error, cross-entropy for next-token prediction, and why training minimises the average loss over a dataset.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Loss functions</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Machine-learning basics</span></div>
+<p class="lede">A model can't get better until it can measure how wrong it is. A <strong>loss function</strong> turns "how wrong" into a single number. Training is nothing more than pushing that number down.</p>
+
+<div class="cover"><img src="../assets/img/cover-p2.webp" alt="Illustration: a glowing ball rolling down a winding path into the lowest valley of a hilly landscape." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what a loss function is and why training minimises its <em>average</em> over a dataset.</li>
+    <li>Compute mean squared error and cross-entropy by hand.</li>
+    <li>Pick the right loss for regression versus classification and next-token prediction.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-5.html">P1.5 Probability &amp; expectation</a> (averages and expected values) and <a href="p1-6.html">P1.6 Entropy, cross-entropy &amp; KL</a> (where the cross-entropy formula comes from). Next up, <a href="p2-2.html">P2.2 Gradient descent</a> shows how a model actually pushes the loss down.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A loss <em>squares</em> each error before adding them up. Which costs more?</p>
+    <ol class="q-src">
+      <li>One prediction that is off by 2</li>
+      <li>Two predictions that are each off by 1</li>
+      <li>They cost exactly the same</li>
+      <li>It depends on the learning rate</li>
+    </ol>
+    <div class="q-explain">$2^2 = 4$, while $1^2 + 1^2 = 2$. Squaring makes one big miss cost more than several small ones, which is exactly why it's used, and also why outliers can dominate it.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">An LLM gives the correct next token a probability of only 0.01. Its loss on that token, $-\ln 0.01$, is about…</p>
+    <ol class="q-src">
+      <li>0.01</li>
+      <li>0.99</li>
+      <li>4.6</li>
+      <li>100</li>
+    </ol>
+    <div class="q-explain">$-\ln 0.01 \approx 4.6$. A perfect prediction ($p = 1$) scores 0, and the loss climbs steeply as $p$ heads to 0. You'll see that curve below.</div>
+  </div>
+</section>
+
+<h2>A loss is one number for "how wrong"</h2>
+<p>A model is a function $f_\theta$ with adjustable parameters $\theta$. Given an input $x$ it makes a prediction $\hat y = f_\theta(x)$. A <strong>loss function</strong> $\ell(\hat y, y)$ compares that prediction with the right answer $y$ and returns a number: <strong>0 for perfect, bigger for worse</strong>.</p>
+<p>One example tells us little, so we average over the whole training set of $N$ examples:</p>
+$$L(\theta) = \frac{1}{N}\sum_{i=1}^{N} \ell\big(f_\theta(x_i),\, y_i\big)$$
+<p>$L(\theta)$ is the <strong>training loss</strong>: a single number for each setting of the parameters. The sum $\sum_{i=1}^{N}$ adds up the loss of every example $i$, and $\frac{1}{N}$ turns the total into an average. Training means finding the $\theta$ that makes $L$ small.</p>
+<p>Two properties make a loss usable for training:</p>
+<ul>
+  <li><strong>It's a single number.</strong> "Downhill" only makes sense for one quantity. You can't minimise a list of ten scores at once.</li>
+  <li><strong>It's smooth.</strong> A small change in $\theta$ gives a small, measurable change in $L$, so the slope (the gradient) tells us which way to move. Accuracy fails this test: nudge a weight slightly and accuracy usually doesn't change at all, so its gradient is zero almost everywhere. That's why models <em>train</em> on a smooth loss but are often <em>reported</em> by accuracy.</li>
+</ul>
+
+<h2>Regression: mean squared error</h2>
+<p>When the target is a number (a price, a temperature, a score), the standard choice is the <strong>mean squared error</strong>:</p>
+$$\text{MSE} = \frac{1}{N}\sum_{i=1}^{N} \big(y_i - \hat y_i\big)^2$$
+<p>$y_i - \hat y_i$ is the <strong>error</strong> (or <strong>residual</strong>) on example $i$: the target minus the prediction. Squaring it makes every error positive and makes big errors count much more than small ones. Watch it being built for a model that is just a straight line:</p>
+
+<figure class="anim wide" data-anim="p2-1-mse"></figure>
+
+<p>Why squares rather than plain distances? Squared error is smooth everywhere, and its slope is simple: $\frac{d}{d\hat y}(y - \hat y)^2 = -2(y - \hat y)$, which is proportional to the error itself. The alternative, <strong>mean absolute error</strong> (MAE, the average of $|y_i - \hat y_i|$), treats a miss of 4 as only twice as bad as a miss of 2, rather than four times. That makes MAE more robust to outliers, but its slope has the same size no matter how close you are, which makes it less pleasant to optimise.</p>
+<p class="math-note">There's a deeper reason too: if the noise in the targets is Gaussian, minimising MSE gives exactly the <em>maximum-likelihood</em> parameters. Cross-entropy, below, is maximum likelihood for categories.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-loss-darts.webp" alt="A child throwing darts at a board; dotted lines measure how far each dart landed from the bullseye." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You throw five darts. For each one, a dotted line measures <strong>how far it landed from the bullseye</strong>.</p>
+      <p>To get your score for the round, you square each distance (so a dart way off the board counts a <em>lot</em>) and take the average. <strong>A small score means good throwing.</strong> Practising means changing how you throw so that score goes down.</p>
+      <p>Where the analogy breaks: a real model gets a different "bullseye" for every example, and for word prediction the score is about how much it <em>believed</em> in the right answer, not a distance.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>Three examples with targets $y = [3,\ 5,\ 4]$. The model predicts $\hat y = [2.5,\ 5.5,\ 2]$.</p>
+<ol class="steps">
+  <li>Errors $y - \hat y$: $[0.5,\ -0.5,\ 2]$</li>
+  <li>Squares: $[0.25,\ 0.25,\ 4]$. The single big miss dominates.</li>
+  <li>Average: $(0.25 + 0.25 + 4)/3 = 1.5$. So $\text{MSE} = 1.5$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>Targets $y = [2,\ 0,\ 4]$, predictions $\hat y = [3,\ 0,\ 1]$.</p>
+  <ol class="steps">
+    <li>Error on the third example, $y_3 - \hat y_3$: <span class="blank" data-answer="3" data-tol="0.001" data-hint="Target minus prediction: 4 − 1."></span></li>
+    <li>Sum of the three squared errors: <span class="blank" data-answer="10" data-tol="0.001" data-hint="The errors are −1, 0 and 3. Square each one, then add."></span></li>
+    <li>MSE: <span class="blank" data-answer="3.33" data-tol="0.01" data-hint="Divide the sum by the number of examples, 3."></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="mse-playground">
+  <h3>Playground: fit the line yourself</h3>
+  <p class="math-note" style="margin:0">Move the line $\hat y = w\,x + b$ with the sliders. Each orange square has side equal to one error, so its area is that error squared. The MSE is their average area.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <div style="display:grid;gap:8px">
+      <label><span>Slope w = <output data-o="w">0.50</output></span>
+        <input type="range" data-k="w" min="-1" max="2.5" step="0.01" value="0.5">
+      </label>
+      <label><span>Intercept b = <output data-o="b">0.50</output></span>
+        <input type="range" data-k="b" min="-2" max="4" step="0.01" value="0.5">
+      </label>
+    </div>
+    <div class="pg-buttons">
+      <button type="button" class="btn btn-primary" data-act="best">Show best fit</button>
+      <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+    </div>
+  </div>
+  <div class="chips" role="group" aria-label="Data options" style="margin-top:12px">
+    <button type="button" class="chip" data-act="outlier" aria-pressed="false">Add an outlier</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+
+<h2>Classification and next tokens: cross-entropy</h2>
+<p>When the answer is one of several <strong>categories</strong> (cat or dog; which of 100,000 tokens comes next), the model outputs a probability for each category, usually via a softmax (P3.2). A good model puts a lot of probability on the right one. The <strong>cross-entropy loss</strong> measures exactly that:</p>
+$$\ell = -\ln p_\theta(y \mid x)$$
+<p>$p_\theta(y \mid x)$ is the probability the model gave the <strong>correct</strong> category $y$ for input $x$, and $\ln$ is the natural log. That's the whole formula. In <a href="p1-6.html">P1.6</a> you met the general cross-entropy $H(q, p) = -\sum_k q_k \ln p_k$; when the target $q$ puts all its weight on the correct class (a "one-hot" target), every term but one is zero and it collapses to $-\ln p_{\text{correct}}$.</p>
+
+<figure class="anim wide" data-anim="p2-1-xent"></figure>
+
+<p>Why a logarithm?</p>
+<ul>
+  <li><strong>Likelihood.</strong> The probability a model gives a whole training text is the <em>product</em> of its per-token probabilities. Logs turn that product into a sum, so minimising the average $-\ln p$ is the same as <strong>maximising the likelihood</strong> of the training data.</li>
+  <li><strong>Confident mistakes are expensive.</strong> $-\ln p$ heads to infinity as $p \to 0$, so the model is pushed hard never to rule out what actually happens.</li>
+  <li><strong>Clean gradients.</strong> Combined with softmax, the gradient with respect to the model's raw scores (logits) is just $p - q$: predicted probabilities minus the one-hot target.</li>
+</ul>
+<p>A useful reference point: a model that spreads probability evenly over a vocabulary of $V$ tokens has loss $\ln V$. For GPT-2's 50,257-token vocabulary that's $\ln 50{,}257 \approx 10.8$, roughly where an untrained LLM's loss curve begins. Training drives it down to a few nats per token; Karpathy's nanoGPT reproduction of the 124M-parameter GPT-2, for example, reaches about 2.85 on its OpenWebText validation set. (Using $\ln$ means the loss is measured in <strong>nats</strong>; with $\log_2$ it would be bits.)</p>
+
+<h3>Worked example</h3>
+<p>A model reads "The cat sat on the" and gives the correct next token, <em>mat</em>, probability $0.25$.</p>
+<ol class="steps">
+  <li>Loss on this token: $-\ln 0.25 = \ln 4 \approx 1.386$.</li>
+  <li>If it had given <em>mat</em> probability $0.5$ instead: $-\ln 0.5 \approx 0.693$. Doubling the probability lowered the loss by exactly $\ln 2$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>Over a three-token sentence, a model gives the correct tokens probabilities $0.5$, $0.25$ and $0.8$.</p>
+  <ol class="steps">
+    <li>Loss on the third token, $-\ln 0.8$: <span class="blank" data-answer="0.223" data-tol="0.005" data-hint="ln 0.8 ≈ −0.223, so −ln 0.8 ≈ ?"></span></li>
+    <li>Average loss over the three tokens: <span class="blank" data-answer="0.767" data-tol="0.01" data-hint="(0.693 + 1.386 + 0.223) / 3."></span></li>
+  </ol>
+</section>
+
+<h2>Why minimise the average over a dataset?</h2>
+<p>We don't care about one example; we want the model to do well on <strong>all</strong> the data it might see. The training average is our best estimate of the <em>expected</em> loss over that whole distribution, $\mathbb{E}_{(x,y)}\left[\ell(f_\theta(x), y)\right]$ (P1.5). Fitting a model by minimising it is called <strong>empirical risk minimisation</strong>.</p>
+<p>We use the <em>mean</em> rather than the sum so the loss doesn't grow with the size of the dataset or batch. A loss of 2.1 means the same thing on 32 examples or on a million tokens, which keeps the learning rate meaningful when you change the batch size. And because the loss is an average, the average over a random <strong>mini-batch</strong> is an unbiased estimate of it, which is what makes mini-batch gradient descent (P2.2) work.</p>
+<p>The last step of the first animation showed the result: for each parameter setting there's one loss value, so the loss forms a <strong>landscape</strong> over parameter space. For a line fitted with MSE it's a perfect bowl with a single bottom. For a neural network it's bumpy and high-dimensional, but the job is the same: find a low point.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> pretraining minimises the average next-token cross-entropy over trillions of tokens, and supervised fine-tuning (M3.1) uses the same loss, just averaged over the response tokens only. Later stages swap in other losses: a pairwise loss for reward models (M3.2), the DPO loss (M3.4). Each one is still "one smooth number to push down". Evaluations then report things the loss can't capture directly, like benchmark accuracy (M4.2), and $e^{\text{loss}}$, which is <strong>perplexity</strong> (M4.1).</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why do LLMs train on cross-entropy rather than directly on "fraction of next tokens guessed correctly"?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Accuracy only changes when the top guess flips, so tiny parameter changes usually leave it unchanged and its gradient is zero almost everywhere. Cross-entropy, $-\ln p_{\text{correct}}$, is smooth: every bit of extra probability on the right token lowers it, so gradient descent always knows which way to move, and confident mistakes are punished hard.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Targets $y = [1,\ 4]$, predictions $\hat y = [2,\ 4]$. What is the MSE?</p>
+    <ol class="q-src">
+      <li>0.5</li>
+      <li>1</li>
+      <li>0.25</li>
+      <li>2</li>
+    </ol>
+    <div class="q-explain">Errors are $-1$ and $0$; squares $1$ and $0$; mean $= 1/2 = 0.5$. Forgetting to divide by $N$ gives 1.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model gives the correct token probability $0.5$ at one position and $0.25$ at another. Its average cross-entropy over the two is about…</p>
+    <ol class="q-src">
+      <li>0.375</li>
+      <li>1.04</li>
+      <li>0.69</li>
+      <li>2.08</li>
+    </ol>
+    <div class="q-explain">$-\ln 0.5 \approx 0.693$ and $-\ln 0.25 \approx 1.386$; their mean is about $1.04$. 0.375 averages the probabilities, which isn't the loss; 2.08 is the sum, not the mean.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which loss suits which task?</p>
+    <ol class="q-src">
+      <li>Cross-entropy for predicting a house price, MSE for the next token</li>
+      <li>Accuracy for both, since it's what we report</li>
+      <li>MSE for both: squared error works on anything</li>
+      <li>MSE for the house price, cross-entropy for the next token</li>
+    </ol>
+    <div class="q-explain">Numbers → squared error. Categories (and tokens are categories) → $-\ln p_{\text{correct}}$. Accuracy can't be trained on directly: its gradient is zero almost everywhere.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Gradient descent (P2.2) usually computes the loss on a small mini-batch, not the whole dataset. Why is that still sound?</p>
+    <ol class="q-src">
+      <li>Because the loss is a sum, and a mini-batch sum equals the full sum</li>
+      <li>Because mini-batch losses are always lower</li>
+      <li>Because the loss is an average, so a random mini-batch's average (and its gradient) is an unbiased, if noisy, estimate of the full one</li>
+      <li>It isn't. The full dataset is always required.</li>
+    </ol>
+    <div class="q-explain">The training loss is a mean over examples. A random sample's mean estimates it without bias, and the same holds for its gradient. That's why every LLM can be trained one batch at a time.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A <strong>loss</strong> turns "how wrong" into one smooth number; training minimises its <strong>average</strong> over the data.</li>
+    <li><strong>MSE</strong> $=\frac1N\sum(y_i-\hat y_i)^2$ for numbers: smooth, and big errors cost a lot.</li>
+    <li><strong>Cross-entropy</strong> $= -\ln p_{\text{correct}}$ for categories and next tokens. Minimising it maximises the likelihood of the data.</li>
+    <li>Using the mean keeps the loss comparable across dataset and batch sizes, and makes mini-batch estimates unbiased.</li>
+    <li>Accuracy is what we often report, but it can't be trained on directly: its gradient is zero almost everywhere.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p2-1-a","front":"What is a loss function, and what does training do with it?","back":"A function that scores how wrong a prediction is (0 = perfect, larger = worse). Training adjusts the parameters to minimise the average loss over the training data, $L(\\theta) = \\frac1N\\sum_i \\ell(f_\\theta(x_i), y_i)$."},
+  {"id":"p2-1-b","front":"Write the mean squared error and say when to use it.","back":"$\\text{MSE} = \\frac1N\\sum_i (y_i - \\hat y_i)^2$. For regression (numeric targets). Squaring makes errors positive, smooth, and punishes big misses heavily."},
+  {"id":"p2-1-c","front":"What is the cross-entropy loss for one next-token prediction?","back":"$-\\ln p_\\theta(\\text{correct token})$. It is 0 when $p = 1$ and grows without bound as $p \\to 0$. The training loss is its average over all tokens."},
+  {"id":"p2-1-d","front":"Why can't we train directly on accuracy?","back":"Accuracy only changes when the top prediction flips, so its gradient is zero almost everywhere. A smooth loss like cross-entropy gives a useful slope at every point."},
+  {"id":"p2-1-e","front":"What is the cross-entropy of a model that guesses uniformly over a vocabulary of $V$ tokens?","back":"$\\ln V$. For GPT-2's 50,257-token vocabulary that's about 10.8 nats, roughly where an untrained LLM's loss starts."},
+  {"id":"p2-1-f","front":"Why average the loss (mean) rather than sum it?","back":"The mean doesn't grow with dataset or batch size, so the loss scale and the learning rate stay comparable, and a random mini-batch mean is an unbiased estimate of the full loss."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p2-1-mse.js"></script>
+<script src="../assets/js/anims/p2-1-xent.js"></script>
+<script src="../assets/js/anims/p2-1-playground.js"></script>
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="cap-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Fine-tune → evaluate → optimize · LLMs, Animated</title>
+<meta name="description" content="The capstone project: pick a narrow task, build the eval set first, fine-tune with LoRA, evaluate with confidence intervals, quantize, and make a ship decision.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Fine-tune → evaluate → optimize</h1>
+<div class="lesson-meta"><span data-mins></span><span>The capstone: everything at once</span></div>
+<p class="lede">Time to use the whole course in one project. You'll make a small open model better at one narrow job, <strong>prove</strong> it with statistics, then make it smaller and faster and prove you didn't break it. This page is the brief: the plan, the checks and the rubric. The starter notebook runs the entire loop in miniature on a CPU.</p>
+
+<div class="cover"><img src="../assets/img/cover-cap.webp" alt="Illustration: a mountain trail passing a workshop, a judging table and a launch pad, with a hiker reaching the summit flag." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Scope a narrow fine-tuning project and build its eval set <em>before</em> training.</li>
+    <li>Compare baseline, fine-tuned and quantized models with confidence intervals and paired tests.</li>
+    <li>Make, and defend, a ship decision from accuracy, size and speed.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> almost everything, but especially <a href="m4-7.html">Building your own evals</a>, <a href="m3-1.html">SFT</a>, <a href="m3-7.html">LoRA &amp; QLoRA</a>, <a href="m4-6.html">Statistical rigor</a>, <a href="m5-1.html">Quantization</a> and <a href="m5-6.html">Batching &amp; serving metrics</a>. Optional extras use <a href="m3-4.html">DPO</a> and <a href="m3-5.html">GRPO</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Two questions to see where you stand.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">When should you build the evaluation set for a fine-tuning project?</p>
+    <ol class="q-src">
+      <li>First, before any training or prompt tweaking</li>
+      <li>After training, from examples the model gets wrong</li>
+      <li>Whenever convenient; it doesn't matter</li>
+      <li>Never: the training loss tells you enough</li>
+    </ol>
+    <div class="q-explain">An eval set built first can't be shaped, even unconsciously, by what your model happens to do well. Building it from the model's failures, or reusing training data, inflates the score.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Your fine-tuned model scores 78% and the baseline 74% on the same 100 questions. What can you conclude?</p>
+    <ol class="q-src">
+      <li>Fine-tuning clearly helped by 4 points</li>
+      <li>Not much yet: with 100 questions each accuracy has a 95% CI of roughly ±8 points; you need a paired test or more data</li>
+      <li>Fine-tuning hurt the model</li>
+      <li>Accuracy is meaningless for LLMs</li>
+    </ol>
+    <div class="q-explain">For $p \approx 0.76$ and $n = 100$, the standard error is $\sqrt{0.76 \times 0.24 / 100} \approx 0.043$, so the 95% CI is about ±8.4 points. A 4-point gap may be noise. A paired comparison on the same questions is tighter, but may still not settle it.</div>
+  </div>
+</section>
+
+<h2>The project in one paragraph</h2>
+<p>Take a small open-weight model (roughly 0.5B to 3B parameters, so a free Colab GPU is enough). Choose one task with a checkable answer. Freeze an eval set. Measure a baseline. Fine-tune with LoRA. Measure again, properly. Quantize. Measure accuracy, size and speed. Decide whether you'd ship it, and write down why. Reading and planning from this page takes about 30 minutes; the project itself is a few evenings.</p>
+
+<figure class="anim wide" data-anim="cap-1-pipeline"></figure>
+<p class="math-note">The numbers in the animation are an illustrative run, but the confidence intervals are computed correctly from them; you'll redo that arithmetic below.</p>
+
+<h2>The brief, step by step</h2>
+<ol class="steps">
+  <li><strong>Pick a narrow task.</strong> Outputs you can check automatically (a label, JSON fields, a number, SQL you can execute), at least a few hundred labelled examples (1,000–5,000 is comfortable), and a baseline that isn't already near-perfect. Good first choices: routing tickets to teams, extracting invoice fields into JSON, unit-conversion word problems. Avoid "make it more helpful" for a first project: it's hard to score.</li>
+  <li><strong>Build the eval set first</strong> (<a href="m4-7.html">M4.7</a>). At least 200 examples, held out, covering every class and difficulty level. Write down the metric and the exact answer-parsing rules. Deduplicate against the training data, including near-duplicates (<a href="m4-3.html">M4.3</a>). Freeze the file and record its hash. Tune prompts on a <em>separate</em> dev split, never on the eval set.</li>
+  <li><strong>Baseline.</strong> Your honest best without training: the instruct model with zero-shot and few-shot prompts. Record accuracy with a 95% CI. Optionally, record a much larger model as a ceiling.</li>
+  <li><strong>Fine-tune</strong> with SFT (<a href="m3-1.html">M3.1</a>) and LoRA (<a href="m3-7.html">M3.7</a>), or QLoRA if memory is tight. Use the same chat template for training and evaluation, compute the loss only on answer tokens, keep a validation split, and stop when validation loss stops improving (<a href="p2-4.html">P2.4</a>). Reasonable starting points: $r = 16$ on all linear layers, learning rate $10^{-4}$–$2\times10^{-4}$, 1–3 epochs.</li>
+  <li><strong>Evaluate with proper statistics</strong> (<a href="m4-6.html">M4.6</a>). Same eval set, same decoding (greedy), same parser. Compare models <strong>paired</strong>, question by question: a paired bootstrap or McNemar's test, reporting the CI of the difference. Then read at least 20 failures and sort them into causes.</li>
+  <li><strong>Optional: preference tuning</strong> (<a href="m3-4.html">M3.4</a>). Worth it only when answers have shades of quality (tone, format). Build pairs with chosen = good answers and rejected = the model's own bad ones, train with DPO, and check accuracy didn't regress. Ambitious alternative: GRPO with your checker as the verifier (<a href="m3-5.html">M3.5</a>).</li>
+  <li><strong>Quantize and measure</strong> (<a href="m5-1.html">M5.1</a>, <a href="m5-6.html">M5.6</a>). Merge the adapter, then quantize the weights to 8-bit and 4-bit. For each version measure: accuracy (paired against the 16-bit model), size in memory, latency (time to first token, tokens per second at batch size 1) and throughput at the batch size you expect. State the hardware.</li>
+  <li><strong>Decide and report.</strong> Write the decision rule <em>before</em> you see the final numbers, for example: "ship the 4-bit model if the lower end of the 95% CI for its accuracy change is above −3 points". Then apply it, and say what you'd do next.</li>
+</ol>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>You're entering a <strong>baking contest</strong> with one recipe: lemon cake. Before baking anything, you write down how the judges will score it and hide a few slices of a cake-tasting test in the freezer so you can't cheat (that's the <strong>eval set</strong>).</p>
+    <p>You taste a shop-bought lemon cake first (the <strong>baseline</strong>). Then you practise your recipe (the <strong>fine-tune</strong>) and run a blind taste test against the shop cake on the same plates (the <strong>paired comparison</strong>). Finally you shrink it into cupcakes that bake faster (<strong>quantization</strong>) and check they still taste as good.</p>
+    <p>Where the analogy breaks: a taste test is one person's opinion, while your eval is hundreds of exact checks, and "tastes about the same" has to become a number with a confidence interval.</p>
+  </div>
+</details>
+
+<h2>The statistics you'll need</h2>
+<p>For an accuracy $\hat p$ measured on $n$ questions, the standard error is $\mathrm{SE} = \sqrt{\hat p(1-\hat p)/n}$, and an approximate 95% confidence interval is $\hat p \pm 1.96\,\mathrm{SE}$.</p>
+<p>To compare two models on the <strong>same</strong> $n$ questions, only the questions where they disagree matter. Let $b$ = questions only model 1 gets right and $c$ = questions only model 2 gets right. Then the accuracy difference and its standard error are:</p>
+$$\hat d = \frac{b - c}{n}, \qquad \mathrm{SE}(\hat d) = \sqrt{\frac{b + c}{n^2} - \frac{(b - c)^2}{n^3}}$$
+<p>This paired SE is usually much smaller than treating the two accuracies as independent, because questions both models get right (or both wrong) add no noise to the difference. The starter notebook gets the same intervals by <strong>bootstrap</strong>: resample the $n$ questions with replacement 10,000 times, recompute the metric each time, and read off the 2.5th and 97.5th percentiles.</p>
+
+<h3>Worked example</h3>
+<p>From the animation: on $n = 200$ tickets the LoRA model gets 150 right; 34 tickets only LoRA gets right, 8 only the base model gets right.</p>
+<ol class="steps">
+  <li><strong>Accuracy:</strong> $\hat p = 150/200 = 0.75$; $\mathrm{SE} = \sqrt{0.75 \times 0.25 / 200} \approx 0.0306$</li>
+  <li><strong>95% CI:</strong> $0.75 \pm 1.96 \times 0.0306 = 0.75 \pm 0.060$, i.e. $[69.0\%,\ 81.0\%]$</li>
+  <li><strong>Paired difference:</strong> $\hat d = (34 - 8)/200 = 0.13$; $\mathrm{SE} = \sqrt{42/200^2 - 26^2/200^3} = \sqrt{0.001050 - 0.0000845} \approx 0.0311$</li>
+  <li><strong>CI of the gain:</strong> $0.13 \pm 1.96 \times 0.0311 = [+6.9,\ +19.1]$ points. It excludes 0, so the gain is real. (Treating the two models as independent would give an SE of about 0.046, half again as wide.)</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Now the 4-bit model against the 16-bit LoRA model, on the same 200 tickets: 6 tickets only the 4-bit model gets right and 10 only the 16-bit model gets right ($b = 6$, $c = 10$). Answer in percentage points.</p>
+  <ol class="steps">
+    <li>Accuracy change $\hat d$, in points: <span class="blank" data-answer="-2" data-tol="0.05" data-hint="(b − c)/n = (6 − 10)/200, times 100."></span></li>
+    <li>$\mathrm{SE}(\hat d)$, in points: <span class="blank" data-answer="2.0" data-tol="0.05" data-hint="√(16/40,000 − 16/8,000,000) ≈ √0.000398, times 100."></span></li>
+    <li>Lower end of the 95% CI, in points: <span class="blank" data-answer="-5.9" data-tol="0.1" data-hint="−2 − 1.96 × 2.0"></span></li>
+    <li>Weights-only size of a 1.5B-parameter model at 4 bits, in GB (ignore scales and overheads): <span class="blank" data-answer="0.75" data-tol="0.01" data-hint="1.5 × 10⁹ parameters × 0.5 bytes."></span></li>
+  </ol>
+  <p class="math-note">So with the decision rule "lower bound above −3 points", this run can't ship the 4-bit model yet: the data are consistent with no loss <em>and</em> with a 6-point loss. Options: a larger eval set (the CI shrinks like $1/\sqrt{n}$), 8-bit instead, or a looser margin if the use case allows.</p>
+</section>
+
+<h2>Rubric</h2>
+<p>Use this to grade yourself, or swap with a friend.</p>
+<ul>
+  <li><strong>Must:</strong> task, metric and answer-parsing rules written down before training.</li>
+  <li><strong>Must:</strong> eval set of at least 200 examples, frozen, deduplicated against training data.</li>
+  <li><strong>Must:</strong> baseline, fine-tuned and quantized models all scored on the identical set with identical decoding.</li>
+  <li><strong>Must:</strong> every accuracy reported with a 95% CI, and every model comparison as a paired difference with its CI.</li>
+  <li><strong>Must:</strong> size and latency measured for each model, with hardware and batch size stated; a decision with its reason.</li>
+  <li><strong>Should:</strong> error analysis (a confusion matrix plus 20 failures read and categorised), training and validation loss curves, and at least two fine-tuning seeds or a note on run-to-run variance.</li>
+  <li><strong>Stretch:</strong> DPO or GRPO on top of SFT; 8-bit vs 4-bit and two quantization methods compared; a short model card listing limitations.</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> this loop is the day-to-day work of applied LLM teams, and most mistakes are not in the training code. They are a missing or leaky eval set, numbers compared across different prompts or decoding settings, and "improvements" that sit inside the noise. If your write-up survives the rubric above, it's better evidence than many published claims.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why do we build the eval set before training, and why compare models with a paired test on that same set?</p>
+  <div class="model-answer"><strong>Model answer:</strong> An eval set fixed in advance can't be tuned to (or leak into) the training process, so its score is an honest estimate of performance on new data. Scoring every model on the same questions lets us look only at the questions where they disagree; that removes the noise from question difficulty, so the paired CI on the difference is much tighter than comparing two independent accuracies.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Review quiz · the whole course</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">During your LoRA fine-tune, training loss keeps falling but validation loss starts rising after epoch 2. What should you do? (P2.4)</p>
+    <ol class="q-src">
+      <li>Train for more epochs until validation loss comes back down</li>
+      <li>Raise the learning rate</li>
+      <li>Use the epoch-2 checkpoint (early stopping); the model has started to overfit</li>
+      <li>Evaluate on the training set instead</li>
+    </ol>
+    <div class="q-explain">Falling training loss with rising validation loss is the signature of overfitting. Keep the checkpoint with the best validation loss, and only then touch the frozen eval set.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which change does <em>not</em> increase the number of trainable LoRA parameters? (M3.7)</p>
+    <ol class="q-src">
+      <li>Raising the rank $r$ from 16 to 32</li>
+      <li>Raising the scaling constant $\alpha$ from 16 to 32</li>
+      <li>Adding adapters to the MLP layers as well as attention</li>
+      <li>Switching to a model with a larger hidden size</li>
+    </ol>
+    <div class="q-explain">$\alpha$ only scales the update $\frac{\alpha}{r}BA$; the parameter count is $r(d+k)$ per adapted layer, which grows with $r$, with $d$ and $k$, and with the number of adapted layers.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why does 4-bit weight quantization speed up generation for a single user? (M5.1, M5.6)</p>
+    <ol class="q-src">
+      <li>4-bit arithmetic is four times faster on every GPU</li>
+      <li>It shortens the prompt</li>
+      <li>It removes attention's quadratic cost</li>
+      <li>Decoding one token at a time is limited by memory bandwidth, and 4-bit weights mean far fewer bytes to read per token</li>
+    </ol>
+    <div class="q-explain">At batch size 1, each new token requires streaming every weight from memory, so bytes moved, not arithmetic, set the speed. At large batch sizes the gain shrinks as compute becomes the limit.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">You discover 15 of your 200 eval tickets have near-duplicates in the training data. What now? (M4.3)</p>
+    <ol class="q-src">
+      <li>Remove the overlap (from training or eval), re-run, and report the change</li>
+      <li>Keep them: more overlap means a higher score</li>
+      <li>Delete the whole eval set and skip evaluation</li>
+      <li>Nothing; near-duplicates can't affect the score</li>
+    </ol>
+    <div class="q-explain">That's contamination: the model may have memorised those answers, inflating accuracy. Fix the split and say so in the report.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">The 4-bit model's accuracy change is −2 points with 95% CI [−6, +2]. Which statement is right? (M4.6)</p>
+    <ol class="q-src">
+      <li>Quantization has no effect on accuracy</li>
+      <li>Quantization costs exactly 2 points</li>
+      <li>No significant drop was detected, but a drop of up to about 6 points is still consistent with the data</li>
+      <li>The 4-bit model is better</li>
+    </ol>
+    <div class="q-explain">"Not significant" is not "no effect". The interval says what's plausible: anything from a 6-point loss to a 2-point gain. Whether that's acceptable is a product decision.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Pick a <strong>narrow, checkable</strong> task, and <strong>freeze the eval set first</strong>.</li>
+    <li>Always have a <strong>baseline</strong>, and score every model on the identical set with identical decoding.</li>
+    <li>Report <strong>CIs</strong>, and compare models with <strong>paired</strong> differences: only disagreements matter.</li>
+    <li>Quantization is a trade: measure <strong>accuracy, size and speed</strong> together, and decide with a rule written in advance.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · the starter notebook</div>
+    <p>The whole pipeline in miniature, in under a minute on CPU: a tiny model and toy task, an eval harness with bootstrap CIs, a LoRA fine-tune, int8 weight quantization, and a final table comparing accuracy and size. Swap in a real model and dataset to start your project.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="cap-1-capstone-starter.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add the capstone's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"cap-1-a","front":"Name the eight steps of the fine-tune → evaluate → optimize pipeline.","back":"Pick a narrow task; build and freeze the eval set; baseline; fine-tune (SFT + LoRA); evaluate with paired statistics; optional preference tuning; quantize and measure; decide and report."},
+  {"id":"cap-1-b","front":"Why build the eval set before training?","back":"So it can't be tuned to or leak into training: it stays an honest estimate on new data. Tune prompts on a separate dev split."},
+  {"id":"cap-1-c","front":"95% CI for an accuracy $\\hat p$ on $n$ questions?","back":"$\\hat p \\pm 1.96\\sqrt{\\hat p(1-\\hat p)/n}$. E.g. 150/200: 0.75 ± 0.060."},
+  {"id":"cap-1-d","front":"Paired accuracy difference and its SE, with $b$, $c$ = questions only model 1 / only model 2 gets right?","back":"$\\hat d = (b-c)/n$, $\\mathrm{SE} = \\sqrt{(b+c)/n^2 - (b-c)^2/n^3}$. Usually much tighter than comparing independent accuracies."},
+  {"id":"cap-1-e","front":"How do you get a bootstrap CI for an eval metric?","back":"Resample the eval questions with replacement many times (e.g. 10,000), recompute the metric each time, and take the 2.5th and 97.5th percentiles."},
+  {"id":"cap-1-f","front":"What should you measure after quantizing, besides accuracy?","back":"Size in memory, latency (time to first token, tokens/s at batch 1) and throughput at your expected batch size, on stated hardware."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/cap-1-pipeline.js"></script>
+</body>
+</html>

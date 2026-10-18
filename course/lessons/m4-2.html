@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m4-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Benchmarks · LLMs, Animated</title>
+<meta name="description" content="What a benchmark really is (dataset + metric + protocol), the main families from MMLU to SWE-bench, the unbiased pass@k estimator, saturation, and why prompt format moves scores.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Benchmarks</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Evaluation</span></div>
+<p class="lede">Every model launch comes with a table of scores: MMLU, GSM8K, HumanEval, SWE-bench. Each is a <strong>benchmark</strong>: a fixed test that lets you compare models on one skill. This lesson shows what's inside one, how the main families work, how to compute pass@k properly, and why the same model can get different scores on the “same” test.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Say what a benchmark is (dataset + metric + protocol) and why the protocol matters as much as the data.</li>
+    <li>Name the main benchmark families and what each measures: knowledge, maths, code, agentic software work.</li>
+    <li>Compute pass@k with the unbiased estimator, and explain benchmark saturation.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="m4-1.html">M4.1 Perplexity</a> (an intrinsic score: how well the model predicts text) and <a href="m1-5.html">M1.5 KV cache &amp; sampling</a> (temperature, which pass@k relies on). The pass@k formula uses basic counting and probability from <a href="p1-5.html">P1.5</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Two reports give the same model different MMLU scores, several points apart. What's the most likely reason?</p>
+    <ol class="q-src">
+      <li>One of the reports is lying</li>
+      <li>MMLU questions are randomly regenerated each time</li>
+      <li>They used different prompts, numbers of examples or scoring methods</li>
+      <li>The model's weights change every time it runs</li>
+    </ol>
+    <div class="q-explain">A benchmark score depends on the <strong>protocol</strong>: the prompt template, the number of few-shot examples, whether the model reasons first, and how its answer is extracted. Change these and the score moves.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A model solves a coding problem in 2 of 10 attempts. If you randomly hand over 5 of those 10 attempts, how likely is it that at least one works?</p>
+    <ol class="q-src">
+      <li>20%</li>
+      <li>100%</li>
+      <li>About 78%</li>
+      <li>10%</li>
+    </ol>
+    <div class="q-explain">The only failure is picking 5 of the 8 failed attempts: $\binom{8}{5}/\binom{10}{5} = 56/252 \approx 0.22$. So the chance of at least one pass is about $0.78$. That's <strong>pass@5</strong>.</div>
+  </div>
+</section>
+
+<h2>A benchmark is three things</h2>
+<p>Perplexity (<a href="m4-1.html">M4.1</a>) asks how well a model predicts text. A benchmark asks a sharper question: <em>can it do this task?</em> Every benchmark has three parts:</p>
+<ol class="steps">
+  <li><strong>Dataset:</strong> fixed inputs with reference answers or tests, e.g. 164 coding problems with unit tests.</li>
+  <li><strong>Metric:</strong> how one output is scored and the scores are combined, e.g. accuracy, exact match on a final number, pass@k, or the percentage of issues resolved.</li>
+  <li><strong>Protocol:</strong> everything else. The prompt template, how many worked examples are shown first (<strong>few-shot</strong> vs <strong>zero-shot</strong>), whether the model may reason step by step, the sampling temperature, the answer-extraction rule, and for agents, which tools and how many steps are allowed.</li>
+</ol>
+<p>For example, a multiple-choice test can be scored by comparing the probabilities the model gives to the letters A–D, or by letting it write an answer and parsing out a letter. These are two protocols, and they can give different scores for the same model. A score reported without its protocol is only half a number.</p>
+
+<h2>The main families</h2>
+<h3>Knowledge and reasoning: MMLU, MMLU-Pro</h3>
+<p><strong>MMLU</strong> (Hendrycks et al., 2021, “Measuring Massive Multitask Language Understanding”) has about 14,000 four-option multiple-choice test questions across 57 subjects, from elementary maths to law and medicine. Random guessing scores 25%. <strong>MMLU-Pro</strong> (Wang et al., 2024) was built once top models crowded MMLU's ceiling: ten options per question (random = 10%), more reasoning-heavy questions, and noisy items removed.</p>
+<h3>Maths: GSM8K, MATH</h3>
+<p><strong>GSM8K</strong> (Cobbe et al., 2021) has about 8,500 grade-school word problems, 1,319 of them in the test set. Each needs a few steps of arithmetic, and the metric is <strong>exact match</strong> on the final number. <strong>MATH</strong> (Hendrycks et al., 2021) has 12,500 competition problems (5,000 for testing) across seven subjects and five difficulty levels. Answers are compared after normalising their LaTeX, so $\tfrac{1}{2}$ and $0.5$ can both count.</p>
+<h3>Code: HumanEval and pass@k</h3>
+<p><strong>HumanEval</strong> (Chen et al., 2021, “Evaluating Large Language Models Trained on Code”) has 164 hand-written Python problems. Each gives a function signature and docstring; the model writes the body, and hidden unit tests decide if it's correct. Code is checked by <em>running</em> it, not by comparing text, which is a big reason code benchmarks are trusted. The metric is <strong>pass@k</strong>, explained below.</p>
+<h3>Agentic software work: SWE-bench</h3>
+<p><strong>SWE-bench</strong> (Jimenez et al., 2024) takes 2,294 real GitHub issues from 12 popular Python repositories. The system gets the repository and the issue text and must produce a patch. The task counts as <strong>resolved</strong> only if the tests that the real fix made pass now pass, and the tests that passed before still pass. This tests navigating a large codebase over many steps, not just writing one function. <strong>SWE-bench Verified</strong> (OpenAI, 2024) is a 500-task subset that human engineers checked for clear issue descriptions and fair tests. Agent scores also depend on the <strong>scaffold</strong>, the tools and loop wrapped around the model, so it's part of the protocol.</p>
+
+<h2>pass@k: give the model k tries</h2>
+<p>For code, one sample can fail on a small slip while the next sample works. <strong>pass@k</strong> is the probability that <em>at least one of k samples</em> passes the tests, averaged over problems. The naive way to measure it is to draw exactly $k$ samples per problem, but that's noisy. Chen et al. instead draw $n \ge k$ samples per problem (they used $n = 200$), count the $c$ that pass, and compute:</p>
+$$\text{pass@}k = \mathop{\mathbb{E}}_{\text{problems}}\left[\,1 - \frac{\binom{n-c}{k}}{\binom{n}{k}}\,\right]$$
+<p>$\binom{n}{k}$ is the number of ways to choose $k$ of the $n$ samples, and $\binom{n-c}{k}$ is the number of those choices that contain only failures. So the fraction is the chance that a random pick of $k$ is all failures, and one minus it is the chance that the pick contains a pass. If $n - c &lt; k$, every pick must include a pass and pass@k is 1. Here's how it works on one problem:</p>
+
+<figure class="anim wide" data-anim="m4-2-pass-at-k"></figure>
+
+<p class="math-note">In code, the binomials get huge, so implementations use the equivalent stable product $1 - \prod_{i=n-c+1}^{n}\left(1 - \frac{k}{i}\right)$.</p>
+
+<h3>Worked example</h3>
+<p>$n = 10$ samples for one problem, $c = 3$ pass.</p>
+<ol class="steps">
+  <li>pass@1 $= 1 - \binom{7}{1}/\binom{10}{1} = 1 - 7/10 = 0.3$, which is simply $c/n$.</li>
+  <li>pass@2 $= 1 - \binom{7}{2}/\binom{10}{2} = 1 - 21/45 \approx 0.533$.</li>
+  <li>pass@5 $= 1 - \binom{7}{5}/\binom{10}{5} = 1 - 21/252 \approx 0.917$.</li>
+  <li>The shortcut $1 - (1 - 0.3)^5 \approx 0.832$ comes out lower. Because $1 - (1-p)^k$ is concave in $p$, plugging in a noisy estimate of $p$ underestimates pass@k on average (Jensen's inequality).</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>$n = 10$ samples, $c = 2$ pass. Compute pass@3.</p>
+  <ol class="steps">
+    <li>All-fail picks of 3, $\binom{8}{3} =$ <span class="blank" data-answer="56" data-tol="0.01" data-hint="8 × 7 × 6 / (3 × 2 × 1)"></span></li>
+    <li>All picks of 3, $\binom{10}{3} =$ <span class="blank" data-answer="120" data-tol="0.01" data-hint="10 × 9 × 8 / 6"></span></li>
+    <li>pass@3 $=$ <span class="blank" data-answer="0.533" data-tol="0.005" data-hint="1 − 56/120"></span></li>
+    <li>And pass@1 $=$ <span class="blank" data-answer="0.2" data-tol="0.005" data-hint="For k = 1 the formula reduces to c/n."></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="passk-playground">
+  <h3>Playground: how fast does pass@k climb?</h3>
+  <p class="math-note" style="margin:0">Choose how many samples you drew ($n$), how many passed ($c$), and the number of tries $k$. Try setting c to 1: even a rarely-correct model looks strong at large $k$.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr">
+    <label><span>samples drawn n = <output data-on>10</output></span><input data-n type="range" min="2" max="50" step="1" value="10"></label>
+    <label><span>samples that pass c = <output data-oc>3</output></span><input data-c type="range" min="0" max="10" step="1" value="3"></label>
+    <label><span>tries k = <output data-ok>5</output></span><input data-k type="range" min="1" max="10" step="1" value="5"></label>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-benchmark-course.webp" alt="Three little robots run the same obstacle course while children in the stands watch and compare them." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Three little robots run the <strong>same obstacle course</strong>, and the kids in the stands compare them. That's a benchmark.</p>
+      <p>It's only fair if everything is the same: the <strong>same obstacles</strong> (the questions), the <strong>same stopwatch</strong> (the score), and the <strong>same rules</strong>, like where you start and whether you may try a jump twice (the protocol). If one robot gets two tries at every jump, its time isn't comparable.</p>
+      <p>And once every robot zooms round the course perfectly, the kids can't tell them apart any more. Time to build a harder course!</p>
+      <p class="math-note">Where it breaks: a robot can be great at this one course and clumsy everywhere else. A benchmark measures one slice of skill, not the whole robot.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Saturation: why new benchmarks keep appearing</h2>
+<p>Benchmarks follow a life cycle. A new one is hard, models climb it, and eventually the top scores bunch up near the ceiling. Then it is <strong>saturated</strong>: the remaining gaps are within noise, and the ceiling itself is below 100% because some questions have wrong or ambiguous labels. A re-annotation of MMLU (Gema et al., 2024, “Are We Done with MMLU?”) estimated errors in a few percent of questions overall, and far more in some subjects.</p>
+<p>The pace is fast. The GPT-4 technical report (OpenAI, 2023) already reported 86.4% on MMLU, five-shot. When SWE-bench appeared, the best model in the paper resolved under 2% of issues; within about two years, leading agent systems were reporting resolving well over half of SWE-bench Verified. So the field keeps moving to harder or fresher tests: MMLU to MMLU-Pro and GPQA, GSM8K to MATH and competition problems, HumanEval to contamination-resistant sets like LiveCodeBench and to SWE-bench. Contamination (<a href="m4-3.html">M4.3</a>) speeds up saturation too: once test questions leak into training data, high scores stop meaning much.</p>
+
+<h2>Small protocol changes, big swings</h2>
+<p>LLMs can be surprisingly sensitive to details that shouldn't matter:</p>
+<ul>
+  <li><strong>Format:</strong> Sclar et al. (2023) varied only the prompt formatting (separators, casing, spacing) and found few-shot accuracy differences of up to 76 points on some tasks for an open 13B model. Larger and instruction-tuned models are usually less fragile, but not immune.</li>
+  <li><strong>Few-shot examples:</strong> which examples you show, and in what order, can move results (Zhao et al., 2021, “Calibrate Before Use”).</li>
+  <li><strong>Scoring:</strong> letter-probability vs generate-and-parse, strict vs lenient answer extraction, with or without step-by-step reasoning.</li>
+</ul>
+<p>The defences are to use a shared, public harness (for example EleutherAI's lm-evaluation-harness or Stanford's HELM, Liang et al., 2022), publish the exact prompts, report the number of shots and the sampling settings, and where possible average over several prompt variants and report the spread. How to put proper error bars on a score is the topic of <a href="m4-6.html">M4.6</a>.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> when you read a model card, check the fine print before comparing numbers. Was it 0-shot or 5-shot? With or without chain-of-thought? pass@1 or pass@10? The full SWE-bench or Verified, and with which scaffold? Public benchmarks are a good first filter for choosing a model, but they rarely look like <em>your</em> task. For that you build your own evals (<a href="m4-7.html">M4.7</a>).</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain what pass@k measures and why Chen et al. compute it from $n &gt; k$ samples with the binomial formula rather than just drawing $k$ samples.</p>
+  <div class="model-answer"><strong>Model answer:</strong> pass@k is the probability that at least one of k sampled solutions passes the unit tests, averaged over problems. Drawing exactly k samples per problem gives a very noisy estimate. Drawing n ≥ k samples, counting the c that pass, and computing $1 - \binom{n-c}{k}/\binom{n}{k}$ uses all the samples and is unbiased, while the shortcut $1-(1-c/n)^k$ underestimates on average.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">To measure pass@10, why sample with temperature above 0 instead of greedy decoding?</p>
+    <ol class="q-src">
+      <li>Greedy decoding is too slow for code</li>
+      <li>Greedy decoding returns the same completion every time, so 10 “tries” are really one</li>
+      <li>Temperature makes each individual sample more accurate</li>
+      <li>The unit tests require random outputs</li>
+    </ol>
+    <div class="q-explain">Greedy decoding always picks the most likely token (M1.5), so repeated runs are identical. pass@k only makes sense with diverse samples. Teams often report pass@1 at low temperature and pass@k at a higher one.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">$n = 5$ samples, $c = 1$ passes. What is the unbiased estimate of pass@5?</p>
+    <ol class="q-src">
+      <li>0.2</li>
+      <li>0.67</li>
+      <li>1</li>
+      <li>0.5</li>
+    </ol>
+    <div class="q-explain">Picking all 5 samples always includes the passing one: $\binom{4}{5} = 0$, so pass@5 $= 1$. The shortcut $1 - 0.8^5 \approx 0.67$ would underestimate.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What does it mean that a benchmark is “saturated”?</p>
+    <ol class="q-src">
+      <li>Top models score near the ceiling, so differences between them are within noise and label errors</li>
+      <li>The benchmark has too many questions to run cheaply</li>
+      <li>Every model scores exactly 100%</li>
+      <li>The benchmark only contains multiple-choice questions</li>
+    </ol>
+    <div class="q-explain">Near the ceiling, a benchmark can no longer separate strong models, and label noise caps the top score below 100%. That's when harder or fresher replacements appear.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Lab A reports “HumanEval 92%” and lab B reports “HumanEval 86%” for their models. What should you check before concluding A is better?</p>
+    <ol class="q-src">
+      <li>Nothing; both are HumanEval</li>
+      <li>Which lab has the larger model</li>
+      <li>Whether the scores were published in the same month</li>
+      <li>That both are the same metric (e.g. pass@1) under the same prompting and sampling protocol, and whether the gap exceeds the noise on 164 problems</li>
+    </ol>
+    <div class="q-explain">Protocol (pass@1 vs pass@10, prompt, temperature) can easily move scores by more than 6 points. And with only 164 problems, one problem is worth about 0.6 points, so small gaps may be noise (M4.6).</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A benchmark is <strong>dataset + metric + protocol</strong>. Change the protocol and the score changes.</li>
+    <li>Families: knowledge (MMLU, MMLU-Pro), maths (GSM8K, MATH), code (HumanEval, pass@k), agentic software work (SWE-bench).</li>
+    <li>Unbiased pass@k: draw $n$ samples, count $c$ passing, compute $1 - \binom{n-c}{k}/\binom{n}{k}$ and average over problems.</li>
+    <li>Benchmarks <strong>saturate</strong>, and contamination speeds that up, so new, harder ones keep appearing.</li>
+    <li>Formatting and few-shot choices can swing scores; use a fixed public harness and report the protocol.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Implement the unbiased pass@k estimator, check it against brute-force enumeration, and run a simulation that shows the shortcut formula is biased low. About 20 minutes, NumPy only.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m4-2-pass-at-k.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m4-2-a","front":"What three things make up a benchmark?","back":"A dataset (inputs + reference answers/tests), a metric (how outputs are scored and aggregated) and a protocol (prompt template, few-shot count, reasoning or not, sampling, answer extraction, tools/scaffold)."},
+  {"id":"m4-2-b","front":"Write the unbiased pass@k estimator and define its symbols.","back":"$\\text{pass@}k = \\mathbb{E}\\big[1 - \\binom{n-c}{k}/\\binom{n}{k}\\big]$ over problems: $n$ samples drawn per problem, $c$ of them pass the tests, $k$ tries allowed."},
+  {"id":"m4-2-c","front":"n = 10, c = 3. pass@1 and pass@5?","back":"pass@1 = 0.3. pass@5 = 1 − C(7,5)/C(10,5) = 1 − 21/252 ≈ 0.917 (the shortcut 1 − 0.7⁵ ≈ 0.832 is biased low)."},
+  {"id":"m4-2-d","front":"Name a benchmark for each: knowledge, grade-school maths, code, agentic software engineering.","back":"MMLU / MMLU-Pro; GSM8K (MATH for competition maths); HumanEval (pass@k); SWE-bench (resolve real GitHub issues; Verified = 500 human-checked tasks)."},
+  {"id":"m4-2-e","front":"What is benchmark saturation, and why does it happen?","back":"Top models score near the ceiling, so the benchmark can't separate them; label errors cap the max, and contamination inflates scores. The field then moves to harder or fresher benchmarks."},
+  {"id":"m4-2-f","front":"Why can the same model get different scores on the same benchmark?","back":"Different protocols: prompt format, number and order of few-shot examples, chain-of-thought or not, letter-probability vs generate-and-parse scoring, sampling settings, scaffold."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m4-2-pass-at-k.js"></script>
+<script src="../assets/js/anims/m4-2-passk-playground.js"></script>
+</body>
+</html>

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p1-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Probability &amp; expectation · LLMs, Animated</title>
+<meta name="description" content="Discrete distributions, expectation as a weighted average, sampling, conditional probability P(next token | context), and why language models add log-probabilities instead of multiplying probabilities.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Probability &amp; expectation</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Math you actually need</span></div>
+<p class="lede">An LLM never simply "knows" the next word. At every step it produces a <strong>probability for every token</strong> in its vocabulary, then picks one. This lesson gives you the vocabulary for that: distributions, expectation, sampling, conditional probability, and the log trick that every training loss relies on.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Check that a discrete distribution is valid, and compute an expectation as a weighted average.</li>
+    <li>Explain how sampling from a distribution works, and what $P(\text{next token} \mid \text{context})$ means.</li>
+    <li>Explain why we multiply probabilities along a sequence but add log-probabilities in practice.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> fractions and percentages, plus the natural log $\ln$ from <a href="p1-3.html">Derivatives &amp; the chain rule (P1.3)</a>. Everything here feeds <a href="p1-6.html">Entropy, cross-entropy &amp; KL (P1.6)</a>, the maths of the LLM training loss.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Only three words can come next. A model says $P(\text{mat}) = 0.5$ and $P(\text{floor}) = 0.3$. What must $P(\text{sofa})$ be?</p>
+    <ol class="q-src">
+      <li>$0.5$</li>
+      <li>$0.2$</li>
+      <li>$0.8$</li>
+      <li>Anything between 0 and 1</li>
+    </ol>
+    <div class="q-explain">Probabilities over all the possible outcomes must add up to 1, so $1 - 0.5 - 0.3 = 0.2$.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Each of a sentence's 100 tokens got probability about 0.1 from the model. Roughly what probability does the model give the whole sentence?</p>
+    <ol class="q-src">
+      <li>$10$ (add them up)</li>
+      <li>$0.1$</li>
+      <li>$10^{-100}$</li>
+      <li>$1/100$</li>
+    </ol>
+    <div class="q-explain">The probability of a sequence is the <em>product</em> of the per-token probabilities: $0.1^{100} = 10^{-100}$. Numbers that small are why we work with logs, as you'll see.</div>
+  </div>
+</section>
+
+<h2>A distribution is a list of probabilities</h2>
+<p>A <strong>discrete probability distribution</strong> assigns a probability $p(x)$ to each possible outcome $x$ from a finite list. Two rules make it valid:</p>
+$$p(x) \ge 0 \text{ for every } x, \qquad \sum_{x} p(x) = 1$$
+<p>A fair die gives each face $\frac{1}{6}$. A language model's outcomes are the tokens in its vocabulary, typically tens of thousands to a few hundred thousand of them (Llama 2 has 32,000; Llama 3 has about 128,000). At every position the model outputs one probability per token. The animation uses a toy distribution over just six words:</p>
+
+<figure class="anim wide" data-anim="p1-5-sampling"></figure>
+
+<p class="math-note">The probabilities in the animation are made up for illustration. The 100 draws are a real simulation (NumPy, fixed seed).</p>
+
+<h2>Expectation: the probability-weighted average</h2>
+<p>If each outcome $x$ carries a number (a payout, a length, a loss), its <strong>expected value</strong> is the average of those numbers, weighted by how likely each one is:</p>
+$$\mathbb{E}[X] = \sum_{x} x \; p(x)$$
+<p>For a fair die: $\frac{1 + 2 + 3 + 4 + 5 + 6}{6} = 3.5$. You can never roll a 3.5, so the expectation needn't be a possible outcome. It's what the <strong>long-run average</strong> settles towards: average many independent rolls and you'll get closer and closer to 3.5 (the law of large numbers).</p>
+<p>This is more than a textbook idea. The training loss of a model is an expectation, "average loss over all the text the model could see", and the loss on a mini-batch is the sample average that estimates it (<a href="p2-2.html">P2.2</a>).</p>
+
+<h3>Worked example</h3>
+<p>A prize wheel pays 10 with probability 0.2, pays 2 with probability 0.5, and pays 0 with probability 0.3.</p>
+<ol class="steps">
+  <li>Valid? $0.2 + 0.5 + 0.3 = 1$ ✓, and none is negative</li>
+  <li>Weighted values: $10 \times 0.2 = 2$, $2 \times 0.5 = 1$, $0 \times 0.3 = 0$</li>
+  <li>$\mathbb{E}[\text{payout}] = 2 + 1 + 0 = 3$ per spin, on average</li>
+</ol>
+
+<h2>Sampling: turning probabilities into a choice</h2>
+<p>To <strong>sample</strong>, lay the probabilities end to end along $[0, 1)$, draw a uniform random number $r$, and pick whichever slice it lands in. Bigger probability means a wider slice and more hits. In code:</p>
+<pre><code>r = random.random()          # uniform in [0, 1)
+total = 0.0
+for token, p in zip(tokens, probs):
+    total += p
+    if r &lt; total:
+        return token
+return tokens[-1]            # guard against rounding</code></pre>
+<p>Text generation is this, repeated: compute a distribution, sample a token, append it, repeat. Always picking the single most likely token instead is <strong>greedy decoding</strong>. Settings like temperature and top-p reshape the distribution before sampling (<a href="m1-5.html">M1.5</a>).</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Imagine a bag of 100 marbles: 45 say "mat", 20 say "floor", 15 say "sofa", and so on. Close your eyes and pull one out. That's <strong>sampling</strong>: "mat" comes out most often, but not every time.</p>
+    <p>Now change the sentence to "The dog slept on the…". You get a <strong>different bag</strong>, with more "floor" marbles. That's what "conditional" means: which bag you use depends on the words before.</p>
+    <p class="math-note">Where it breaks: a real model's bag has around 100,000 kinds of marble, the amounts don't have to be whole numbers, and the model builds a fresh bag for every single position.</p>
+  </div>
+</details>
+
+<h2>Conditional probability: $P(A \mid B)$</h2>
+<p>$P(A \mid B)$ is read "the probability of $A$ <strong>given</strong> $B$": among the cases where $B$ happens, how often does $A$ happen too?</p>
+$$P(A \mid B) = \frac{P(A \text{ and } B)}{P(B)}$$
+<p>Example: it's cloudy on 40% of days and rains on 24% of days, and it only rains when it's cloudy. Then $P(\text{rain} \mid \text{cloudy}) = 0.24 / 0.40 = 0.6$. Knowing it's cloudy raises the chance of rain from 24% to 60%.</p>
+<p>A language model outputs exactly such a conditional distribution: $P(\text{next token} \mid \text{all the tokens so far})$. Chaining them gives the probability of a whole sequence, by the <strong>chain rule of probability</strong>:</p>
+$$P(w_1, w_2, \dots, w_n) = P(w_1)\, P(w_2 \mid w_1)\, P(w_3 \mid w_1, w_2) \cdots P(w_n \mid w_1, \dots, w_{n-1})$$
+<p>Each factor is one forward step of the model. "Autoregressive" just means "generates by using this factorisation, one token at a time".</p>
+
+<h2>Why we add logs instead of multiplying</h2>
+<p>That product is a problem in practice. Suppose a model gives "the" probability 0.05, then "cat" (given "the") 0.01, then "sat" (given "the cat") 0.2:</p>
+$$P = 0.05 \times 0.01 \times 0.2 = 0.0001 \qquad \ln P = (-2.996) + (-4.605) + (-1.609) = -9.210$$
+<p>Three tokens already give $10^{-4}$. A thousand tokens at about 0.1 each give $10^{-1000}$, far below the smallest positive 64-bit float (about $5 \times 10^{-324}$), so the computer rounds it to <strong>exactly 0</strong>. The log-probability, $1000 \times \ln 0.1 \approx -2302.6$, is a perfectly ordinary number. Logs fix three things at once:</p>
+<ul>
+  <li><strong>No underflow:</strong> products of tiny numbers become sums of moderate negative numbers.</li>
+  <li><strong>Same winner:</strong> $\ln$ is increasing, so whatever maximises the probability also maximises the log-probability.</li>
+  <li><strong>Easier calculus:</strong> the derivative of a sum is the sum of derivatives (<a href="p1-3.html">P1.3</a>), one simple term per token.</li>
+</ul>
+<p>In ML, "log" means the natural log $\ln$ unless stated otherwise. Log-probabilities are always $\le 0$, so we usually flip the sign and minimise the <strong>negative log-likelihood</strong>. Averaged per token, that's the LLM training loss, and it gets its full story in the next lesson.</p>
+
+<h3>Your turn (faded example)</h3>
+<p>A model gives the three tokens of a sentence probabilities $0.5$, $0.25$ and $0.1$ (each conditioned on the tokens before it).</p>
+<ol class="steps">
+  <li>Probability of the whole sentence: <span class="blank" data-answer="0.0125" data-tol="0.0001" data-hint="Multiply: 0.5 × 0.25 × 0.1."></span></li>
+  <li>Sum of the natural-log probabilities: <span class="blank" data-answer="-4.382" data-tol="0.01" data-hint="ln 0.5 ≈ −0.693, ln 0.25 ≈ −1.386, ln 0.1 ≈ −2.303. Add them."></span></li>
+  <li>Average negative log-probability per token: <span class="blank" data-answer="1.461" data-tol="0.01" data-hint="Flip the sign and divide by 3."></span></li>
+</ol>
+<p class="math-note">Check: $e^{-4.382} \approx 0.0125$. The last number is the per-token loss an LLM would report for this sentence.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> every forward pass ends in a probability distribution over the vocabulary (made by softmax, <a href="p3-2.html">P3.2</a>). Generation samples from it. Training maximises the summed log-probability of real text. Evaluation reports the average negative log-probability, or its exponential, <strong>perplexity</strong>. Many APIs also return per-token <code>logprobs</code>, which people use to score answers, estimate confidence and build classifiers on top of a model.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why do LLM training and evaluation work with log-probabilities instead of probabilities?</p>
+  <div class="model-answer"><strong>Model answer:</strong> A sequence's probability is a product of many per-token probabilities, which quickly underflows to 0 in floating point. Taking logs turns the product into a sum of manageable numbers, keeps the same best answer (log is increasing), and makes derivatives simple, one term per token.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which of these is a valid probability distribution over three tokens?</p>
+    <ol class="q-src">
+      <li>$(0.5, 0.3, 0.3)$</li>
+      <li>$(0.7, -0.1, 0.4)$</li>
+      <li>$(0.6, 0.4, 0)$</li>
+      <li>$(0.2, 0.2, 0.2)$</li>
+    </ol>
+    <div class="q-explain">It needs non-negative entries that sum to 1. A zero probability is allowed. (A) sums to 1.1, (B) has a negative entry, (D) sums to 0.6.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A generated answer earns reward 1 with probability 0.3 and 0 otherwise. What is the expected reward?</p>
+    <ol class="q-src">
+      <li>$0.3$</li>
+      <li>$1$</li>
+      <li>$0.5$</li>
+      <li>$0$, because you can't earn 0.3</li>
+    </ol>
+    <div class="q-explain">$1 \times 0.3 + 0 \times 0.7 = 0.3$. Like the die's 3.5, an expectation needn't be a possible outcome. It's the long-run average reward per answer.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">It's cloudy on 40% of days, it rains on 24% of days, and it only ever rains when cloudy. What is $P(\text{rain} \mid \text{cloudy})$?</p>
+    <ol class="q-src">
+      <li>$0.24$</li>
+      <li>$0.096$</li>
+      <li>$0.16$</li>
+      <li>$0.6$</li>
+    </ol>
+    <div class="q-explain">$P(\text{rain and cloudy}) / P(\text{cloudy}) = 0.24 / 0.40 = 0.6$. (0.096 multiplies instead of dividing.)</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">(From P1.3) Training increases $\ln p$ for the correct token. What is the derivative $\frac{d}{dp}\ln p$ at $p = 0.1$, and what does it suggest?</p>
+    <ol class="q-src">
+      <li>$0.1$: low-probability tokens barely matter</li>
+      <li>$10$: a correct token the model thought unlikely gets a strong push</li>
+      <li>$-2.3$: the gradient is always negative</li>
+      <li>$1$: every token gets the same push</li>
+    </ol>
+    <div class="q-explain">$\frac{d}{dp}\ln p = \frac{1}{p} = 10$ at $p = 0.1$, versus about 1.1 at $p = 0.9$. The log objective pushes hardest exactly where the model was most wrong.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A discrete distribution: non-negative probabilities that <strong>sum to 1</strong>.</li>
+    <li><strong>Expectation</strong> $\mathbb{E}[X] = \sum_x x\,p(x)$ is a probability-weighted average, the long-run mean.</li>
+    <li><strong>Sampling</strong>: a uniform random number picks a slice of $[0, 1)$; likelier outcomes have wider slices.</li>
+    <li>An LLM outputs $P(\text{next token} \mid \text{context})$; chaining these gives a sequence's probability.</li>
+    <li>Products of probabilities underflow, so we <strong>add log-probabilities</strong>. The negative average is the training loss.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p1-5-a","front":"What makes a list of numbers a valid discrete probability distribution?","back":"Every entry is $\\ge 0$ and they sum to 1 over all possible outcomes."},
+  {"id":"p1-5-b","front":"Define the expectation $\\mathbb{E}[X]$ of a discrete random variable.","back":"$\\sum_x x\\,p(x)$: the probability-weighted average, which the long-run average of samples approaches. (Fair die: 3.5.)"},
+  {"id":"p1-5-c","front":"How do you sample from a discrete distribution?","back":"Lay the probabilities end to end on $[0, 1)$, draw uniform $r$, and pick the outcome whose slice contains $r$ (compare $r$ with the running cumulative sum)."},
+  {"id":"p1-5-d","front":"What is $P(A \\mid B)$, and what conditional distribution does an LLM output?","back":"$P(A \\text{ and } B) / P(B)$: how likely $A$ is among cases where $B$ holds. An LLM outputs $P(\\text{next token} \\mid \\text{previous tokens})$."},
+  {"id":"p1-5-e","front":"Why use log-probabilities for sequences?","back":"$P(\\text{sequence}) = \\prod_t p_t$ underflows to 0 for long texts. $\\log$ turns it into $\\sum_t \\log p_t$: stable, same maximiser, simple derivatives."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p1-5-sampling.js"></script>
+</body>
+</html>

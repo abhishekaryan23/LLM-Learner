@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p2-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Overfitting &amp; data splits · LLMs, Animated</title>
+<meta name="description" content="Why a model that aces its training data can fail on new data: train, validation and test splits, under- and overfitting, regularization, and why held-out data matters for LLM evals.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Overfitting &amp; data splits</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Machine-learning basics</span></div>
+<p class="lede">A model can score perfectly on its training data and still fail on everything new. The only way to know is to test it on data it has <strong>never seen</strong>, and to guard that data carefully.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Diagnose underfitting and overfitting from training and validation error.</li>
+    <li>Explain what the training, validation and test splits are each for, and why the test set is used only once.</li>
+    <li>Describe weight decay, dropout, early stopping and more data, and how LLM training uses them.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p2-1.html">P2.1 Loss functions</a> (we compare losses on different data) and <a href="p2-2.html">P2.2 Gradient descent</a> (weight decay changes the update). It sets up <a href="m4-3.html">M4.3 Contamination</a>, where this lesson's rule meets real LLM benchmarks.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A model scores 99% on its training data but 60% on new examples. What's the most likely story?</p>
+    <ol class="q-src">
+      <li>The model is too simple</li>
+      <li>The learning rate is too small</li>
+      <li>It memorised the training examples instead of learning the general pattern</li>
+      <li>The new examples are mislabelled</li>
+    </ol>
+    <div class="q-explain">A big gap between training and new-data performance is the signature of <strong>overfitting</strong>. A model that's too simple would do badly on <em>both</em>.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You try 50 hyperparameter settings and report the best score on your test set. Is that score a fair estimate of performance on new data?</p>
+    <ol class="q-src">
+      <li>Yes, the test set was never trained on</li>
+      <li>No, it's optimistic: you picked the setting that happened to do best on that particular test set</li>
+      <li>No, it's pessimistic: test sets are always harder</li>
+      <li>Yes, as long as the test set is large</li>
+    </ol>
+    <div class="q-explain">Choosing among many options <em>using</em> the test set lets its quirks leak into your choice. That's what the separate <strong>validation</strong> set is for.</div>
+  </div>
+</section>
+
+<h2>The goal is new data</h2>
+<p>We train on a fixed dataset, but we care about examples the model has never seen: tomorrow's users, the next sentence. Doing well on those is called <strong>generalisation</strong>. The training loss can't measure it, because the model was optimised on exactly those examples. A flexible enough model can drive the training loss to zero just by memorising them.</p>
+<p>So we hold some data back. The difference between the error on held-out data and on training data is the <strong>generalisation gap</strong>. A small gap means what the model learned transfers; a big one means it learned the training set's quirks.</p>
+
+<h2>Three splits, three jobs</h2>
+<ul>
+  <li><strong>Training set:</strong> the only data gradient descent sees. It fits the <em>parameters</em>.</li>
+  <li><strong>Validation set</strong> (or <em>dev set</em>): used to make <em>decisions</em>: model size, learning rate, how long to train, which checkpoint to keep. You'll look at it many times.</li>
+  <li><strong>Test set:</strong> locked away and used <strong>once</strong>, at the end, to report how well the final model does on new data.</li>
+</ul>
+<p>Why the extra split? Every decision you make by looking at a dataset tunes your model to that dataset a little. Try 50 settings and keep the best validation score, and part of that "best" is luck on those particular examples. The validation score becomes optimistic. The test set stays honest only if nothing was chosen with it. For small datasets a split like 80/10/10 is common; with millions of examples, a few thousand held-out ones are usually plenty.</p>
+
+<figure class="anim wide" data-anim="p2-4-overfit"></figure>
+
+<p class="math-note">The fits are ordinary least-squares polynomials, $\hat y = \theta_0 + \theta_1 x + \dots + \theta_d x^d$, fitted to the 10 training points only. "Degree" is the model's flexibility. Weight decay here is a penalty $\lambda \sum_j \theta_j^2$ added to the training MSE, with $\lambda = 10^{-4}$.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-overfitting.webp" alt="Two students facing new test questions: one who memorised the answers panics, while one who understood the material calmly solves them." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Two kids study for a test with the same practice sheet. One <strong>memorises every answer</strong> on the sheet. The other works out <strong>why</strong> the answers are right.</p>
+      <p>On test day the questions are <em>new</em>. The memoriser panics: none of the answers they learned fit. The kid who understood calmly solves them. Both were perfect on the practice sheet; only one learned the real thing.</p>
+      <p>That's why teachers don't put the practice questions on the real test. Where the analogy breaks: a model doesn't choose to memorise; it simply has enough flexibility to fit the noise, unless we stop it.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Reading the two curves</h2>
+<p>Compare training and validation error and you can usually tell which problem you have:</p>
+<ul>
+  <li><strong>Underfitting</strong>: training error is high and validation error about the same. The model is too simple or hasn't trained long enough. Fixes: a bigger model, better features, more training.</li>
+  <li><strong>Overfitting</strong>: training error is low but validation error is much higher, and often <em>rising</em> while training error still falls. Fixes: more data, regularization, a smaller model, or stopping earlier.</li>
+  <li><strong>A good fit</strong>: both are low and close together.</li>
+</ul>
+<p>The same U-shape appears over <em>training time</em>: as a flexible model trains longer, validation loss usually falls, flattens, and eventually starts rising as the model begins to fit noise.</p>
+
+<div class="playground" id="overfit-playground">
+  <h3>Playground: find the sweet spot</h3>
+  <p class="math-note" style="margin:0">The same 10 training points (filled) and 10 validation points (hollow). Slide the polynomial degree and watch both errors. Then switch on weight decay and try degree 9 again.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Polynomial degree = <output>3</output></span>
+      <input type="range" min="0" max="9" step="1" value="3">
+    </label>
+    <div class="chips" role="group" aria-label="Regularization">
+      <button type="button" class="chip" data-act="wd" aria-pressed="false">Weight decay</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+
+<h2>Regularization: making memorising harder</h2>
+<p><strong>Regularization</strong> is anything that nudges a model toward simpler solutions that generalise. The main tools:</p>
+<ul>
+  <li><strong>Weight decay.</strong> Add $\lambda\lVert\theta\rVert^2 = \lambda\sum_j \theta_j^2$ to the loss. Its gradient is $2\lambda\theta$, so every step also pulls each weight a little toward zero, in proportion to its size. Wild fits need huge coefficients, so they become expensive. LLMs use the <strong>AdamW</strong> optimizer (Loshchilov &amp; Hutter, 2019), which applies the shrinkage directly to the weights instead of through the gradient (M2.3); a weight decay of 0.1 appears in many published recipes, such as GPT-3 and Llama 2.</li>
+  <li><strong>Dropout</strong> (Srivastava et al., 2014). During training, randomly zero each activation with probability $p$ and scale the survivors by $\frac{1}{1-p}$, so no unit can rely on any particular other one. At evaluation time it's switched off. Large LLM pretraining runs often set $p = 0$, since they rarely see the same text twice; it's more common when fine-tuning on small datasets.</li>
+  <li><strong>Early stopping.</strong> Track the validation loss during training and keep the checkpoint where it was lowest.</li>
+  <li><strong>More data.</strong> The most reliable fix of all: it's much harder to memorise a million examples than ten. Data augmentation (sensible variations of existing examples) is a cheap version of this.</li>
+</ul>
+
+<h3>Worked example: one step with weight decay</h3>
+<p>A weight $\theta = 2$, gradient of the data loss $0.5$, learning rate $\eta = 0.1$, penalty $\lambda\theta^2$ with $\lambda = 0.01$.</p>
+<ol class="steps">
+  <li>Gradient of the penalty: $2\lambda\theta = 2 \times 0.01 \times 2 = 0.04$.</li>
+  <li>Total gradient: $0.5 + 0.04 = 0.54$.</li>
+  <li>Update: $\theta \leftarrow 2 - 0.1 \times 0.54 = 1.946$. Without decay it would be $1.95$: the extra $-0.004$ is the pull toward zero.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Now $\theta = -3$, data-loss gradient $-0.2$, $\eta = 0.1$, $\lambda = 0.05$.</p>
+  <ol class="steps">
+    <li>Gradient of the penalty, $2\lambda\theta$: <span class="blank" data-answer="-0.3" data-tol="0.001" data-hint="2 × 0.05 × (−3)."></span></li>
+    <li>Total gradient: <span class="blank" data-answer="-0.5" data-tol="0.001" data-hint="Data gradient plus penalty gradient: −0.2 + (−0.3)."></span></li>
+    <li>New $\theta$: <span class="blank" data-answer="-2.95" data-tol="0.001" data-hint="θ − η × total = −3 − 0.1 × (−0.5)."></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">Check the direction: $\theta$ was negative and moved toward zero, as weight decay should.</p>
+</section>
+
+<h2>Why held-out data is sacred for LLM evals</h2>
+<p>For an LLM, a <strong>benchmark</strong> (M4.2) is the test set. Its promise is "this measures performance on questions the model hasn't seen". Two things break that promise:</p>
+<ul>
+  <li><strong>Contamination</strong> (<a href="m4-3.html">M4.3</a>). Pretraining data is scraped from the web, and benchmark questions, answers and discussions end up on the web. If they leak into training, a high score can partly reflect memorisation: the overfitted student who saw the exam in advance.</li>
+  <li><strong>Selecting on the test set.</strong> When many models, prompts or checkpoints are compared, tuned and re-run on the same public benchmark, the field slowly overfits to it, exactly like trying 50 settings on your test set.</li>
+</ul>
+<p>Good practice mirrors this lesson: keep private or freshly written test sets, check training data for overlap with benchmarks, prefer questions written after the model's training cutoff, and make decisions on a validation set rather than the reported one.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> pretraining is unusual. With trillions of tokens, most data is seen about once, so the training loss on the next batch is effectively a validation loss, and classic overfitting is rare. Repetition is where it creeps back: Muennighoff et al. (2023) found that repeating data for up to about 4 epochs was almost as good as fresh data, with rapidly diminishing returns beyond that. Fine-tuning (M3.1) is the opposite: small datasets, a few epochs, and validation loss watched closely, because overfitting arrives fast.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why do we need a validation set <em>and</em> a test set? Wouldn't one held-out set do?</p>
+  <div class="model-answer"><strong>Model answer:</strong> We make many decisions (hyperparameters, model size, when to stop) by comparing scores on held-out data, and each choice fits that data a little, so its score becomes optimistic. The validation set absorbs those decisions; the test set is used once at the end, so it still gives an honest estimate of performance on truly new data.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Training loss is still falling, but validation loss has risen for the last three evaluations. What's the sensible move?</p>
+    <ol class="q-src">
+      <li>Train longer; validation loss always comes back down</li>
+      <li>Raise the learning rate</li>
+      <li>Check the test set to decide</li>
+      <li>Stop, and keep the checkpoint with the lowest validation loss (early stopping), or add regularization</li>
+    </ol>
+    <div class="q-explain">Training loss falling while validation loss rises is the classic overfitting signal. Peeking at the test set to decide would turn it into a second validation set.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which split should you use to choose the learning rate?</p>
+    <ol class="q-src">
+      <li>The training set</li>
+      <li>The validation set</li>
+      <li>The test set</li>
+      <li>Any of them; it doesn't matter</li>
+    </ol>
+    <div class="q-explain">Hyperparameters are decisions, and decisions go on the validation set. The training loss would reward whatever memorises best, and using the test set would make your final number optimistic.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A model's score on a public benchmark jumps after a new pretraining crawl, and many of the benchmark's questions turn out to be in that crawl. The new score…</p>
+    <ol class="q-src">
+      <li>probably overstates how well the model handles genuinely new questions</li>
+      <li>is more trustworthy, because the model has seen more data</li>
+      <li>is unaffected; benchmarks measure reasoning, not memory</li>
+      <li>is lower than the true ability</li>
+    </ol>
+    <div class="q-explain">That's test-set contamination: the "test" data was effectively training data. More in M4.3.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Weight decay adds $\lambda\lVert\theta\rVert^2$ to the loss. In the gradient-descent update $\theta \leftarrow \theta - \eta\,\nabla L$ (P2.2), what does this term do?</p>
+    <ol class="q-src">
+      <li>Adds a constant $\eta\lambda$ to every weight</li>
+      <li>Multiplies the learning rate by $\lambda$</li>
+      <li>Adds $2\lambda\theta$ to the gradient, pulling each weight toward zero in proportion to its size</li>
+      <li>Randomly sets some weights to zero</li>
+    </ol>
+    <div class="q-explain">The derivative of $\lambda\theta^2$ is $2\lambda\theta$, so big weights are pulled back harder. Randomly zeroing things is dropout, and that acts on activations, not weights.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Training error can't measure generalisation; only data the model never trained on can.</li>
+    <li><strong>Train</strong> fits parameters, <strong>validation</strong> makes decisions, <strong>test</strong> is used once to report.</li>
+    <li>Underfit: both errors high. Overfit: training error low, validation error much higher.</li>
+    <li>Regularize with <strong>weight decay</strong>, <strong>dropout</strong>, <strong>early stopping</strong> and, best of all, <strong>more data</strong>.</li>
+    <li>LLM benchmarks are test sets: <strong>contamination</strong> and repeated selection quietly inflate scores.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p2-4-a","front":"What are the training, validation and test sets each for?","back":"Training: fit the parameters. Validation: make decisions (hyperparameters, model size, when to stop). Test: used once at the end for an honest estimate on new data."},
+  {"id":"p2-4-b","front":"How do you tell underfitting from overfitting?","back":"Underfitting: training and validation error both high. Overfitting: training error low, validation error much higher (and often rising while training error falls)."},
+  {"id":"p2-4-c","front":"What does weight decay do to the loss and to each update?","back":"Adds $\\lambda\\lVert\\theta\\rVert^2$ to the loss; its gradient $2\\lambda\\theta$ pulls each weight toward zero in proportion to its size. AdamW applies the shrinkage directly to the weights."},
+  {"id":"p2-4-d","front":"How does dropout work, and when is it active?","back":"During training, each activation is zeroed with probability $p$ and survivors are scaled by $1/(1-p)$. It is switched off at evaluation time (e.g. <code>model.eval()</code>)."},
+  {"id":"p2-4-e","front":"What is early stopping?","back":"Monitor validation loss during training and keep the checkpoint where it was lowest, stopping once it keeps rising."},
+  {"id":"p2-4-f","front":"Why does held-out data matter for LLM benchmarks?","back":"A benchmark is a test set. If its questions leak into pretraining data (contamination) or the field keeps selecting models on it, scores overstate performance on genuinely new questions."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p2-4-overfit.js"></script>
+<script src="../assets/js/anims/p2-4-playground.js"></script>
+</body>
+</html>

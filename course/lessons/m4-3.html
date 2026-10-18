@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m4-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Contamination · LLMs, Animated</title>
+<meta name="description" content="How benchmark test data leaks into pretraining, how much it can inflate scores, and how to detect it (n-gram overlap, canary strings, perturbed variants, membership inference) and prevent it.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Contamination</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Evaluation</span></div>
+<p class="lede">A benchmark only measures skill if the model hasn't seen the test. But LLMs are pretrained on a large slice of the public web, and benchmarks live on the public web. When test questions leak into training data, scores go up without the model getting any better. This is <strong>contamination</strong>.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how test data leaks into training and how much that can inflate a score.</li>
+    <li>Describe four detection methods (n-gram overlap, canary strings, perturbed variants, membership inference) and their blind spots.</li>
+    <li>Choose mitigations: decontamination filters, private held-out sets and fresh, dated benchmarks.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p2-4.html">P2.4 Overfitting &amp; data splits</a> (why the test set must stay unseen), <a href="m2-1.html">M2.1 Pretraining data</a> (web-scale crawls and filtering), <a href="m4-1.html">M4.1 Perplexity</a> and <a href="m4-2.html">M4.2 Benchmarks</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A model scores much higher on an old, widely shared benchmark than on freshly written questions of the same type and difficulty. What's the most likely explanation?</p>
+    <ol class="q-src">
+      <li>Some of the old test questions, or close copies, were in its training data</li>
+      <li>The new questions must be harder</li>
+      <li>Models get worse over time</li>
+      <li>Old benchmarks use an easier metric</li>
+    </ol>
+    <div class="q-explain">If difficulty is matched, a gap between old and fresh questions is the classic sign of contamination: some old answers were remembered rather than worked out.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Some benchmark files contain a long random string with a note saying it should never appear in training data. What is it for?</p>
+    <ol class="q-src">
+      <li>It's a licence key for the dataset</li>
+      <li>It encrypts the answers</li>
+      <li>It lets training pipelines filter the files out, and lets anyone test whether a model has seen them</li>
+      <li>It makes the questions harder for the model</li>
+    </ol>
+    <div class="q-explain">That's a <strong>canary string</strong>. Filters can drop any document containing it, and if a model can complete the string from its first few characters, the benchmark files were probably in its training data.</div>
+  </div>
+</section>
+
+<h2>How test data leaks</h2>
+<p>Pretraining corpora are built from huge web crawls (<a href="m2-1.html">M2.1</a>). Benchmarks are public by design, so their questions turn up in many places: GitHub repos and dataset hubs, paper appendices, blog posts walking through examples, forum threads asking for help on a question, and translations of all of these. Nobody has to cheat on purpose. At trillions of tokens, it's simply hard to keep every copy out.</p>
+<p>Leaks come in different strengths:</p>
+<ul>
+  <li><strong>Exact:</strong> the question and answer appear verbatim.</li>
+  <li><strong>Near-duplicate:</strong> reformatted, reworded slightly or with different whitespace.</li>
+  <li><strong>Semantic:</strong> paraphrased or translated. The same problem, but few shared words.</li>
+  <li><strong>Input only vs input + label:</strong> seeing the question alone helps a little; seeing it with its answer helps a lot.</li>
+</ul>
+<p>Post-training can leak too: a fine-tuning set that copied benchmark items, or synthetic data generated by a model that had memorised them.</p>
+
+<h2>Why it inflates scores</h2>
+<p>A test set is supposed to measure <strong>generalisation</strong>: performance on problems the model has never seen (<a href="p2-4.html">P2.4</a>). A contaminated item measures <strong>recall</strong> instead. The overall score becomes a blend of a real skill and a memory test, and you can't tell how much of each from the number alone.</p>
+<p>There is real evidence that this matters. Zhang et al. (2024) wrote <strong>GSM1k</strong>, 1,250 new grade-school problems matched to GSM8K's style and difficulty. Some model families scored noticeably lower on the fresh problems than on GSM8K, while several frontier models showed little or no drop. <strong>LiveCodeBench</strong> (Jain et al., 2024) dates every coding problem by its contest release; for some models, performance fell off sharply on problems released after the model's training cutoff. Both patterns are what contamination predicts.</p>
+
+<figure class="anim wide" data-anim="m4-3-ngram"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-contamination-peek.webp" alt="A student with a peeked answer sheet sticking out of a pocket finishes a test instantly, while the teacher raises an eyebrow." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A student finishes the test in ten seconds and gets everything right. Wow! But there's an <strong>answer sheet poking out of their pocket</strong>. They saw the answers before the test.</p>
+      <p>The teacher raises an eyebrow and does the smart thing: she <strong>changes the numbers</strong> in the questions. A student who really understands still gets them right. A student who only remembered the answers suddenly gets them wrong.</p>
+      <p class="math-note">Where it breaks: the model isn't sneaky. It read the whole internet, and the answer sheet happened to be lying around in it. Nobody meant to peek.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Detecting contamination</h2>
+<h3>1 · n-gram overlap (needs the training data)</h3>
+<p>Normalise text, split every test item into overlapping word $n$-grams, and look them up in an index of the training corpus. A sequence of $L$ words has $L - n + 1$ $n$-grams. GPT-3 (Brown et al., 2020) flagged test items sharing 13-grams with the training data, and reported scores on the “clean” subset too. The GPT-4 report (OpenAI, 2023) checked for 50-character substrings. <em>Blind spots:</em> paraphrases and translations slip through, and very common phrases cause false alarms, so the choice of $n$ and threshold matters.</p>
+<h3>2 · Canary strings</h3>
+<p>BIG-bench (Srivastava et al., 2022) put a unique GUID, a <strong>canary string</strong>, in its files with a request not to train on them. Training pipelines can drop any document that contains it, and if a model can reproduce the canary from its first characters, the files were probably in its training data. <em>Blind spot:</em> copies of the questions without the canary, such as quotes in a blog post, escape both checks.</p>
+<h3>3 · Perturbed and rephrased variants (black box)</h3>
+<p>Change the numbers or names, shuffle the multiple-choice options, or paraphrase the question, keeping the difficulty the same. A model that solves the problem barely notices. A model that memorised the item drops, or even repeats the old answer. Fresh look-alike sets such as GSM1k are this idea at scale. <em>Blind spot:</em> it's hard to make variants exactly as difficult as the originals.</p>
+<h3>4 · Membership inference</h3>
+<p>Text a model was trained on tends to get an unusually high likelihood, that is, unusually low perplexity (<a href="m4-1.html">M4.1</a>). <strong>Min-K% Prob</strong> (Shi et al., 2024) averages the log-probabilities of the least likely k% of tokens: if even the hardest tokens of a passage are predicted well, the passage was probably seen. Oren et al. (2024) test whether a model prefers a dataset's original example order over shuffled orders, which only makes sense if it saw the dataset in that order. <em>Blind spot:</em> these are statistical hints, not proof. Duan et al. (2024) found that many such attacks barely beat chance on LLM pretraining data.</p>
+
+<h3>Worked example: how much does it inflate?</h3>
+<p>A benchmark has 1,000 items. Decontamination analysis finds 200 of them in the training data. The model gets 95% of the contaminated items right and 60% of the clean ones.</p>
+<ol class="steps">
+  <li>Correct answers: $200 \times 0.95 + 800 \times 0.60 = 190 + 480 = 670$.</li>
+  <li>Reported score: $670 / 1000 = 67\%$.</li>
+  <li>Clean-subset score: $60\%$. That's the better estimate of the real skill.</li>
+  <li>Inflation: $67 - 60 = 7$ percentage points, which is bigger than many gaps between competing models.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>A test question is 30 words long. How many 13-grams does it have? <span class="blank" data-answer="18" data-tol="0.01" data-hint="L − n + 1 with L = 30 and n = 13."></span></li>
+    <li>Another benchmark: 300 of 1,000 items are contaminated, with 90% accuracy on them and 50% on the 700 clean items. The reported score (in %) is <span class="blank" data-answer="62" data-tol="0.1" data-hint="(300 × 0.90 + 700 × 0.50) / 1000, as a percentage."></span></li>
+    <li>Inflation over the clean-subset score, in percentage points: <span class="blank" data-answer="12" data-tol="0.1" data-hint="Reported score minus the clean score of 50%."></span></li>
+  </ol>
+</section>
+
+<h2>Preventing it</h2>
+<ul>
+  <li><strong>Decontaminate the training data:</strong> before training, remove or mask documents that overlap known test sets, and say what you removed. Then report scores on the clean subset alongside the full one.</li>
+  <li><strong>Keep test sets private:</strong> publish a dev set, but keep the real test questions, or at least their answers, off the internet, and score submissions on a server, as Kaggle-style private leaderboards do. Combine with a canary string for the parts that are public.</li>
+  <li><strong>Use fresh, dated benchmarks:</strong> LiveCodeBench (Jain et al., 2024) keeps collecting new contest problems so you can evaluate only on problems released after a model's training cutoff; LiveBench (White et al., 2024) refreshes its questions regularly. These help a lot, but they aren't perfect: cutoff dates are self-reported and fuzzy, new problems can resemble old ones, and difficulty drifts from batch to batch.</li>
+  <li><strong>Protect your own evals:</strong> the private test set you build for your product (<a href="m4-7.html">M4.7</a>) is only useful while it stays private. Don't post it publicly.</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> serious model reports now include a contamination section, and the habit is worth copying. When a new model jumps on an old, famous benchmark but not on fresh ones, suspect contamination before celebrating. Prefer benchmarks with private or dated test sets for decisions, and read “we decontaminated against X” as a claim about exact or near-exact overlap, not about paraphrases.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why can a decontamination filter based on 13-gram overlap still leave a benchmark contaminated, and what black-box check could reveal it?</p>
+  <div class="model-answer"><strong>Model answer:</strong> n-gram filters only catch text that shares long exact word sequences with the test item, so paraphrased, reformatted or translated copies slip through. A black-box check is to perturb the items (new numbers, shuffled options, paraphrases) or use a fresh, matched set: if accuracy drops clearly, or the model repeats the original answer, it likely memorised the originals.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Contamination is the LLM-scale version of which classic machine-learning mistake?</p>
+    <ol class="q-src">
+      <li>Using a learning rate that's too high</li>
+      <li>Leaking test examples into the training data, so the test no longer measures generalisation</li>
+      <li>Training for too few epochs</li>
+      <li>Using too small a batch size</li>
+    </ol>
+    <div class="q-explain">Train/test separation (P2.4) is what makes a test score mean “works on unseen data”. Contamination breaks that separation, so part of the score measures memory.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Membership-inference methods like Min-K% Prob look for which signal that a passage was in the training data?</p>
+    <ol class="q-src">
+      <li>The passage contains a canary string</li>
+      <li>The model refuses to discuss the passage</li>
+      <li>The passage has many long words</li>
+      <li>The model assigns it unusually high likelihood (low perplexity), even on its hardest tokens</li>
+    </ol>
+    <div class="q-explain">Training pushes up the likelihood of seen text (M4.1), so seen passages tend to have fewer “surprising” tokens. It's a statistical hint, not proof.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which contamination would a 13-gram overlap filter most likely <em>miss</em>?</p>
+    <ol class="q-src">
+      <li>A French translation of the test questions</li>
+      <li>A verbatim copy of the test file on GitHub</li>
+      <li>The test questions with extra blank lines between them</li>
+      <li>The test questions in all capital letters</li>
+    </ol>
+    <div class="q-explain">Normalisation (lowercasing, collapsing whitespace) handles the formatting cases. A translation shares almost no word sequences with the original, so overlap filters can't see it.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You're publishing a new benchmark and want it to stay useful for years. Which plan is best?</p>
+    <ol class="q-src">
+      <li>Publish all questions and answers so everyone can reproduce results</li>
+      <li>Publish the questions without a canary string, so filters don't remove them</li>
+      <li>Keep a private held-out test split, add a canary to public files, and refresh with new dated items over time</li>
+      <li>Make the questions as hard as possible so models can't memorise them</li>
+    </ol>
+    <div class="q-explain">Private test data can't be crawled, canaries let others filter and check the public part, and fresh dated items let you evaluate after each model's cutoff. Hard questions can still be memorised once their answers are online.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Contamination</strong> = test items (or close copies) in the training data. Scores then mix skill with memory.</li>
+    <li>Detection: <strong>n-gram overlap</strong> (needs the data), <strong>canary strings</strong>, <strong>perturbed or fresh variants</strong> (black box) and <strong>membership inference</strong> (statistical hints).</li>
+    <li>Paraphrases and translations defeat overlap filters, so no single check is enough.</li>
+    <li>Mitigation: decontaminate and report clean-subset scores, keep private held-out sets, and prefer fresh, dated benchmarks.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m4-3-a","front":"What is benchmark contamination, and why does it inflate scores?","back":"Test items (or close copies) appear in the training data. The model can recall answers instead of solving, so the score measures memory as well as skill and overstates generalisation."},
+  {"id":"m4-3-b","front":"How does n-gram overlap detection work, and what does it miss?","back":"Normalise text, split each test item into overlapping n-grams (L − n + 1 of them) and look them up in the training corpus (e.g. 13-grams in GPT-3). It misses paraphrases and translations, and needs access to the training data."},
+  {"id":"m4-3-c","front":"What is a canary string?","back":"A unique random string (e.g. BIG-bench's GUID) placed in benchmark files. Pipelines can filter documents containing it, and a model that can complete it has probably trained on the files."},
+  {"id":"m4-3-d","front":"Name two black-box ways to detect contamination.","back":"Perturb items (new numbers, shuffled options, paraphrases) or use a fresh matched set (e.g. GSM1k) and look for a drop; membership-inference signals such as unusually low perplexity (Min-K% Prob) or a preference for the dataset's original order."},
+  {"id":"m4-3-e","front":"200 of 1,000 items contaminated (95% right), 800 clean (60% right). Reported vs clean score?","back":"Reported (190 + 480)/1000 = 67%; clean 60%. Inflation 7 points."},
+  {"id":"m4-3-f","front":"Three ways to mitigate contamination.","back":"Decontaminate training data (and report clean-subset scores); keep private held-out test sets; use fresh, dated benchmarks (e.g. LiveCodeBench) evaluated after the model's training cutoff."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m4-3-ngram.js"></script>
+</body>
+</html>

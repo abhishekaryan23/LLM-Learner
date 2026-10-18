@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p3-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tokenization (BPE) · LLMs, Animated</title>
+<meta name="description" content="Why LLMs read subword tokens, how byte-pair encoding learns them merge by merge, vocabulary-size trade-offs, byte-level BPE, and why tokens explain odd LLM behaviour with spelling and arithmetic.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Tokenization (BPE)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Neural nets → language</span></div>
+<p class="lede">An LLM never sees letters or words. Before anything else, a <strong>tokenizer</strong> chops text into pieces from a fixed vocabulary and replaces each piece with an integer ID. How it chops explains a surprising number of LLM quirks, from miscounting the r's in "strawberry" to fumbling long multiplication.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain why LLMs use subword tokens rather than characters or whole words.</li>
+    <li>Run byte-pair encoding by hand: count pairs, merge the most frequent, repeat, then encode new words.</li>
+    <li>Use tokenization to explain odd LLM behaviour with spelling, numbers, other languages and whitespace.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p3-2.html">Softmax</a> (the model outputs one probability per vocabulary entry) and, for the cost argument, <a href="m1-1.html">Attention</a> (its cost grows with the square of the number of tokens). Next, <a href="p3-4.html">Embeddings</a> turns each token ID into a vector.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Two quick guesses.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What does GPT-4 actually receive when you type the question "How many r are in strawberry?"</p>
+    <ol class="q-src">
+      <li>The 29 characters, one at a time</li>
+      <li>The 6 words, each as a dictionary entry</li>
+      <li>A picture of the text</li>
+      <li>7 integer IDs, one per token, where " strawberry" is a single token</li>
+    </ol>
+    <div class="q-explain">With GPT-4's tokenizer, that question is 7 tokens, and " strawberry" (with its leading space) is one of them, ID 73700. The model never sees the letters inside it, which is why counting them is surprisingly hard.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A tokenizer learns its vocabulary from a big pile of text. Which pieces most likely become single tokens?</p>
+    <ol class="q-src">
+      <li>Long, rare words, because they carry the most meaning</li>
+      <li>Frequent words and frequent word parts, like " the" or "ing"</li>
+      <li>Only single letters</li>
+      <li>Exactly the entries of an English dictionary</li>
+    </ol>
+    <div class="q-explain">Byte-pair encoding merges whatever appears together most often, so common words and pieces become single tokens and rare words are built from several pieces.</div>
+  </div>
+</section>
+
+<h2>Characters or words? Neither.</h2>
+<p>A model needs a fixed list of symbols, its <strong>vocabulary</strong>, so that it can output one probability per symbol (P3.2). Two obvious choices both fail:</p>
+<ul>
+  <li><strong>Characters</strong> (or the 256 possible bytes). Tiny vocabulary, and nothing is ever unknown. But sequences get roughly 4 to 5 times longer than with subword tokens, and attention's cost grows with the <em>square</em> of the length (M1.1). Each position also carries very little meaning, so the model must spend layers just assembling letters into words.</li>
+  <li><strong>Whole words.</strong> Short sequences, but the vocabulary explodes: every name, typo, number, URL and inflection ("run", "runs", "running", "rerun") needs its own entry, and anything unseen becomes an "unknown" token. Each form is also learned separately, with no sharing.</li>
+</ul>
+<p><strong>Subword tokens</strong> sit in between. Frequent words get a token of their own; rare words are spelled out of reusable pieces. Typical vocabularies hold tens of thousands to a couple of hundred thousand tokens: 32,000 for Llama 2, 50,257 for GPT-2, about 100,000 for GPT-4, 128,256 for Llama 3 and about 200,000 for GPT-4o.</p>
+
+<h2>Byte-pair encoding</h2>
+<p>The most common way to learn those pieces is <strong>byte-pair encoding (BPE)</strong>. It started as a data-compression trick (Gage, 1994) and was adapted for neural translation by Sennrich, Haddow &amp; Birch (2016). Training it on a corpus is a simple loop:</p>
+<ol class="steps">
+  <li>Start with every word split into single symbols (characters, or bytes).</li>
+  <li>Count every <strong>adjacent pair</strong> of symbols across the corpus, weighted by how often each word occurs.</li>
+  <li><strong>Merge</strong> the most frequent pair into one new symbol everywhere, and record the merge rule.</li>
+  <li>Repeat until the vocabulary reaches the target size. Vocabulary size = base symbols + number of merges.</li>
+</ol>
+<p>The output is an ordered list of merge rules. To <strong>encode</strong> new text, split it into base symbols and replay the merges in the same order.</p>
+
+<figure class="anim wide" data-anim="p3-3-bpe"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-tokenizer-bricks.webp" alt="A child building long shapes from a small set of reusable toy bricks sorted into colour bins." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You have a box of tiny one-stud bricks, one for each letter. Building every word from tiny bricks takes ages.</p>
+      <p>So you notice which two bricks you keep sticking together, and glue them into a new, bigger brick. Then you look again and glue the next most popular pair, maybe a glued brick plus another one. After a while your <strong>colour bins</strong> hold a few hundred handy bricks: some are whole words you build all the time, some are common bits like "est".</p>
+      <p>Now you can build almost anything quickly, and for a shape you've never built before you still have the tiny bricks to fall back on.</p>
+      <p><em>Where it breaks:</em> the "bricks" are picked purely by how often letters appear together, not by meaning, so they often don't match real word parts.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>In the animation's corpus (low ×4, lowest ×7, fastest ×5, longest ×5), why did <strong>s t</strong> win the first round with 22?</p>
+<ol class="steps">
+  <li>"lowest" contains s t once and appears 7 times: $7$.</li>
+  <li>"fastest" contains s t <em>twice</em> (fa<strong>st</strong>e<strong>st</strong>) and appears 5 times: $2 \times 5 = 10$.</li>
+  <li>"longest" contains it once and appears 5 times: $5$. "low" has none.</li>
+  <li>Total: $7 + 10 + 5 = 22$, beating e s ($7 + 5 + 5 = 17$) and l o ($4 + 7 + 5 = 16$) ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A new corpus: <strong>ab</strong> ×4, <strong>abc</strong> ×3, <strong>bc</strong> ×2, split into characters.</p>
+  <ol class="steps">
+    <li>Weighted count of the pair a b: <span class="blank" data-answer="7" data-tol="0.001" data-hint="It appears in ab (×4) and abc (×3)."></span></li>
+    <li>Weighted count of b c: <span class="blank" data-answer="5" data-tol="0.001" data-hint="It appears in abc (×3) and bc (×2)."></span> So the first merge is a + b → ab.</li>
+    <li>Corpus length in symbols before the merge: <span class="blank" data-answer="21" data-tol="0.001" data-hint="2×4 + 3×3 + 2×2."></span> and after it: <span class="blank" data-answer="14" data-tol="0.001" data-hint="ab is now 1 symbol, abc is 2 (ab, c), bc is still 2."></span></li>
+    <li>After merge #2 (ab + c → abc), how many tokens does the unseen word <strong>abcab</strong> become? <span class="blank" data-answer="2" data-tol="0.001" data-hint="Replay the merges in order: a b c a b → ab c ab → abc ab."></span></li>
+  </ol>
+</section>
+
+<h2>Vocabulary size is a trade-off</h2>
+<p>More merges mean longer tokens and shorter sequences, so each forward pass covers more text and the context window holds more. But every extra token adds a row to the embedding table and a column to the output layer (P3.4), each of size $d$, the model width. Rare tokens also get few training examples, so their vectors stay poorly trained. An extreme case was <code>␣SolidGoldMagikarp</code>, a Reddit username that was a single token in the GPT-2 and GPT-3 vocabularies but almost never appeared in the training text. Prompts containing it produced bizarre outputs (Rumbelow &amp; Watkins, 2023).</p>
+
+<div class="playground" id="bpe-playground">
+  <h3>Playground: learn merges, watch the text shrink</h3>
+  <p class="math-note" style="margin:0">BPE trained on the paragraph below. Slide to learn more merges; each coloured chip below is one token.</p>
+</div>
+
+<h2>Byte-level BPE: nothing is ever unknown</h2>
+<p>If the base symbols are characters, a character missing from training (an emoji, a rare script) has no token at all. GPT-2 (Radford et al., 2019) fixed this by running BPE on the <strong>bytes</strong> of the UTF-8 encoding instead. There are only 256 possible bytes, so <em>any</em> string can be encoded. GPT-2's vocabulary is exactly 256 bytes + 50,000 merges + 1 special end-of-text token = 50,257.</p>
+<p>The price is that a token can be part of a character. The emoji 🙂 is 4 bytes in UTF-8, and GPT-4's tokenizer splits it into 2 tokens of 2 bytes each; GPT-4o's larger vocabulary has it as one token.</p>
+<p>Real tokenizers also <strong>pre-tokenize</strong> with a regular expression before BPE: the text is split into chunks such as words (with their leading space), runs of digits and punctuation, and merges never cross chunk boundaries. GPT-4's tokenizer, for example, splits digits into chunks of at most three. Other popular schemes include WordPiece (used by BERT) and SentencePiece (Kudo &amp; Richardson, 2018), a library that tokenizes raw text, spaces included, and powers T5 and the first two Llama generations (BPE with a fallback to bytes for unknown characters).</p>
+
+<h2>Tokens are not words</h2>
+<p>Real examples from GPT-4's tokenizer (<code>cl100k_base</code>), with ␣ marking a space that is part of the token:</p>
+<ul>
+  <li><code>␣strawberry</code> is <strong>one</strong> token, but at the very start of a text, without the space, it's <code>str</code> <code>aw</code> <code>berry</code>. The same word can tokenize differently depending on what's around it.</li>
+  <li><code>␣unhappiness</code> becomes <code>␣unh</code> <code>appiness</code>, not "un + happiness". Pieces follow frequency, not grammar.</li>
+  <li><code>␣hello</code> is one token; <code>␣HELLO</code> is two, <code>␣HEL</code> <code>LO</code>. Case matters.</li>
+  <li><code>1234</code> is <code>123</code> <code>4</code>, but <code>12345</code> is <code>123</code> <code>45</code>. The chunks run left to right, so the same token can stand for different place values.</li>
+  <li>"Здравствуйте" (Russian for "hello") takes 14 tokens with GPT-3's tokenizer, 6 with GPT-4's and 1 with GPT-4o's.</li>
+</ul>
+
+<h2>Why tokenization explains odd LLM behaviour</h2>
+<ol class="steps">
+  <li><strong>Spelling and letter counting.</strong> The model sees the ID for <code>␣strawberry</code>, not s-t-r-a-w-b-e-r-r-y. It can only answer "how many r's?" if it has learned each token's spelling indirectly from training data.</li>
+  <li><strong>Arithmetic.</strong> Digits are grouped into chunks that don't line up with place value, so carrying across chunk boundaries is awkward. This is one reason Llama 1 and 2 split every number into single digits (Touvron et al., 2023).</li>
+  <li><strong>Other languages pay more.</strong> Text in languages underrepresented in the tokenizer's training data needs more tokens for the same meaning, so it costs more and fits less in the context window (Petrov et al., 2023).</li>
+  <li><strong>Whitespace and formatting.</strong> " Hello" and "Hello" are different tokens, so a stray trailing space in a prompt can shift what the model expects next. Runs of spaces in code indentation get their own tokens.</li>
+</ol>
+
+<div class="why"><strong>Why this matters in practice:</strong> context windows, API prices and rate limits are all counted in <strong>tokens</strong>. For ordinary English text, GPT-4-era tokenizers average roughly 4 to 5 characters per token (an English paragraph we checked came to 5.0 characters, or 0.9 words, per token with <code>cl100k_base</code>), and many other languages need far more tokens. The tokenizer is also frozen before pretraining: change it, and the embedding table (P3.4) no longer matches, which is why a model and its tokenizer always ship together.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain how BPE builds its vocabulary, and why that makes "how many r's are in strawberry?" hard for an LLM.</p>
+  <div class="model-answer"><strong>Model answer:</strong> BPE starts from single characters or bytes, repeatedly finds the most frequent adjacent pair in the training corpus and merges it into a new token, until the vocabulary reaches a target size. Common words like " strawberry" end up as a single token, so the model receives one ID and never directly sees the individual letters it would need to count.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">During BPE training, which pair gets merged next?</p>
+    <ol class="q-src">
+      <li>The pair that forms a real English word</li>
+      <li>A random pair, to keep the vocabulary diverse</li>
+      <li>The adjacent pair with the highest count across the corpus, weighted by word frequency</li>
+      <li>The longest possible pair</li>
+    </ol>
+    <div class="q-explain">BPE is purely frequency-driven: count all adjacent pairs, merge the top one, recount. That's why tokens often don't match morphemes ("␣unh" + "appiness").</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What is the main advantage of byte-level BPE over character-level BPE?</p>
+    <ol class="q-src">
+      <li>Any string can be encoded, since every text is made of the 256 possible bytes, so there is no "unknown" token</li>
+      <li>Tokens always line up with whole characters</li>
+      <li>Sequences become shorter than with any other tokenizer</li>
+      <li>It needs no training</li>
+    </ol>
+    <div class="q-explain">The base alphabet is all 256 byte values, so nothing is ever out of vocabulary. The cost: a token can be a fragment of a multi-byte character, like half an emoji.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A team grows its vocabulary from 32,000 to 128,000 tokens. What is the most likely effect?</p>
+    <ol class="q-src">
+      <li>Longer sequences and a smaller embedding table</li>
+      <li>No change, since vocabulary size only matters for non-English text</li>
+      <li>The model can no longer encode rare words</li>
+      <li>Shorter sequences for the same text, but bigger embedding and output matrices, and rarer tokens with fewer training examples each</li>
+    </ol>
+    <div class="q-explain">More merges mean longer tokens and fewer of them per text. Every vocabulary entry costs a $d$-sized row in the embedding table and in the output layer, and the rarest tokens are seen less often during training.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">The same document is 1,000 tokens with tokenizer A and 2,000 tokens with tokenizer B. Roughly how many attention scores does each layer and head compute with B, compared with A (M1.1)?</p>
+    <ol class="q-src">
+      <li>The same number</li>
+      <li>About 4 times as many</li>
+      <li>About twice as many</li>
+      <li>Half as many</li>
+    </ol>
+    <div class="q-explain">Attention compares every token with every other one, so the score count grows as $n^2$: $2{,}000^2 / 1{,}000^2 = 4$. A tokenizer that is less efficient for your language makes everything downstream more expensive.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>LLMs read <strong>token IDs</strong>. Subword tokens balance vocabulary size against sequence length.</li>
+    <li><strong>BPE</strong>: start from characters or bytes, repeatedly merge the most frequent adjacent pair, and record the merges; encode by replaying them in order.</li>
+    <li><strong>Byte-level</strong> BPE can encode any string; pre-tokenization keeps merges inside words, numbers and punctuation chunks.</li>
+    <li>Bigger vocabularies give shorter sequences but larger embedding and output matrices, and rarer tokens.</li>
+    <li>Tokens ≠ words: they explain trouble with spelling, digit arithmetic, non-English cost and stray whitespace.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Build a BPE tokenizer from scratch in plain Python: count pairs, merge, train on a small corpus, then encode and decode with a round-trip check, including byte-level text with emoji. About 25 minutes, runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p3-3-bpe-tokenizer.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p3-3-a","front":"Why do LLMs use subword tokens instead of characters or words?","back":"Characters make sequences ~4–5× longer (attention cost grows as $n^2$) and each position carries little meaning. Words make the vocabulary explode and leave unknown words. Subwords keep frequent words whole and build rare ones from pieces."},
+  {"id":"p3-3-b","front":"Describe the BPE training loop.","back":"Split words into base symbols (characters or bytes); count adjacent pairs weighted by word frequency; merge the most frequent pair into a new symbol and record the rule; repeat until the target vocabulary size (base + merges) is reached."},
+  {"id":"p3-3-c","front":"How does a trained BPE tokenizer encode a new word?","back":"Split it into base symbols, then apply the learned merges in the order they were learned. Unseen words still split into known pieces, e.g. slowest → s + lowest."},
+  {"id":"p3-3-d","front":"What is byte-level BPE, and what does it buy?","back":"BPE whose base alphabet is the 256 UTF-8 byte values (GPT-2: 256 + 50,000 merges + 1 special = 50,257). Any string can be encoded, with no unknown token; a token may be part of a character."},
+  {"id":"p3-3-e","front":"Vocabulary size: what do you gain and lose by making it bigger?","back":"Gain: shorter sequences, more text per context window. Lose: bigger embedding and output matrices (V × d each), and rare tokens get few training updates (e.g. glitch tokens like ␣SolidGoldMagikarp)."},
+  {"id":"p3-3-f","front":"Give two LLM quirks that tokenization explains.","back":"Letter counting/spelling: a word like ␣strawberry is one token, so letters aren't visible. Arithmetic: digits are grouped into chunks (123|45) that don't align with place value. Also: non-English text costs more tokens; ' Hello' ≠ 'Hello'."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p3-3-bpe.js"></script>
+<script src="../assets/js/anims/p3-3-bpe-playground.js"></script>
+</body>
+</html>

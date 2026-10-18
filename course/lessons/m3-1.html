@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m3-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SFT &amp; instruction tuning · LLMs, Animated</title>
+<meta name="description" content="How supervised fine-tuning turns a base model into an assistant: instruction data, chat templates with role tokens, and a next-token loss that only counts the answer.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>SFT &amp; instruction tuning</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Post-training</span></div>
+<p class="lede">A pretrained model is a brilliant autocomplete, not an assistant. <strong>Supervised fine-tuning (SFT)</strong> shows it thousands of examples of good answers and trains on them with the same next-token loss as pretraining, with one twist: only the answer counts.</p>
+
+<div class="cover"><img src="../assets/img/cover-m3.webp" alt="Illustration: a friendly robot guided by a human coach along a garden path, with star rewards above good choices." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how a base model differs from an assistant, and what SFT data looks like.</li>
+    <li>Turn a conversation into a chat-template training example and compute its loss with the prompt masked.</li>
+    <li>Say why data quality beats quantity in SFT, and what SFT can't fix on its own.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> the next-token cross-entropy loss from <a href="m2-2.html">The next-token objective</a> (M2.2) and <a href="p2-1.html">Loss functions</a> (P2.1), and the decoder-only model from <a href="m1-4.html">The decoder-only transformer</a> (M1.4). SFT reuses all three unchanged.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A <em>base</em> model (pretrained only, no fine-tuning) is given the text “Capital of Peru?”. What is a likely continuation?</p>
+    <ol class="q-src">
+      <li>Always a polite, direct answer: “The capital of Peru is Lima.”</li>
+      <li>Anything that plausibly follows in a document, such as more quiz questions: “Capital of Chile? Capital of Spain?”</li>
+      <li>A refusal, because it hasn't been trained to answer questions</li>
+      <li>Nothing at all: base models need a special start token</li>
+    </ol>
+    <div class="q-explain">A base model has learned to continue internet text. A lone question often appears in a list of questions, so continuing the list is a perfectly “good” prediction. It may also answer, but nothing makes answering its default.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">When fine-tuning on (prompt, ideal response) pairs, which tokens usually contribute to the loss?</p>
+    <ol class="q-src">
+      <li>Every token in the conversation, prompt included</li>
+      <li>Only the tokens of the assistant's response</li>
+      <li>Only the prompt tokens</li>
+      <li>Only the final token of the response</li>
+    </ol>
+    <div class="q-explain">The prompt is given at inference time, so there's no need to learn to write it. The common default is to <strong>mask</strong> the prompt and train only on the response, as you'll see in the animation.</div>
+  </div>
+</section>
+
+<h2>From autocomplete to assistant</h2>
+<p>Pretraining (module M2) produces a <strong>base model</strong>: a network that predicts the next token of internet-style text. It knows a lot, but its default behaviour is to <em>continue whatever document it is given</em>. A question might be followed by more questions, a forum reply, or an answer in the wrong format.</p>
+<p><strong>Post-training</strong> is everything that turns that base model into a helpful assistant. The classic recipe comes from <strong>InstructGPT</strong> (Ouyang et al., 2022) and has three stages:</p>
+<ol class="steps">
+  <li><strong>SFT</strong> on demonstrations of good answers (this lesson).</li>
+  <li>A <strong>reward model</strong> trained on human comparisons of answers (M3.2).</li>
+  <li><strong>Reinforcement learning</strong> (PPO) against that reward model (M3.3).</li>
+</ol>
+<p>Pipelines in 2026 mix and repeat these stages, adding preference optimization such as DPO (M3.4) and RL with verifiable rewards (M3.5), but SFT almost always comes first.</p>
+
+<h2>What instruction data looks like</h2>
+<p>Each SFT example is a short conversation: an optional <strong>system</strong> message, one or more <strong>user</strong> turns, and the ideal <strong>assistant</strong> reply. Stored as data, it's usually a list of messages:</p>
+<pre><code>{"messages": [
+  {"role": "system", "content": "Be concise."},
+  {"role": "user", "content": "Capital of Peru?"},
+  {"role": "assistant", "content": "Lima."}
+]}</code></pre>
+<p>The replies come from three main sources:</p>
+<ul>
+  <li><strong>People</strong> writing them. InstructGPT's SFT set had about 13,000 training prompts, with demonstrations written by hired labelers.</li>
+  <li><strong>Existing NLP datasets</strong> rewritten as instructions. FLAN (Wei et al., 2021) did this for 60+ datasets and showed that this <strong>instruction tuning</strong> improves zero-shot performance on tasks the model never saw.</li>
+  <li><strong>Synthetic data</strong> generated by a stronger model and then filtered. This is now a large share of most SFT mixes.</li>
+</ul>
+
+<h2>Chat templates: one conversation, one token stream</h2>
+<p>The model only ever sees a flat sequence of tokens. A <strong>chat template</strong> serializes the conversation, using <strong>special role tokens</strong> to mark who is speaking and where each turn ends. Every model family has its own. Two common ones:</p>
+<ul>
+  <li><strong>ChatML</strong> style: <code>&lt;|im_start|&gt;user</code> … <code>&lt;|im_end|&gt;</code> <code>&lt;|im_start|&gt;assistant</code> … <code>&lt;|im_end|&gt;</code></li>
+  <li><strong>Llama 3</strong> style: the role name sits between <code>&lt;|start_header_id|&gt;</code> and <code>&lt;|end_header_id|&gt;</code>, and <code>&lt;|eot_id|&gt;</code> ends each turn</li>
+</ul>
+<p>The animation uses a simplified <code>&lt;user&gt;</code> / <code>&lt;asst&gt;</code> / <code>&lt;end&gt;</code> version. The end-of-turn token matters: training on it is how the model learns to <strong>stop</strong> instead of rambling on into a made-up next user turn.</p>
+
+<figure class="anim wide" data-anim="m3-1-sft"></figure>
+
+<h2>The loss: next-token cross-entropy, on the answer only</h2>
+<p>Let $R$ be the set of positions whose token belongs to the assistant's reply, including the end-of-turn token. The SFT loss is</p>
+$$\mathcal{L}_{\text{SFT}}(\theta) = -\frac{1}{|R|}\sum_{t \in R} \log p_\theta\!\left(x_t \mid x_{&lt;t}\right)$$
+<p>Here $x_t$ is the token at position $t$, $x_{&lt;t}$ is everything before it (the whole prompt included), $p_\theta$ is the model's predicted probability with parameters $\theta$, and $|R|$ is the number of reply tokens. This is exactly the pretraining loss from M2.2. The only change is that the sum runs over $R$ instead of every position.</p>
+<p>In code, masking is one line: set the label of every prompt position to <code>-100</code>, which PyTorch's <code>CrossEntropyLoss</code> ignores by default. The prompt still flows through the model as context; it just isn't graded.</p>
+<p class="math-note">Masking the prompt is the common default, not a law. A few studies (e.g. Shi et al., 2024) find that keeping some loss on the prompt helps when the data is small, so treat it as a tunable choice.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-sft-apprentice.webp" alt="An apprentice chef copying a row of the master's example dishes, getting closer each time." width="1200" height="900" loading="lazy">
+    <div>
+      <p>An apprentice chef already knows lots about food. But they don't yet know <strong>how this restaurant serves a dish</strong>.</p>
+      <p>So the master lays out a row of <strong>example dishes</strong>. The apprentice copies them one by one, and each copy looks a bit more like the master's. Nobody grades how the apprentice <em>read the order slip</em>, only the plate they make.</p>
+      <p><em>Where it breaks:</em> the apprentice only copies. Nobody ever says “this plate is better than that one”, so they can't learn to beat the master. That's what reward models and RL add next.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>The example from the animation: the reply tokens are <code>Lima</code>, <code>.</code>, <code>&lt;end&gt;</code>, and the model gives them probabilities 0.25, 0.80 and 0.50.</p>
+<ol class="steps">
+  <li>Masked positions: the 5 prompt targets (<code>Capital</code> … <code>&lt;asst&gt;</code>) contribute 0.</li>
+  <li>Per-token losses: $-\log 0.25 = 1.39$, $-\log 0.80 = 0.22$, $-\log 0.50 = 0.69$.</li>
+  <li>Mean over $|R| = 3$ tokens: $(1.39 + 0.22 + 0.69)/3 = 0.77$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A templated example has 12 prompt tokens (role tokens included) and a reply of 4 tokens: <code>It</code>, <code>is</code>, <code>Lima</code>, <code>&lt;end&gt;</code>. The model gives them probabilities 0.5, 0.5, 0.25 and 0.5.</p>
+  <ol class="steps">
+    <li>How many positions contribute to the SFT loss? <span class="blank" data-answer="4" data-tol="0" data-hint="Only the reply's tokens, including the end-of-turn token."></span></li>
+    <li>Loss on <code>Lima</code>: <span class="blank" data-answer="1.39" data-tol="0.011" data-hint="−ln 0.25 = ln 4."></span></li>
+    <li>Mean SFT loss: <span class="blank" data-answer="0.87" data-tol="0.011" data-hint="−ln 0.5 ≈ 0.69 three times, plus 1.39, divided by 4."></span></li>
+    <li>Suppose you forget the mask, and each of the 12 prompt positions has loss 3.0. Mean loss over all 16 positions: <span class="blank" data-answer="2.47" data-tol="0.02" data-hint="(12 × 3.0 + the 4 reply losses, which sum to 3.47) / 16."></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">That last number is why masking matters: unmasked, the hard-to-predict prompt dominates the loss and the gradient, even though you only care about the reply.</p>
+</section>
+
+<h2>Quality beats quantity</h2>
+<p><strong>LIMA</strong> (Zhou et al., 2023, “Less Is More for Alignment”) fine-tuned a 65B LLaMA on just <strong>1,000</strong> carefully chosen prompt–response pairs. In their human study, its answers were rated as good as or better than GPT-4's in 43% of comparisons. The authors proposed the <strong>Superficial Alignment Hypothesis</strong>: almost all knowledge comes from pretraining, and SFT mainly teaches the <em>format and style</em> of a good answer.</p>
+<p>Treat that as a strong hint, not a law. It was one evaluation set, and later work shows that more (and more diverse) data still helps for harder skills such as maths, coding and long multi-turn chats. The practical lesson holds up well, though:</p>
+<ul>
+  <li>The model imitates <em>everything</em> in the demos, including mistakes, padding and over-hedging.</li>
+  <li>Deduplicate, filter out wrong or sloppy answers, and cover diverse tasks in a consistent style.</li>
+  <li>A few thousand clean examples often beat a hundred thousand noisy ones.</li>
+</ul>
+
+<h2>What SFT can't do on its own</h2>
+<ul>
+  <li><strong>Only positive examples.</strong> SFT shows what <em>a</em> good answer looks like but never says that answer A is better than answer B. Reward models (M3.2) learn exactly that.</li>
+  <li><strong>Capped by the demonstrator.</strong> It is imitation, so it struggles to beat the people (or models) who wrote the data. Yet people are much better at <em>judging</em> two answers than at writing a perfect one, which is the motivation for preference data.</li>
+  <li><strong>Trained on perfect prefixes.</strong> During SFT the model always continues a flawless reply. At inference it continues its <em>own</em> output, and early mistakes can snowball (“exposure bias”).</li>
+  <li><strong>Can teach making things up.</strong> Training a model to confidently state facts it never learned in pretraining can encourage hallucination (Gekhman et al., 2024 report this effect; how big it is depends on the setup).</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> almost every open-weights assistant goes through SFT first, often on a mix of human-written and synthetic data distilled from stronger models. SFT is also what you'll do to adapt a model to your own domain, usually with LoRA (M3.7) to save memory. And one of the most common fine-tuning bugs is a <strong>chat-template mismatch</strong>: training with one template and serving with another quietly degrades quality. Use the tokenizer's own template (for example <code>apply_chat_template</code> in Hugging Face) for both.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What exactly does the model train on in SFT, and why are the prompt tokens masked?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The conversation is serialized with a chat template into one token sequence, and the model is trained with ordinary next-token cross-entropy, averaged only over the assistant's reply tokens (including end-of-turn). The prompt is still fed in as context, but its labels are set to −100 so it adds no loss: we want the model to learn to <em>answer</em>, not to write prompts, and the prompt is supplied at inference anyway.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Compared with the pretraining loss from M2.2, the SFT loss on a reply token is…</p>
+    <ol class="q-src">
+      <li>A mean-squared error between the predicted and ideal embeddings</li>
+      <li>A KL divergence to the base model's predictions</li>
+      <li>The same next-token cross-entropy, $-\log p_\theta(x_t \mid x_{&lt;t})$, just restricted to reply positions</li>
+      <li>A score from a reward model</li>
+    </ol>
+    <div class="q-explain">SFT changes the <em>data</em> and which positions are graded, not the loss. It's still cross-entropy on the next token.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Why is the end-of-turn token (e.g. <code>&lt;|im_end|&gt;</code>) included in the loss?</p>
+    <ol class="q-src">
+      <li>So the model learns when to stop, instead of continuing into an invented next turn</li>
+      <li>Because special tokens can't be masked</li>
+      <li>It isn't. Special tokens are always masked.</li>
+      <li>To make the loss average over an even number of tokens</li>
+    </ol>
+    <div class="q-explain">Stopping is a behaviour too. If the end token were never trained, the model would have no reason to emit it and would ramble on.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">LIMA fine-tuned a 65B model on just 1,000 examples. Which conclusion is best supported?</p>
+    <ol class="q-src">
+      <li>More SFT data always makes things worse</li>
+      <li>1,000 examples are enough for every skill, including hard maths</li>
+      <li>SFT is mainly where the model learns its facts</li>
+      <li>A small, high-quality set can teach the assistant format, because most knowledge comes from pretraining</li>
+    </ol>
+    <div class="q-explain">That's the Superficial Alignment Hypothesis. It doesn't say more data never helps; later work shows harder skills still benefit from more, diverse data.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Why do most pipelines add a preference or RL stage after SFT?</p>
+    <ol class="q-src">
+      <li>SFT can't change the model's weights</li>
+      <li>SFT only imitates demos; it never learns which of two answers is better, so it is capped by its demonstrators</li>
+      <li>SFT requires a reward model, which RL removes</li>
+      <li>SFT only works on base models smaller than 1B parameters</li>
+    </ol>
+    <div class="q-explain">Comparisons carry information that demonstrations don't (“A beats B”), and they are easier for people to give. Reward models and RL turn that into a training signal.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A <strong>base model</strong> continues documents; <strong>SFT</strong> on prompt → ideal-response pairs teaches it to behave like an assistant.</li>
+    <li>A <strong>chat template</strong> with role tokens turns a conversation into one token stream. Use the same template for training and serving.</li>
+    <li>The SFT loss is ordinary <strong>next-token cross-entropy</strong>, averaged over the <strong>reply tokens only</strong> (prompt labels = −100), end-of-turn included.</li>
+    <li><strong>Quality beats quantity</strong>: the model imitates everything, so curate (LIMA: 1,000 good examples went a long way).</li>
+    <li>SFT only imitates. Learning “A is better than B” needs <strong>preferences</strong>: reward models, RLHF and DPO.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m3-1-a","front":"What is the difference between a base model and an SFT (instruction-tuned) model?","back":"A base model is only pretrained, so it continues documents. An SFT model has been fine-tuned on prompt → ideal-response conversations, so its default is to answer as an assistant and stop."},
+  {"id":"m3-1-b","front":"What is a chat template, and why must it match at inference?","back":"A fixed way to serialize a conversation into tokens, with special role tokens marking speakers and end-of-turn. The model learned that exact format; serving with a different one quietly degrades quality."},
+  {"id":"m3-1-c","front":"Write the SFT loss and say what $R$ is.","back":"$\\mathcal{L} = -\\frac{1}{|R|}\\sum_{t\\in R}\\log p_\\theta(x_t\\mid x_{\\lt t})$, where $R$ is the set of assistant-reply positions (end-of-turn included). Prompt positions are masked (label −100)."},
+  {"id":"m3-1-d","front":"What did LIMA (Zhou et al., 2023) suggest about SFT data?","back":"1,000 carefully curated examples fine-tuned a 65B model into a strong assistant: quality beats quantity, and SFT mostly teaches format and style (the Superficial Alignment Hypothesis). Harder skills still benefit from more data."},
+  {"id":"m3-1-e","front":"Name two things SFT alone can't do.","back":"Learn from comparisons (it never sees that A is better than B), and exceed its demonstrators. It is also trained only on perfect prefixes (exposure bias) and can teach hallucination if demos contain facts the model doesn't know."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m3-1-sft.js"></script>
+</body>
+</html>

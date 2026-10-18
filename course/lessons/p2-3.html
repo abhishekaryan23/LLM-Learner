@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p2-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Backpropagation · LLMs, Animated</title>
+<meta name="description" content="How a network gets the gradient of the loss for every one of its parameters in a single backward sweep: computational graphs, the chain rule node by node, and why it's cheap.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Backpropagation</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Machine-learning basics</span></div>
+<p class="lede">Gradient descent needs the slope of the loss for <em>every</em> parameter: billions of them in an LLM. <strong>Backpropagation</strong> gets them all in a single backward sweep through the network, and that sweep costs only about twice as much as the forward pass.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write a small model as a computational graph and run its forward pass.</li>
+    <li>Run the backward pass by hand: upstream gradient × local derivative at every node, adding up where a value branches.</li>
+    <li>Explain why backprop costs about as much as a couple of forward passes, not one pass per parameter.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-3.html">P1.3 Derivatives &amp; the chain rule</a> (the only math rule backprop uses), <a href="p1-4.html">P1.4 Gradients</a>, <a href="p2-1.html">P2.1 Loss functions</a> and <a href="p2-2.html">P2.2 Gradient descent</a>, which consumes the gradients we compute here.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A model has a billion parameters. You estimate each one's gradient by nudging that parameter and re-running the model. Roughly how many forward passes is that, per training step?</p>
+    <ol class="q-src">
+      <li>1</li>
+      <li>2</li>
+      <li>About a thousand</li>
+      <li>About a billion</li>
+    </ol>
+    <div class="q-explain">One extra forward pass per parameter: a billion passes for a single step. Backpropagation gets the same billion gradients from one forward and one backward pass.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">$f = a \cdot b$ with $a = 3$ and $b = 4$. If you nudge $a$ up by $0.01$, $f$ changes by about…</p>
+    <ol class="q-src">
+      <li>0.03</li>
+      <li>0.04</li>
+      <li>0.07</li>
+      <li>0.12</li>
+    </ol>
+    <div class="q-explain">$\frac{\partial f}{\partial a} = b = 4$, so $f$ moves by $4 \times 0.01 = 0.04$. "The derivative of a product with respect to one input is the other input" is one of the local rules backprop uses at every node.</div>
+  </div>
+</section>
+
+<h2>The problem: one slope per parameter</h2>
+<p>Training needs $\frac{\partial L}{\partial \theta_i}$, the slope of the loss with respect to each parameter $\theta_i$. The obvious way is to nudge each parameter by a tiny $\varepsilon$ and measure how the loss moves:</p>
+$$\frac{\partial L}{\partial \theta_i} \approx \frac{L(\theta_1, \dots, \theta_i + \varepsilon, \dots) - L(\theta)}{\varepsilon}$$
+<p>That works, and it's a great way to <em>check</em> gradients, but it costs one extra forward pass <strong>per parameter</strong>. For a 7-billion-parameter model that's 7 billion forward passes for one step. Hopeless.</p>
+<p><strong>Backpropagation</strong> computes the <em>exact</em> gradient for every parameter with one forward pass and one backward pass. It's a special case of <strong>reverse-mode automatic differentiation</strong> (described by Linnainmaa in 1970) and was popularised for neural networks by Rumelhart, Hinton &amp; Williams (1986), "Learning representations by back-propagating errors".</p>
+
+<h2>Step 1: the model as a graph</h2>
+<p>Any model, from a line to a transformer, is built from simple operations: multiply, add, relu, square, exp. Draw each operation as a box and connect the boxes by the values that flow between them. That's a <strong>computational graph</strong>. Our example is a tiny two-layer network with one hidden unit:</p>
+$$z = w\,x, \qquad h = \text{relu}(z), \qquad \hat y = v\,h, \qquad L = (\hat y - y)^2$$
+<p>$x$ is the input, $y$ the target, $w$ and $v$ the two weights we want to train, and $\text{relu}(z) = \max(0, z)$.</p>
+
+<h2>Step 2: forward, then backward</h2>
+<p>The <strong>forward pass</strong> computes every box in order, from inputs to loss, and <strong>stores</strong> each intermediate value. The <strong>backward pass</strong> then walks the graph in reverse. At each box it applies the chain rule (<a href="p1-3.html">P1.3</a>): if a value $u$ feeds a box whose output is $n$, then</p>
+$$\frac{\partial L}{\partial u} = \frac{\partial L}{\partial n}\cdot\frac{\partial n}{\partial u}$$
+<p>$\frac{\partial L}{\partial n}$ is the <strong>upstream gradient</strong>, already computed one box closer to the loss. $\frac{\partial n}{\partial u}$ is the box's <strong>local derivative</strong>, which depends only on that one simple operation and the values stored in the forward pass. Each box needs only a handful of local rules:</p>
+<ul>
+  <li><strong>add</strong> $n = a + b$: local derivative 1 for both inputs (the gradient is copied).</li>
+  <li><strong>multiply</strong> $n = a\,b$: $\frac{\partial n}{\partial a} = b$ and $\frac{\partial n}{\partial b} = a$ (each input gets the <em>other</em> one).</li>
+  <li><strong>relu</strong>: 1 if the input was positive, 0 otherwise (the gradient passes or is blocked).</li>
+  <li><strong>squared error</strong> $(\hat y - y)^2$: $2(\hat y - y)$ with respect to $\hat y$.</li>
+</ul>
+
+<figure class="anim wide" data-anim="p2-3-backprop"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-backprop-buckets.webp" alt="A bucket line of children passing water; a glowing feedback ribbon travels backward along the line so each child can adjust their bucket." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A line of kids passes buckets of water to fill a pool at the end. The pool comes out too empty.</p>
+      <p>The kid at the pool says to the kid before them, "we were short by this much". That kid works out <strong>their share</strong> of the problem, adjusts their bucket, and passes a message back to the kid before them. The message travels <strong>all the way back down the line</strong>, so every kid learns how to change, from just one trip back.</p>
+      <p>Where the analogy breaks: real backprop doesn't change anything on the way back. It only computes every gradient; the optimizer then updates all the weights at once.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example (the animation, in writing)</h3>
+<p>$x = 1.5$, $w = 2$, $v = 0.5$, $y = 2.5$.</p>
+<ol class="steps">
+  <li><strong>Forward:</strong> $z = 3$, $h = 3$, $\hat y = 1.5$, $L = (1.5 - 2.5)^2 = 1$.</li>
+  <li>$\frac{\partial L}{\partial \hat y} = 2(\hat y - y) = -2$.</li>
+  <li>Through $\hat y = v\,h$: $\frac{\partial L}{\partial v} = -2 \times h = -6$ and $\frac{\partial L}{\partial h} = -2 \times v = -1$.</li>
+  <li>Through relu (input $3 &gt; 0$): $\frac{\partial L}{\partial z} = -1 \times 1 = -1$.</li>
+  <li>Through $z = w\,x$: $\frac{\partial L}{\partial w} = -1 \times x = -1.5$.</li>
+  <li>Both weight gradients are negative, so gradient descent <em>raises</em> both weights. With $\eta = 0.02$: $w = 2.03$, $v = 0.62$, and the loss drops to about $0.37$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same network, new numbers: $x = 2$, $w = 1$, $v = -1$, target $y = 1$.</p>
+  <ol class="steps">
+    <li>Forward pass, loss $L = (\hat y - y)^2$: <span class="blank" data-answer="9" data-tol="0.001" data-hint="z = 2, h = relu(2) = 2, ŷ = −1 × 2 = −2. Then (−2 − 1)²."></span></li>
+    <li>$\frac{\partial L}{\partial \hat y} = 2(\hat y - y)$: <span class="blank" data-answer="-6" data-tol="0.001" data-hint="2 × (−2 − 1)."></span></li>
+    <li>$\frac{\partial L}{\partial v}$: <span class="blank" data-answer="-12" data-tol="0.001" data-hint="Upstream gradient × the other input of the multiply: −6 × h."></span></li>
+    <li>$\frac{\partial L}{\partial w}$: <span class="blank" data-answer="12" data-tol="0.001" data-hint="∂L/∂h = −6 × v = 6. Relu passes it (z = 2 > 0), so ∂L/∂z = 6. Then multiply by x."></span></li>
+  </ol>
+</section>
+
+<h2>Branches: gradients add up</h2>
+<p>Real graphs aren't chains. A value often feeds <strong>several</strong> boxes: a residual connection, a weight reused at every position, an embedding looked up many times in a batch. If $u$ feeds boxes $n_1, \dots, n_k$, it affects the loss along every one of those paths, and the multivariable chain rule adds the contributions:</p>
+$$\frac{\partial L}{\partial u} = \sum_{j=1}^{k} \frac{\partial L}{\partial n_j}\cdot\frac{\partial n_j}{\partial u}$$
+
+<figure class="anim wide" data-anim="p2-3-branch"></figure>
+
+<p>This is why frameworks <strong>accumulate</strong> gradients: in PyTorch, <code>.grad</code> is added to, not overwritten, which is also why training loops call <code>zero_grad()</code> before every backward pass (P4.1, P4.2).</p>
+
+<h2>Why it's so cheap</h2>
+<p>The forward pass visits each box once. The backward pass visits each box once more and does a small, fixed amount of work there: a multiply or two using values already stored. So the whole gradient, for <em>all</em> parameters, costs a small constant multiple of one forward pass, however many parameters there are. Compare that with one forward pass <em>per parameter</em> for nudging.</p>
+<p>For networks dominated by matrix multiplications, the backward pass needs two matrix multiplies for every one in the forward pass (one for the gradient with respect to the weights, one for the gradient with respect to the inputs), so it costs about <strong>2× the forward pass</strong>. That gives the well-known estimate of about $6N$ floating-point operations per training token for a model with $N$ parameters: $2N$ forward plus $4N$ backward (Kaplan et al., 2020).</p>
+<p>The price is <strong>memory</strong>: every intermediate value from the forward pass must be kept until the backward pass uses it. For large models these stored <em>activations</em> can take more memory than the weights themselves, which is why tricks like activation checkpointing (recompute some values instead of storing them) exist (M2.5).</p>
+<p class="math-note">Two consequences you'll meet again: if a relu's input is negative its local derivative is 0 and no gradient flows through it; and multiplying many local derivatives smaller than 1 across many layers can shrink gradients toward zero (<em>vanishing gradients</em>), which residual connections and careful normalisation help prevent.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> you will never write a backward pass by hand. PyTorch's <strong>autograd</strong> (P4.1) records the graph as your code runs and replays it backwards when you call <code>loss.backward()</code>. But backprop explains a lot of practice: why training needs far more memory than inference (stored activations, plus gradients), why training a model costs about 3× the compute of running it on the same tokens, and why gradient clipping, residual connections and normalisation layers exist (keeping gradients well-behaved through dozens of layers).</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does backpropagation get every parameter's gradient for about the cost of a couple of forward passes, when nudging needs one forward pass per parameter?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The forward pass stores every intermediate value. The backward pass then visits each operation once, in reverse, multiplying the upstream gradient by that operation's local derivative (the chain rule), so all the shared work along the way is reused instead of recomputed for each parameter. The total is a small constant multiple of the forward cost, independent of the number of parameters.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A box computes $n = a\cdot b$ with $a = 2$, $b = 5$. The upstream gradient is $\frac{\partial L}{\partial n} = 3$. What is $\frac{\partial L}{\partial a}$?</p>
+    <ol class="q-src">
+      <li>15</li>
+      <li>6</li>
+      <li>10</li>
+      <li>3</li>
+    </ol>
+    <div class="q-explain">Upstream × local: $3 \times \frac{\partial n}{\partial a} = 3 \times b = 15$. Using $a$ instead of $b$ gives the wrong answer 6.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A value $u$ feeds two boxes. Backprop gets a contribution of $2$ through the first and $-5$ through the second. What is $\frac{\partial L}{\partial u}$?</p>
+    <ol class="q-src">
+      <li>$-10$, the product</li>
+      <li>$2$, from the first path only</li>
+      <li>$-3$, the sum</li>
+      <li>$-5$, the larger one</li>
+    </ol>
+    <div class="q-explain">When a value is used in several places, the gradients from all paths <strong>add</strong> (multivariable chain rule).</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">For a large network made mostly of matrix multiplications, how does the backward pass's cost compare with the forward pass's?</p>
+    <ol class="q-src">
+      <li>About the same as one forward pass per parameter</li>
+      <li>Roughly twice the forward pass, regardless of the number of parameters</li>
+      <li>Free: the gradients come out of the forward pass</li>
+      <li>About the square of the forward cost</li>
+    </ol>
+    <div class="q-explain">Each forward matmul needs two in the backward pass (gradients for the weights and for the inputs). Hence the "6N FLOPs per token" rule for training: 2N forward + 4N backward.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Backprop gives $\frac{\partial L}{\partial w} = -1.5$. With learning rate $\eta = 0.1$, what does one step of gradient descent (P2.2) do to $w$?</p>
+    <ol class="q-src">
+      <li>Decreases it by 0.15</li>
+      <li>Sets it to −1.5</li>
+      <li>Decreases it by 1.5</li>
+      <li>Increases it by 0.15</li>
+    </ol>
+    <div class="q-explain">$w \leftarrow w - \eta\,\frac{\partial L}{\partial w} = w - 0.1 \times (-1.5) = w + 0.15$. A negative gradient means "increasing $w$ lowers the loss". Backprop computes the gradient; the optimizer uses it.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A model is a <strong>computational graph</strong> of simple operations.</li>
+    <li><strong>Forward</strong> computes and stores every value; <strong>backward</strong> walks the graph in reverse.</li>
+    <li>At each node: gradient = <strong>upstream gradient × local derivative</strong> (the chain rule).</li>
+    <li>Where a value feeds several nodes, its gradients <strong>add up</strong>.</li>
+    <li>All gradients cost about 2× a forward pass in compute, plus memory for the stored activations.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Build a tiny autograd engine in plain Python and NumPy in about 25 minutes: scalar values that remember how they were made, a backward pass in reverse topological order, gradient accumulation, and a check against numerical gradients. Runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p2-3-backprop.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p2-3-a","front":"What does backpropagation compute, and in how many passes?","back":"The exact gradient of the loss with respect to every parameter (and every intermediate value), using one forward pass and one backward pass."},
+  {"id":"p2-3-b","front":"State the rule applied at every node in the backward pass.","back":"$\\frac{\\partial L}{\\partial u} = \\frac{\\partial L}{\\partial n} \\cdot \\frac{\\partial n}{\\partial u}$: upstream gradient times the node's local derivative (the chain rule)."},
+  {"id":"p2-3-c","front":"Local derivatives: add, multiply, relu?","back":"Add: 1 to each input (copy the gradient). Multiply $a\\cdot b$: $b$ for $a$ and $a$ for $b$. Relu: 1 if the input was positive, else 0."},
+  {"id":"p2-3-d","front":"A value is used in several places in the graph. What is its gradient?","back":"The sum of the gradients arriving along every path (multivariable chain rule). This is why frameworks accumulate gradients."},
+  {"id":"p2-3-e","front":"Why must the forward pass store intermediate values (activations)?","back":"Local derivatives need them (e.g. $\\partial(a b)/\\partial a = b$). Storing them costs memory, often more than the weights for large models; activation checkpointing trades recomputation for memory."},
+  {"id":"p2-3-f","front":"Roughly how many FLOPs does training cost per token for an $N$-parameter model, and why?","back":"About $6N$: $2N$ for the forward pass and about $4N$ for backward, since each matmul needs two matmuls in the backward pass (Kaplan et al., 2020)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p2-3-backprop.js"></script>
+</body>
+</html>

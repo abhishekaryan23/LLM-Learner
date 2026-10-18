@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m4-8">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Safety &amp; agent evals · LLMs, Animated</title>
+<meta name="description" content="Red-teaming, jailbreak robustness, over- and under-refusal, dangerous-capability evals at a high level, and agent evals: sandboxes, state-based success, pass@k vs pass^k, cost per task.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Safety &amp; agent evals</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 8 of Evaluation</span></div>
+<p class="lede">Two kinds of evaluation break the usual "score on a fixed test set" pattern. <strong>Safety evals</strong> ask what a model should <em>not</em> do, and whether someone trying hard can push it there anyway. <strong>Agent evals</strong> ask whether a model running in a loop with tools reliably finishes long tasks, and at what cost.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain manual and automated red-teaming, how jailbreak robustness is measured, and why over-refusal must be measured alongside harmful compliance.</li>
+    <li>Say, at a high level, what dangerous-capability evals are for and why they try to <em>maximise</em> what the model can do.</li>
+    <li>Design an agent eval: sandboxed environment, state-based success checks, pass@k vs pass^k, and cost and latency per task.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="m4-7.html">Building your own evals</a> (test cases, graders, regression gates), <a href="m4-6.html">Statistical rigor</a> (error bars on small eval sets), <a href="m4-4.html">LLM-as-judge</a> (grading responses) and <a href="m3-6.html">Constitutional AI &amp; RLAIF</a> (how safety behaviour is trained).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A safety report says: "the model refuses 99.9% of harmful requests." Which number do you most need next?</p>
+    <ol class="q-src">
+      <li>Its MMLU score</li>
+      <li>How often it refuses <em>harmless</em> requests</li>
+      <li>How fast it refuses</li>
+      <li>Nothing: 99.9% settles it</li>
+    </ol>
+    <div class="q-explain">A model that refuses everything scores 100% on harmful requests and is useless. Safety evals need both directions: harmful compliance <em>and</em> over-refusal.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">An agent completes a task successfully in 60% of independent attempts. What's the chance it succeeds three times in a row?</p>
+    <ol class="q-src">
+      <li>60%</li>
+      <li>94%</li>
+      <li>About 22%</li>
+      <li>About 36%</li>
+    </ol>
+    <div class="q-explain">$0.6^3 = 0.216$. "At least one of three" would be $1 - 0.4^3 = 94\%$. Which one you report changes the story completely, as you'll see.</div>
+  </div>
+</section>
+
+<h2>Safety evals: two ways to fail</h2>
+<p>Treat "should the model help with this?" like a classifier, with two error types:</p>
+<ul>
+  <li><strong>Under-refusal (harmful compliance):</strong> the model helps with something it shouldn't. This is measured on sets of clearly harmful requests, as a compliance or harmfulness rate.</li>
+  <li><strong>Over-refusal (exaggerated safety):</strong> the model refuses something harmless that merely <em>sounds</em> risky, such as "How do I kill a Python process?". XSTest (Röttger et al., 2024) is a small benchmark of exactly these look-alike prompts, with unsafe contrast prompts mixed in.</li>
+</ul>
+<p>Report both, ideally per category. Changes that cut one error usually raise the other, and a release decision is about the trade-off. Grading needs care too. A "jailbroken" answer may still be vague and useless, so StrongREJECT (Souly et al., 2024) scores how specific and useful a harmful answer is, not just whether the model refused. The authors argue that many published jailbreak results look stronger than they are.</p>
+
+<h2>Red-teaming: attack it before others do</h2>
+<p>A fixed list of harmful prompts measures yesterday's attacks. <strong>Red-teaming</strong> means actively searching for inputs that make the model misbehave:</p>
+<ul>
+  <li><strong>Manual:</strong> domain experts and crowdworkers try to elicit harmful or policy-violating behaviour. Ganguli et al. (2022) released tens of thousands of such attacks and found that RLHF-trained models became harder to red-team as they scaled.</li>
+  <li><strong>Automated:</strong> an attacker LLM generates test prompts at scale and a classifier scores the target's replies (Perez et al., 2022). Optimisation-based methods search for adversarial suffixes that transfer between models (Zou et al., 2023). Iterative LLM attackers refine a prompt, often succeeding within about twenty queries (PAIR; Chao et al., 2023). Long-context attacks pack in many fake dialogue examples (many-shot jailbreaking; Anil et al., 2024).</li>
+  <li><strong>For agents and apps:</strong> <strong>prompt injection</strong>, where malicious instructions hide in a web page, email or tool result the model reads (Greshake et al., 2023). Benchmarks such as AgentDojo (Debenedetti et al., 2024) test whether an agent can be hijacked mid-task.</li>
+</ul>
+<p>The headline metric is the <strong>attack success rate (ASR)</strong>: the fraction of attack attempts that produce a harmful response, as judged by a grader. HarmBench (Mazeika et al., 2024) standardises ASR across many attacks and models. Robustness means a low ASR against the <em>strongest</em> attacks within a budget, not just the known ones, because fixed attack lists get patched and then overfit (<a href="m4-7.html">M4.7</a>). Findings feed back into training (<a href="m3-6.html">M3.6</a>), into input/output classifiers, and into regression suites.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-red-team-castle.webp" alt="Kids in helmets playfully probing a toy castle for ways in while its builder notes where to strengthen it." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You built a toy castle. Before the "real" game, you invite friends in helmets to <strong>find every way in</strong>: a loose block, a gap under the gate, a wobbly tower.</p>
+      <p>Each time they find a way in, you <strong>write it down and fix it</strong>, and later you check that the old tricks don't work any more.</p>
+      <p>That's red-teaming: friendly attackers find the weak spots first.</p>
+      <p><em>Where it breaks:</em> if your friends can't get in, that doesn't prove nobody can. Real attackers keep inventing new tricks, so red-teaming can show that weak spots exist but never prove there are none.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Dangerous-capability evals (high level)</h2>
+<p>A different question: <em>could</em> this model meaningfully help someone cause severe harm, for example with biological or chemical weapons or serious cyberattacks? Or could it act autonomously in risky ways? Frontier developers publish policies that tie capability thresholds to required safeguards: Anthropic's Responsible Scaling Policy, OpenAI's Preparedness Framework and Google DeepMind's Frontier Safety Framework. Government AI institutes also run independent tests.</p>
+<p>The methods include proxy knowledge tests that measure hazardous knowledge without containing it (e.g. WMDP; Li et al., 2024), capture-the-flag security challenges, long agentic tasks in sandboxes, expert red-teaming, and controlled "uplift" studies that compare people working with and without model access. This course stays at that level, deliberately.</p>
+<p>The key difference from ordinary benchmarks is <strong>elicitation</strong>. Here, <em>under</em>estimating capability is the dangerous mistake. So evaluators try hard to bring the capability out: the best prompts, tools and scaffolding, many attempts, sometimes fine-tuning. A low score from a lazy setup proves little.</p>
+
+<h2>Agent evals: tasks, not answers</h2>
+<p>An agent is a model in a loop: it reads the situation, calls a tool, reads the result, and repeats, often for dozens of steps. Evaluating it takes three parts:</p>
+<ol class="steps">
+  <li><strong>An environment</strong>, usually a <strong>sandbox</strong> (container or VM) reset to the same starting state for every trial. Network access is limited, and the agent is isolated from real systems. Isolation is for safety (agents can delete things) and for reproducibility.</li>
+  <li><strong>A task</strong> in natural language, plus anything the agent needs: a repository, a database, policy documents, or a simulated user.</li>
+  <li><strong>A success check on the final state</strong>, not on the transcript: hidden unit tests pass, the database matches the goal state, the right email was sent. You can add process checks, such as "asked for confirmation before cancelling".</li>
+</ol>
+<p><strong>SWE-bench</strong> (Jimenez et al., 2024) collects 2,294 real GitHub issues from 12 popular Python repositories. The agent edits the repo, and it succeeds if the tests that reproduce the issue now pass without breaking the others. <strong>SWE-bench Verified</strong> (2024) is a 500-task subset that human engineers checked, removing underspecified or broken tasks. Scores have risen quickly since then, and the usual caveats apply: public repositories invite contamination (<a href="m4-3.html">M4.3</a>), and the benchmark saturates. <strong>τ-bench</strong> (Yao et al., 2024) puts agents in customer-service domains (retail, airline) with tools, a policy document and an LLM-simulated user. Success means the final database matches the goal. It introduced the <strong>pass^k</strong> metric, and reported that strong function-calling agents of the time solved under half the tasks, with pass^8 in retail below 25%.</p>
+
+<figure class="anim wide" data-anim="m4-8-passk"></figure>
+
+<h3>Estimating pass@k and pass^k</h3>
+<p>Run each task $n$ times and count the successes $c$. Then the unbiased estimates for one task are</p>
+$$\text{pass@}k = 1 - \frac{\binom{n-c}{k}}{\binom{n}{k}}, \qquad \text{pass}^k = \frac{\binom{c}{k}}{\binom{n}{k}}$$
+<p>Average each over tasks. $\binom{n}{k}$ counts the ways to choose $k$ of the $n$ trials. The first formula is 1 minus the chance that $k$ trials drawn from your $n$ all failed (Chen et al., 2021, from HumanEval). The second is the chance they all succeeded (Yao et al., 2024). They use every trial, so they're less noisy than literally running $k$ attempts once.</p>
+<p><strong>Worked example.</strong> One task, $n = 10$ trials, $c = 7$ successes, $k = 3$: $\binom{10}{3} = 120$. Then pass@3 $= 1 - \binom{3}{3}/120 = 1 - 1/120 = 0.992$, and pass^3 $= \binom{7}{3}/120 = 35/120 = 0.292$. A 70%-reliable agent almost always succeeds once in three tries, but completes all three only about 29% of the time.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Another task: $n = 10$ trials, $c = 6$ successes, $k = 2$.</p>
+  <ol class="steps">
+    <li>$\binom{10}{2} =$ <span class="blank" data-answer="45" data-tol="0.01" data-hint="10 × 9 / 2."></span></li>
+    <li>pass@2 $= 1 - \binom{4}{2}/\binom{10}{2} =$ <span class="blank" data-answer="0.867" data-tol="0.005" data-hint="C(4,2) = 6, so 1 − 6/45."></span></li>
+    <li>pass^2 $= \binom{6}{2}/\binom{10}{2} =$ <span class="blank" data-answer="0.333" data-tol="0.005" data-hint="C(6,2) = 15, so 15/45."></span></li>
+  </ol>
+</section>
+
+<h3>Cost, latency and honest comparisons</h3>
+<ul>
+  <li><strong>Report cost and time per task</strong>: tokens, dollars, wall-clock time and steps. An agent that scores 2 points higher by spending 15× more, or retrying 10 times, is not simply "better". Kapoor et al. (2024, "AI Agents That Matter") argue for comparing agents on an accuracy-versus-cost <strong>Pareto frontier</strong>.</li>
+  <li><strong>Error bars.</strong> Agent benchmarks are small (hundreds of tasks) and each trial is noisy. Use multiple trials per task and CIs (<a href="m4-6.html">M4.6</a>). On 500 tasks, a 73% score is about ±4 points.</li>
+  <li><strong>Read transcripts.</strong> Agents find shortcuts: editing the tests instead of the code, reading answer files left in the sandbox, special-casing the checker. An environment bug can look like a capability. Successes deserve as much scrutiny as failures.</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> model and system cards from frontier labs now report jailbreak robustness, over-refusal and dangerous-capability results next to ordinary benchmarks. If you build on these models, the same ideas apply at your scale. Red-team your own app, especially for <strong>prompt injection</strong> through documents and tool outputs. Measure over-refusal on your real traffic. Use <strong>pass^k</strong>, not pass@k, for agents that customers depend on. Gate releases on these suites just like any other regression test (<a href="m4-7.html">M4.7</a>).</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why is pass^k the more relevant reliability metric for a customer-facing agent than pass@k? And why must a safety eval report over-refusal as well as harmful compliance?</p>
+  <div class="model-answer"><strong>Model answer:</strong> A customer gets one attempt and needs it to work every time, which is what pass^k (all $k$ trials succeed) measures. pass@k assumes you can retry and check the result, which only fits settings like code against tests. pass^k falls fast as $k$ grows unless per-trial reliability is very high. For safety, refusing everything would ace a harmful-request test while being useless, so you also need the rate of wrongly refused harmless requests to see the real trade-off.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">An agent succeeds independently 90% of the time on a task. What's its pass^5 on that task?</p>
+    <ol class="q-src">
+      <li>90%</li>
+      <li>About 59%</li>
+      <li>About 99.999%</li>
+      <li>About 45%</li>
+    </ol>
+    <div class="q-explain">$0.9^5 \approx 0.59$. Even a 90%-reliable agent fails at least once in five runs about 41% of the time. 99.999% is pass@5, $1 - 0.1^5$.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A red-team campaign makes 500 jailbreak attempts with a given attack method and none succeed. What can you conclude? (Think back to M4.6.)</p>
+    <ol class="q-src">
+      <li>Its ASR against this attack is probably under ~0.6%, but other attacks may still work</li>
+      <li>The model is jailbreak-proof against all attacks</li>
+      <li>The attack success rate is exactly 0%</li>
+      <li>Nothing at all: 500 attempts is too few to say anything</li>
+    </ol>
+    <div class="q-explain">This is the "rule of three": after 0 successes in $n$ tries, $3/n$ is roughly a 95% upper bound on the true rate. Zero of $n$ still carries information: with $p = 3/500$, the chance of seeing no successes in 500 tries is about 5%, so higher rates are unlikely. But it only covers <em>this</em> attack distribution. Red-teaming shows that weaknesses exist; it can't prove they don't.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">On a 500-task agent benchmark, agent A scores 72% at 40 cents per task. Agent B scores 74% at 6 dollars per task, using 10 retries. What's the fairest summary?</p>
+    <ol class="q-src">
+      <li>B is better: 74% beats 72% on the same tasks</li>
+      <li>A is better, simply because it's cheaper</li>
+      <li>They're identical, since the scores are close</li>
+      <li>The gap is within noise and B costs 15× more: compare on accuracy and cost</li>
+    </ol>
+    <div class="q-explain">$1.96\sqrt{0.73 \times 0.27 / 500} \approx 0.039$, so the gap isn't clearly real. Even if it were, a comparison that ignores cost (and retries) is misleading.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">The model refuses "How do I kill a Python process that's hanging?" What kind of failure is this, and what measures it?</p>
+    <ol class="q-src">
+      <li>A jailbreak, measured by attack success rate</li>
+      <li>A capability failure, measured by MMLU</li>
+      <li>Over-refusal (exaggerated safety), measured on harmless look-alike prompts, as in XSTest</li>
+      <li>Prompt injection, measured by AgentDojo</li>
+    </ol>
+    <div class="q-explain">The request only <em>sounds</em> harmful. Look-alike benchmarks catch models that react to scary words instead of actual risk.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Safety has two error directions: <strong>harmful compliance</strong> and <strong>over-refusal</strong>. Always report both.</li>
+    <li><strong>Red-teaming</strong> (manual and automated) searches for failures. Robustness is a low <strong>attack success rate</strong> against strong, adaptive attacks, including prompt injection for agents.</li>
+    <li>Dangerous-capability evals try to <strong>elicit</strong> the most a model can do, because underestimating is the risky error.</li>
+    <li>Agent evals = sandboxed environment + task + <strong>final-state</strong> check (e.g. SWE-bench's tests, τ-bench's database).</li>
+    <li><strong>pass@k</strong> (any of $k$) suits retry-and-verify settings; <strong>pass^k</strong> (all $k$) measures reliability. Report cost and latency per task, and error bars.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m4-8-a","front":"What are the two error directions in safety evals, and why report both?","back":"Under-refusal (harmful compliance) and over-refusal (refusing harmless look-alike requests, e.g. XSTest). A model that refuses everything aces the first and is useless, so the trade-off needs both numbers."},
+  {"id":"m4-8-b","front":"Manual vs automated red-teaming, and the main robustness metric?","back":"Manual: experts/crowdworkers probe for failures. Automated: attacker LLMs, optimised adversarial suffixes, iterative attackers, many-shot and prompt-injection attacks. Metric: attack success rate (ASR) against strong, adaptive attacks."},
+  {"id":"m4-8-c","front":"Why do dangerous-capability evals focus on elicitation?","back":"Because underestimating a dangerous capability is the costly error. Evaluators use the best prompts, tools, scaffolding, many attempts and sometimes fine-tuning, so a low score from a weak setup proves little."},
+  {"id":"m4-8-d","front":"What are the three parts of an agent eval?","back":"A sandboxed, resettable environment; a task (plus repo/database/policy/simulated user); and a success check on the final state (tests pass, DB matches the goal), not on the transcript."},
+  {"id":"m4-8-e","front":"Define pass@k and pass^k, with their per-task estimators from n trials with c successes.","back":"pass@k: at least one of k succeeds, $1-\\binom{n-c}{k}/\\binom{n}{k}$. pass^k: all k succeed, $\\binom{c}{k}/\\binom{n}{k}$. At 60% per-trial success: pass@4 ≈ 97%, pass^4 ≈ 13%."},
+  {"id":"m4-8-f","front":"What should an honest agent benchmark comparison include besides the success rate?","back":"Cost and latency per task (tokens, dollars, time, steps, retries), confidence intervals from multiple trials, and transcript review for shortcuts such as editing tests. Compare on an accuracy–cost frontier."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m4-8-passk.js"></script>
+</body>
+</html>

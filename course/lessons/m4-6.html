@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m4-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Statistical rigor · LLMs, Animated</title>
+<meta name="description" content="An eval score is an estimate. Standard errors, confidence intervals, the bootstrap, paired comparisons, power and multiple comparisons, with an interactive CI playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Statistical rigor</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of Evaluation</span></div>
+<p class="lede">Model B scores 81.3%. Model A scores 80.1%. Ship B? Not yet. Every eval score is an <strong>estimate</strong> computed from a sample of questions, so it comes with noise. This lesson shows how big that noise is, how to put error bars on any metric, and how to compare two models without fooling yourself.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute the standard error and a 95% confidence interval for an accuracy, and a bootstrap CI for any metric.</li>
+    <li>Compare two models with a <strong>paired</strong> test, and explain why it beats checking whether two CIs overlap.</li>
+    <li>Estimate how many questions you need to detect a given difference, and avoid the multiple-comparisons trap.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-5.html">Probability &amp; expectation</a> (means and variances), <a href="m4-2.html">Benchmarks</a> (what an accuracy score is) and <a href="m4-5.html">Human eval, pairwise &amp; Elo</a> (ratings with confidence intervals).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A model scores 80% on a 100-question eval. Roughly what range of "true" accuracy is consistent with that?</p>
+    <ol class="q-src">
+      <li>79.5% to 80.5%</li>
+      <li>78% to 82%</li>
+      <li>72% to 88%</li>
+      <li>50% to 100%</li>
+    </ol>
+    <div class="q-explain">The 95% CI is $0.80 \pm 1.96\sqrt{0.8 \times 0.2/100} = 0.80 \pm 0.078$, so roughly 72% to 88%. A hundred questions is not many.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">To make an eval's confidence interval half as wide, you need about…</p>
+    <ol class="q-src">
+      <li>twice as many questions</li>
+      <li>four times as many questions</li>
+      <li>ten times as many questions</li>
+      <li>the same questions, run twice</li>
+    </ol>
+    <div class="q-explain">The width shrinks like $1/\sqrt{n}$, so halving it takes $4\times$ the questions. Re-running the same questions with greedy decoding gives exactly the same score and no new information.</div>
+  </div>
+</section>
+
+<h2>A score is an estimate</h2>
+<p>Think of your benchmark as a <strong>random sample</strong> from a huge population of questions you could have asked: all grade-school maths problems, all customer emails of a certain kind. What you care about is the model's accuracy on that whole population, $p$. What you measure is its accuracy on your $n$ questions, $\hat p$ ("p-hat"). Draw a different $n$ questions and $\hat p$ changes.</p>
+<p>Each question is scored 0 or 1, so $\hat p$ is an average of $n$ coin-flip-like values. By the central limit theorem it is roughly normal around $p$, with spread given by the <strong>standard error</strong>:</p>
+$$\mathrm{SE}(\hat p) = \sqrt{\frac{\hat p\,(1 - \hat p)}{n}}$$
+<p>$\hat p(1-\hat p)$ is the variance of a single 0/1 score (largest at 50%, small near 0% or 100%). Dividing by $n$ and taking the square root gives the variance of the average. A <strong>95% confidence interval</strong> is $\hat p \pm 1.96\,\mathrm{SE}$, where 1.96 is the number of standard errors that covers the middle 95% of a normal distribution.</p>
+
+<h3>Worked example</h3>
+<p>A model gets 400 of 500 questions right.</p>
+<ol class="steps">
+  <li>$\hat p = 400/500 = 0.80$.</li>
+  <li>$\mathrm{SE} = \sqrt{0.80 \times 0.20 / 500} = \sqrt{0.00032} = 0.0179$, about <strong>1.8 points</strong>.</li>
+  <li>95% CI: $0.80 \pm 1.96 \times 0.0179 = 0.80 \pm 0.035$, so <strong>76.5% to 83.5%</strong>.</li>
+  <li>So "80%" on 500 questions really means "somewhere around 76 to 84". A 1-point gap between two models is well inside that noise.</li>
+</ol>
+
+<p>What does "95%" promise? If you repeated the whole eval many times on fresh questions, about 95% of the intervals you computed would contain the true $p$. Try it:</p>
+
+<div class="playground" id="ci-playground">
+  <h3>Playground: how wide is the error bar?</h3>
+  <p class="math-note" style="margin:0">Each row is one eval run on $n$ fresh questions, drawn as its score $\hat p$ with a 95% CI. The dashed line is the model's true accuracy. Change $n$ and the accuracy, or press <em>Run again</em>.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <div style="display:grid;gap:8px">
+      <label><span>Questions per eval n = <output class="ci-n-out">500</output></span>
+        <input type="range" name="n" min="0" max="8" step="1" value="4">
+      </label>
+      <label><span>True accuracy = <output class="ci-p-out">80%</output></span>
+        <input type="range" name="p" min="50" max="99" step="1" value="80">
+      </label>
+    </div>
+    <div class="pg-buttons">
+      <button type="button" class="btn btn-primary" data-act="run">Run again</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0">Notice: going from 500 to 2,000 questions only halves the width. And at 99% accuracy with small $n$, the simple formula gets shaky: intervals miss more often than 1 in 20. That is one reason to prefer the bootstrap or exact methods near 0% or 100%.</p>
+</div>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A model scores 90% on a 1,000-question benchmark.</p>
+  <ol class="steps">
+    <li>$\mathrm{SE}$, in percentage points (two decimals) $=$ <span class="blank" data-answer="0.95" data-tol="0.011" data-hint="√(0.9 × 0.1 / 1000) = √0.00009 ≈ 0.0095, then × 100."></span></li>
+    <li>Half-width of the 95% CI, in points $=$ <span class="blank" data-answer="1.86" data-tol="0.03" data-hint="1.96 × SE."></span></li>
+    <li>Lower end of the CI, in % $=$ <span class="blank" data-answer="88.14" data-tol="0.05" data-hint="90 − half-width."></span></li>
+    <li>Questions per model to detect 80% vs 85% with a separate-samples test (formula in the power section below) $\approx$ <span class="blank" data-answer="902" data-tol="15" data-hint="7.84 × (0.8·0.2 + 0.85·0.15) / 0.05² = 7.84 × 0.2875 / 0.0025."></span></li>
+  </ol>
+</section>
+
+<p class="math-note">Questions are often <strong>not independent</strong>. Several questions may share one reading passage, or one prompt may be sampled several times. Then the effective sample size is smaller, and the formula above understates the noise. Miller (2024), "Adding Error Bars to Evals", recommends <strong>clustered standard errors</strong> in that case, computed per cluster rather than per question. They can be considerably larger than the naive ones.</p>
+
+<h2>The bootstrap: error bars for any metric</h2>
+<p>The SE formula works for a simple accuracy. But many eval metrics have no neat formula: F1, pass@k, a judge's win rate with ties, a Bradley–Terry rating (<a href="m4-5.html">M4.5</a>). The <strong>bootstrap</strong> (Efron, 1979) works for all of them. Pretend your sample <em>is</em> the population, and draw new samples from it:</p>
+
+<figure class="anim wide" data-anim="m4-6-bootstrap"></figure>
+
+<ol class="steps">
+  <li>Draw $n$ questions <strong>with replacement</strong> from your $n$ questions.</li>
+  <li>Recompute the metric on that resample.</li>
+  <li>Repeat $B$ times (1,000 to 10,000 is typical).</li>
+  <li>The 2.5th and 97.5th percentiles of the $B$ values form a 95% <strong>percentile bootstrap CI</strong>.</li>
+</ol>
+<p>Resample whatever is independent. If questions come in clusters, resample whole clusters, not single questions.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-uncertainty-fishing.webp" alt="One day's catch of a single fish beside many buckets from many trips, each with a different catch." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You go fishing once and catch <strong>one fish</strong>. Is this a bad lake? You can't tell from one day!</p>
+      <p>Now look at the <strong>buckets from lots of trips</strong>: one has 3 fish, one has none, one has 5. Each trip is a bit different. The buckets show you what a <em>normal</em> day looks like, and how much it bounces around.</p>
+      <p>An eval score is one fishing trip. The <strong>error bar</strong> tells you how much the catch would change if you went again.</p>
+      <p><em>Where it breaks:</em> new trips are free in the story, but a new eval set is expensive. The bootstrap fakes the extra trips by reshuffling the one catch you already have.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Comparing two models: pair up</h2>
+<p>The most common mistake: "the two 95% CIs overlap, so there's no real difference." Separate CIs treat the two scores as if they came from <em>different</em> question sets. But both models answered the <strong>same</strong> questions, and question difficulty is shared. A hard question tends to be missed by both models, and an easy one answered by both. That shared noise cancels in the difference, so look at the difference directly.</p>
+
+<figure class="anim wide" data-anim="m4-6-paired"></figure>
+
+<p>For each question $i$, let $d_i = a_i - b_i$, which is $+1$, $0$ or $-1$. The paired estimate is the mean difference $\bar d$, with standard error</p>
+$$\mathrm{SE}(\bar d) = \frac{s_d}{\sqrt n}$$
+<p>where $s_d$ is the standard deviation of the $d_i$. Only the discordant questions make $d_i \neq 0$, so they set $s_d$.</p>
+
+<h3>Worked example: same data, two analyses</h3>
+<p>1,000 questions. A scores 82% and B scores 80%. They disagree on 100 questions: A alone is right on 60, B alone on 40.</p>
+<ol class="steps">
+  <li><strong>Separate CIs:</strong> $\mathrm{SE}_A = \sqrt{0.82 \times 0.18/1000} = 1.21$ pts and $\mathrm{SE}_B = 1.26$ pts. The SE of the difference is $\sqrt{1.21^2 + 1.26^2} = 1.75$ pts, so the difference is $2.0 \pm 3.4$, from $-1.4$ to $+5.4$. That includes 0, so "can't tell".</li>
+  <li><strong>Paired:</strong> $\bar d = (60 - 40)/1000 = 0.02$. The variance of $d$ is $\overline{d^2} - \bar d^{\,2} = 0.100 - 0.0004 = 0.0996$, so $\mathrm{SE} = \sqrt{0.0996/1000} = 1.0$ pt. The difference is $2.0 \pm 2.0$, from $+0.04$ to $+3.96$. That (just) excludes 0.</li>
+  <li><strong>McNemar's test</strong> (McNemar, 1947) asks the same question using only the discordant counts: $\chi^2 = (60-40)^2/(60+40) = 4.0$, so $p \approx 0.046$.</li>
+  <li>A <strong>paired bootstrap</strong> gives a similar answer for any metric. Resample question indices, and score <em>both</em> models on the same resample each time.</li>
+</ol>
+<p>"Statistically significant" only means "probably not noise". A real 0.5-point gain may not matter to your users, and a non-significant result doesn't prove the models are equal. Report the difference with its CI, not just a yes/no.</p>
+
+<h2>Other sources of noise</h2>
+<ul>
+  <li><strong>Sampling randomness.</strong> At temperature &gt; 0, the same model can answer the same question differently, so re-running gives a different score. Sample several answers per question and average them: this shrinks the within-question part of the variance (Miller, 2024, recommends it). Report the number of samples.</li>
+  <li><strong>Training seeds.</strong> Two fine-tunes that differ only in random seed can land points apart on small evals. When comparing training recipes, run several seeds and report the mean and spread.</li>
+  <li><strong>Prompt format.</strong> Small formatting changes in few-shot prompts (separators, spacing, option labels) can shift scores noticeably, in extreme cases by tens of points (Sclar et al., 2023). Fix the template, publish it, and compare models with the same one.</li>
+</ul>
+
+<h2>How many questions do you need?</h2>
+<p><strong>Power</strong> is the probability that your eval detects a difference that really exists. A standard approximation for the number of questions $n$ needed (per model, with separate samples) to detect accuracies $p_1$ vs $p_2$ at the 5% level with 80% power:</p>
+$$n \approx \frac{(z_{0.975} + z_{0.8})^2\,\big[p_1(1-p_1) + p_2(1-p_2)\big]}{(p_1 - p_2)^2}$$
+<p>$z_{0.975} = 1.96$ and $z_{0.8} = 0.84$ are normal quantiles, so the first factor is $(2.80)^2 \approx 7.84$. The bracket is the variance, and the denominator is the squared gap you want to detect.</p>
+<ul>
+  <li>To detect <strong>80% vs 82%</strong>: $n \approx 7.84 \times (0.16 + 0.1476) / 0.02^2 \approx$ <strong>6,000 questions</strong>.</li>
+  <li><strong>Paired</strong>, if the models disagree on about 10% of questions: replace the bracket with the variance of $d$, about $0.10 - 0.02^2$. Then $n \approx 7.84 \times 0.0996 / 0.0004 \approx$ <strong>2,000 questions</strong>, three times fewer.</li>
+</ul>
+<p>Many popular benchmarks have only a few hundred to a few thousand items, so a reported 1–2 point gap between two models is often within the noise. Underpowered comparisons are a known, long-standing problem in NLP (Card et al., 2020, "With Little Power Comes Great Responsibility").</p>
+
+<h2>Multiple comparisons</h2>
+<p>Suppose you try 20 prompt variants that are, in truth, all equally good, and test each against the baseline at the 5% level. The chance that at least one looks "significantly better" is $1 - 0.95^{20} \approx$ <strong>64%</strong>. Worse, the variant you pick is the one that got the luckiest draw, so its score is biased upward: the <strong>winner's curse</strong>.</p>
+<ul>
+  <li>Re-measure the winner on <strong>fresh, held-out</strong> questions before you believe it.</li>
+  <li>Or tighten the threshold. <strong>Bonferroni</strong> divides $\alpha$ by the number of tests: $0.05/20 = 0.0025$ each. It's simple but conservative.</li>
+  <li>Decide what you'll compare <em>before</em> looking at results, and report how many things you tried.</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> a good eval report reads like "B − A = +1.2 points (paired 95% CI −0.3 to +2.7, n = 1,319, 5 samples per question, template v3)", not "B wins, 81.3 vs 80.1". Model releases and papers increasingly include error bars, and the same statistics decide whether a regression test in CI should fail a change (<a href="m4-7.html">M4.7</a>). When the CI is too wide to decide, the fix is more (or more varied) questions, or a paired design, not a second look until it comes out the way you hoped.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why can a paired comparison detect a difference between two models that two separate confidence intervals miss?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Both models answer the same questions, and much of the score noise comes from which questions happened to be easy or hard. That noise is shared, so it cancels when you look at per-question differences. Only the questions where the models disagree carry information, which gives a much smaller standard error for the difference than combining two separate SEs. Overlapping separate CIs therefore don't show that there's no difference.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A model scores 60% on 600 questions. What is the half-width of the 95% CI?</p>
+    <ol class="q-src">
+      <li>About ±0.4 points</li>
+      <li>About ±2.0 points</li>
+      <li>About ±3.9 points</li>
+      <li>About ±10 points</li>
+    </ol>
+    <div class="q-explain">$\mathrm{SE} = \sqrt{0.6 \times 0.4/600} = \sqrt{0.0004} = 0.02$, which is 2 points. The 95% half-width is $1.96 \times 2 \approx 3.9$ points. ±2.0 is the SE, not the CI.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Models A and B were scored on the same 1,000 questions, and their separate 95% CIs overlap. What should you conclude?</p>
+    <ol class="q-src">
+      <li>Nothing yet: run a paired test on the per-question differences, which can be much more sensitive</li>
+      <li>They are equally good</li>
+      <li>The one with the higher score is better</li>
+      <li>The eval is broken</li>
+    </ol>
+    <div class="q-explain">Overlapping separate CIs are a weak, conservative check. Because the questions are shared, a paired analysis (paired bootstrap or McNemar) removes the shared difficulty noise and often gives a clear answer.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">You try 10 system-prompt variants and keep the one with the best score. It beats the baseline with $p = 0.03$. What's the right next step?</p>
+    <ol class="q-src">
+      <li>Ship it: $p &lt; 0.05$</li>
+      <li>Try 10 more variants to be safe</li>
+      <li>Report only the winning variant's score</li>
+      <li>Re-evaluate the winner on fresh held-out questions (or correct for 10 comparisons), because the best of 10 noisy scores is biased upward</li>
+    </ol>
+    <div class="q-explain">With 10 tries there's about a $1 - 0.95^{10} \approx 40\%$ chance of a false "win" somewhere, and the winner's score is inflated. A Bonferroni threshold would be $0.05/10 = 0.005$, which $p = 0.03$ doesn't meet.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">HumanEval (from M4.2) has 164 problems. A model passes 70% of them. Roughly how precise is that number?</p>
+    <ol class="q-src">
+      <li>±0.5 points: 164 problems is plenty</li>
+      <li>About ±7 points</li>
+      <li>About ±20 points</li>
+      <li>It can't be computed for code benchmarks</li>
+    </ol>
+    <div class="q-explain">$1.96\sqrt{0.7 \times 0.3/164} \approx 0.070$. Small benchmarks give wide intervals, so a 3-point gap on HumanEval tells you very little on its own.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>An eval score is an estimate. For accuracy, $\mathrm{SE} = \sqrt{\hat p(1-\hat p)/n}$ and a 95% CI is $\hat p \pm 1.96\,\mathrm{SE}$. Width shrinks like $1/\sqrt n$.</li>
+    <li>The <strong>bootstrap</strong> (resample questions, or clusters, with replacement) gives CIs for any metric.</li>
+    <li>Compare models <strong>paired</strong>, on the same questions. It's far more sensitive than checking whether two CIs overlap.</li>
+    <li>Detecting a 2-point gap near 80% takes thousands of questions (about 6,000 unpaired, about 2,000 paired with 10% disagreement).</li>
+    <li>Sampling, seeds and prompt format add noise. Many comparisons inflate false wins, so re-test the winner on fresh data.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>In about 25 minutes, with numpy: compute SEs and CIs, write a bootstrap and a paired bootstrap, simulate how often a truly better model loses by chance, and build a sample-size calculator. Runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m4-6-error-bars.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m4-6-a","front":"Standard error and 95% CI of an accuracy $\\hat p$ on $n$ questions?","back":"$\\mathrm{SE} = \\sqrt{\\hat p(1-\\hat p)/n}$; 95% CI $= \\hat p \\pm 1.96\\,\\mathrm{SE}$. E.g. 80% on 500 questions: SE ≈ 1.8 pts, CI ≈ 76.5–83.5%."},
+  {"id":"m4-6-b","front":"How do you compute a percentile bootstrap CI for an eval metric?","back":"Resample the $n$ questions (or clusters) with replacement, recompute the metric, repeat ~1,000–10,000 times, and take the 2.5th and 97.5th percentiles."},
+  {"id":"m4-6-c","front":"Why is a paired comparison more powerful than comparing two separate CIs?","back":"Both models see the same questions, so question difficulty is shared noise that cancels in the per-question differences. Only discordant questions carry information, so the SE of the difference is much smaller."},
+  {"id":"m4-6-d","front":"McNemar's statistic for A-only-correct = 60 and B-only-correct = 40?","back":"$\\chi^2 = (60-40)^2/(60+40) = 4.0$, giving $p \\approx 0.046$. It uses only the discordant questions."},
+  {"id":"m4-6-e","front":"Roughly how many questions are needed to detect 80% vs 82% (5% level, 80% power)?","back":"About 6,000 per model with separate samples ($7.84 \\times 0.3076 / 0.02^2$); about 2,000 with a paired design when the models disagree on ~10% of questions."},
+  {"id":"m4-6-f","front":"What is the multiple-comparisons trap in eval work, and two fixes?","back":"Testing many variants makes a false 'win' likely ($1-0.95^{20} \\approx 64\\%$ for 20 tests) and inflates the winner's score. Fixes: re-test the winner on fresh held-out data; correct the threshold (Bonferroni $\\alpha/m$); pre-register comparisons."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m4-6-bootstrap.js"></script>
+<script src="../assets/js/anims/m4-6-paired.js"></script>
+<script src="../assets/js/anims/m4-6-ci-playground.js"></script>
+</body>
+</html>

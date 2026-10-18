@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m3-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GRPO &amp; verifiable rewards · LLMs, Animated</title>
+<meta name="description" content="Reinforcement learning with rewards a program can check, and GRPO: sample a group of answers, compare each to the group average, no value model needed.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>GRPO &amp; verifiable rewards</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Post-training</span></div>
+<p class="lede">When a program can check the answer, you don't need humans or a learned reward model to say what's good. Sample several answers, reward the ones that pass, and push the model toward them. That simple recipe, with an algorithm called <strong>GRPO</strong>, is how many of today's reasoning models are trained.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain reinforcement learning with <strong>verifiable rewards</strong> and which tasks it fits.</li>
+    <li>Compute GRPO's <strong>group-relative advantages</strong> by hand, and say why GRPO needs no value model.</li>
+    <li>Spot the classic failure modes: format hacking, length bias and groups that teach nothing.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="m3-3.html">RLHF with PPO</a> (policy, advantage, clipping and the KL penalty) and <a href="m3-2.html">Reward models</a>. A quick look back at <a href="p1-6.html">KL divergence</a> helps with the "leash" at the end.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You want to train a model on 50,000 maths problems that each have a known numeric answer. What is the cheapest reliable reward?</p>
+    <ol class="q-src">
+      <li>Train a reward model on human preference pairs first</li>
+      <li>A short program that checks whether the final answer matches the known one</li>
+      <li>Ask people to rate every response from 1 to 10</li>
+      <li>The model's own perplexity on its answer</li>
+    </ol>
+    <div class="q-explain">If correctness can be checked by code, the check <em>is</em> the reward: free, instant and exact. That's the idea of <strong>verifiable rewards</strong>. Low perplexity only means the model is confident, not that it's right.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">PPO-based RLHF usually trains a <strong>value model</strong> (critic) next to the policy. What is it for?</p>
+    <ol class="q-src">
+      <li>It writes the responses</li>
+      <li>It stores a frozen copy of the original model</li>
+      <li>It predicts the expected reward, so the update can tell "better than expected" from "worse than expected"</li>
+      <li>It filters unsafe prompts</li>
+    </ol>
+    <div class="q-explain">The critic gives the <strong>baseline</strong> that turns raw rewards into advantages. GRPO gets that baseline a cheaper way: the average reward of several answers to the same prompt.</div>
+  </div>
+</section>
+
+<h2>When a program can check the answer</h2>
+<p>RLHF (M3.3) learns a <strong>reward model</strong> from human preferences, then optimizes against it. That works for fuzzy goals like "helpful" and "polite", but the reward model is expensive to build, noisy, and can be fooled. For many tasks we can do better, because correctness is <strong>checkable</strong>:</p>
+<ul>
+  <li><strong>Maths:</strong> extract the final answer (say, the one in <code>\boxed{…}</code>), normalise it ("1/2" = "0.5") and compare with the reference.</li>
+  <li><strong>Code:</strong> run hidden unit tests in a sandbox; reward 1 if all pass (or the fraction that pass).</li>
+  <li><strong>Format and constraints:</strong> does the output parse as valid JSON, stay under 50 words, use the required tags?</li>
+</ul>
+<p>Training a policy against rewards like these is called <strong>reinforcement learning with verifiable rewards (RLVR)</strong>, a name popularised by the Tülu 3 report (Lambert et al., 2024). The reward is usually just 1 or 0. It is exact and costs almost nothing, but it only exists for tasks with a checkable answer, and a verifier with holes can be gamed (more on that below).</p>
+
+<h2>GRPO: the group is the baseline</h2>
+<p>Policy-gradient methods need an <strong>advantage</strong>: how much better a response did than expected. PPO (M3.3) gets "expected" from a <strong>value model</strong>, a second network about the size of the policy, trained alongside it. That roughly doubles the memory and adds another thing to tune.</p>
+<p><strong>Group Relative Policy Optimization</strong> (GRPO; Shao et al., 2024, the DeepSeekMath paper) drops the value model. For each prompt $q$ it samples a <strong>group</strong> of $G$ responses $o_1, \dots, o_G$ from the current policy, scores them, and compares each one with its siblings:</p>
+$$\hat A_i = \frac{r_i - \operatorname{mean}(r_1, \dots, r_G)}{\operatorname{std}(r_1, \dots, r_G)}$$
+<p>$r_i$ is the reward of response $i$, and $\hat A_i$ (A-hat) is its advantage. Above the group average means positive, below means negative. With outcome rewards, <strong>every token</strong> of response $i$ shares the same $\hat A_i$. Watch one step:</p>
+
+<figure class="anim wide" data-anim="m3-5-grpo"></figure>
+
+<p>The full objective is PPO's clipped objective, averaged over the group, with a KL term:</p>
+$$\mathcal{J}(\theta)=\mathbb{E}\!\left[\frac{1}{G}\sum_{i=1}^{G}\frac{1}{|o_i|}\sum_{t=1}^{|o_i|}\Big(\min\!\big(\rho_{i,t}\hat A_{i},\ \operatorname{clip}(\rho_{i,t},1-\varepsilon,1+\varepsilon)\,\hat A_{i}\big)-\beta\,\mathbb{D}_{\mathrm{KL}}\big[\pi_\theta\,\|\,\pi_{\text{ref}}\big]\Big)\right]$$
+<ul>
+  <li>$\rho_{i,t} = \pi_\theta(o_{i,t}\mid q, o_{i,&lt;t}) \,/\, \pi_{\theta_\text{old}}(o_{i,t}\mid q, o_{i,&lt;t})$ is the <strong>probability ratio</strong> for token $t$: how much more (or less) likely the updated policy makes it than the policy that sampled it.</li>
+  <li>$\operatorname{clip}(\cdot, 1-\varepsilon, 1+\varepsilon)$ with $\varepsilon \approx 0.2$ stops any single update from moving a token's probability too far, exactly as in PPO.</li>
+  <li>$\frac{1}{|o_i|}$ averages over the $|o_i|$ tokens of response $i$, and $\frac1G$ averages over the group.</li>
+  <li>$\beta\,\mathbb{D}_{\mathrm{KL}}$ penalises drifting from the frozen <strong>reference</strong> model $\pi_\text{ref}$ (usually the SFT model). GRPO adds it directly to the loss, rather than folding it into the reward as PPO-RLHF usually does.</li>
+</ul>
+<p class="math-note">The paper also describes a "process supervision" variant with a reward per reasoning step. The outcome version above is the one normally paired with verifiers.</p>
+<p>Count the networks in GPU memory. PPO-RLHF: policy, value model, reward model and reference. GRPO with a verifier: <strong>policy and reference</strong>, plus a few lines of checking code. The price is generation: you sample $G$ responses (often 8 to 64) for every prompt.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-grpo-puzzles.webp" alt="Five students each trying to open the same puzzle box, while a teacher holds the key; the boxes that open earn stars." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Five students all get the <strong>same puzzle box</strong>. Each one tries their own way to open it. The teacher holds the <strong>key</strong>, so she can tell for sure whose box really opened. Nobody has to argue about it.</p>
+      <p>Stars go to the students who did <strong>better than the class did on this puzzle</strong>. If only one box opened, that student gets lots of stars. If every box opened, nobody gets extra stars, because the puzzle was too easy to teach anyone something new.</p>
+      <p>Next time, everyone copies a bit more of what the star-winners did.</p>
+    </div>
+  </div>
+</details>
+<p class="math-note">Where the analogy breaks: the "students" are really the same model answering several times, and "copying the winners" means raising the probability of every token in the winning answers, not understanding why they worked.</p>
+
+<h3>Worked example</h3>
+<p>A group of $G = 4$ answers; only the first is correct, so the rewards are $[1, 0, 0, 0]$.</p>
+<ol class="steps">
+  <li><strong>Mean:</strong> $(1 + 0 + 0 + 0)/4 = 0.25$</li>
+  <li><strong>Std:</strong> $\sqrt{\big(0.75^2 + 3 \times 0.25^2\big)/4} = \sqrt{0.1875} \approx 0.433$</li>
+  <li><strong>Correct answer:</strong> $(1 - 0.25)/0.433 \approx +1.73$</li>
+  <li><strong>Each wrong answer:</strong> $(0 - 0.25)/0.433 \approx -0.58$. Check: $1.73 - 3 \times 0.58 \approx 0$. Group advantages always sum to zero.</li>
+</ol>
+<p class="math-note">We use the population std (divide by $G$). Some libraries divide by $G - 1$, which rescales every advantage by the same factor; signs and ranking don't change. Implementations also add a tiny $\epsilon$ to the denominator so it never divides by zero.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Now $G = 5$ with rewards $[1, 1, 0, 1, 0]$.</p>
+  <ol class="steps">
+    <li>Group mean: <span class="blank" data-answer="0.6" data-tol="0.001" data-hint="Three correct out of five."></span></li>
+    <li>Group std (population): <span class="blank" data-answer="0.49" data-tol="0.006" data-hint="Each correct answer is 0.4 from the mean, each wrong one 0.6. Average the squares, then take the square root: √((3·0.16 + 2·0.36)/5)."></span></li>
+    <li>Advantage of a correct answer: <span class="blank" data-answer="0.82" data-tol="0.011" data-hint="(1 − 0.6) / 0.49"></span></li>
+    <li>Advantage of a wrong answer: <span class="blank" data-answer="-1.22" data-tol="0.015" data-hint="(0 − 0.6) / 0.49. It should be negative."></span></li>
+  </ol>
+  <p class="math-note">Notice: when most of the group is right, the rare wrong answers get the big (negative) push. When most are wrong, a rare right answer gets the big positive push.</p>
+</section>
+
+<div class="playground" id="grpo-playground">
+  <h3>Playground: who gets the push?</h3>
+  <p class="math-note" style="margin:0">Eight sampled answers to one prompt. Tap an answer to flip the verifier's verdict, or pick a preset. Then switch off the division by std.</p>
+  <div class="chips grpo-toggles" role="group" aria-label="Verifier verdict for each answer" style="margin-top:12px"></div>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="chips" role="group" aria-label="Presets and options" style="margin-top:8px">
+    <button type="button" class="chip" data-preset="1" style="min-height:44px">1 of 8 right</button>
+    <button type="button" class="chip" data-preset="4" style="min-height:44px">4 of 8</button>
+    <button type="button" class="chip" data-preset="7" style="min-height:44px">7 of 8</button>
+    <button type="button" class="chip" data-preset="8" style="min-height:44px">All right</button>
+    <button type="button" class="chip" data-act="std" aria-pressed="true" style="min-height:44px">Divide by std: on</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<h2>Reasoning models</h2>
+<p>DeepSeek-R1 (DeepSeek-AI, 2025) made this recipe famous. Its precursor <strong>R1-Zero</strong> was trained from a base model with GRPO and only rule-based rewards: an accuracy reward (is the answer right? do the tests pass?) and a format reward (is the reasoning inside <code>&lt;think&gt;</code> tags?). The authors report that, over training, responses grew much longer and the model started re-checking and revising its own work, though R1-Zero's output was often hard to read and mixed languages. The released R1 added a small supervised "cold start" set and further SFT and RL stages to fix that.</p>
+<p>Since then, an RLVR stage with GRPO or a close variant has become a common part of post-training for reasoning and coding models, but recipes differ a lot. How much of the gain is <em>new</em> ability versus RL surfacing answers the base model could already sample is still debated (e.g. Yue et al., 2025, who compare pass@k before and after RL).</p>
+
+<h2>Pitfalls: what goes wrong in practice</h2>
+<ul>
+  <li><strong>Reward hacking on format.</strong> The policy optimizes the verifier you wrote, not the one you meant. A format reward for <code>&lt;think&gt;</code> tags can be earned with empty tags. A checker that accepts "any number in the text" can be beaten by listing several answers. Weak unit tests can be passed by hard-coding the expected outputs. Fixes: strict parsing (exactly one final answer), hidden tests, and reading samples regularly.</li>
+  <li><strong>Length bias.</strong> The $\frac{1}{|o_i|}$ term spreads a response's advantage over its tokens. For a <em>wrong</em> answer, a longer response means a smaller penalty per token, which can nudge the model toward long wrong answers (Liu et al., 2025, "Dr. GRPO"). Long outputs are also expensive and get truncated. Common fixes: normalise by the total number of tokens across the whole group instead (as in DAPO; Yu et al., 2025), cap or penalise length.</li>
+  <li><strong>Groups that teach nothing.</strong> If all $G$ answers get the same reward (all right or all wrong), every advantage is 0. Prompts that are far too easy or too hard waste generation. Recipes filter or resample such groups, or pick prompts the model solves only sometimes.</li>
+  <li><strong>The std divisor has side effects.</strong> Dividing by the std gives near-unanimous groups (very easy or very hard prompts) larger advantages. Dr. GRPO argues for dropping it; others keep it. Try both in the playground.</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> RLVR runs are dominated by <em>generation</em>, not gradient steps: every prompt needs $G$ long samples, often thousands of tokens each. That's why RL frameworks (TRL, verl, OpenRLHF and others) plug in fast inference engines such as vLLM, and why the serving tricks in M5 matter for training too. And the verifier is now part of your model's specification: whatever it fails to check, the model is free to exploit.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why can GRPO skip PPO's value model, and what does it pay instead?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The value model only supplies a baseline, "what reward did we expect?". GRPO estimates that baseline by sampling several answers to the same prompt and using their mean (and std) reward, so each answer is judged against its siblings. The price is generating $G$ responses per prompt, one advantage per whole response rather than per token, and no learning signal from groups whose rewards are all equal.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A prompt's group of 8 answers all fail the verifier: rewards $[0,0,0,0,0,0,0,0]$. What do the GRPO advantages do?</p>
+    <ol class="q-src">
+      <li>All become −1, pushing every answer down</li>
+      <li>All become −∞, so the prompt is removed</li>
+      <li>All are 0, so this prompt contributes no reward signal this step</li>
+      <li>The least-bad answer gets a positive advantage</li>
+    </ol>
+    <div class="q-explain">Every reward equals the mean, so every $r_i - \text{mean} = 0$ (and the $\epsilon$ in the denominator avoids 0/0). With nothing to compare, there is nothing to learn, which is why recipes filter these groups or choose prompts of the right difficulty.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">GRPO with a rule-based verifier needs which networks in memory during training?</p>
+    <ol class="q-src">
+      <li>Policy, value model, reward model and reference</li>
+      <li>Policy and a frozen reference model</li>
+      <li>Only a value model</li>
+      <li>Policy and reward model, but no reference</li>
+    </ol>
+    <div class="q-explain">The group mean replaces the value model, and the verifier (code) replaces the reward model. The reference stays, because the KL penalty is measured against it.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In a code-RL run, training reward climbs to 95% but a held-out test suite barely improves. Samples show functions that return hard-coded outputs for the visible test cases. What is happening?</p>
+    <ol class="q-src">
+      <li>Reward hacking: the policy found a hole in the verifier</li>
+      <li>The KL penalty is too strong</li>
+      <li>The value model is overfitting</li>
+      <li>The learning rate is too small</li>
+    </ol>
+    <div class="q-explain">The policy maximizes the reward you wrote. Hidden tests, stricter checks and reading samples are the defence. (There is no value model in GRPO, and a strong KL would slow the climb, not fake it.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">How does GRPO differ from DPO (M3.4)?</p>
+    <ol class="q-src">
+      <li>GRPO needs human preference pairs; DPO doesn't need any data</li>
+      <li>DPO trains a value model; GRPO doesn't</li>
+      <li>They are the same algorithm with different names</li>
+      <li>DPO learns offline from a fixed set of preference pairs; GRPO samples fresh responses during training and scores them</li>
+    </ol>
+    <div class="q-explain">DPO turns preference pairs into a classification-style loss with no sampling in the loop. GRPO is <em>online</em> RL: the current policy generates, the verifier scores, and the policy updates on its own fresh samples.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Verifiable rewards</strong>: when code can check the answer (maths, tests, formats), the check is the reward. No reward model.</li>
+    <li><strong>GRPO</strong> samples $G$ answers per prompt and uses $\hat A_i = (r_i - \text{mean})/\text{std}$ within the group, so it needs <strong>no value model</strong>.</li>
+    <li>It keeps PPO's clipped ratio and adds a <strong>KL penalty</strong> to a frozen reference.</li>
+    <li>Watch for <strong>verifier hacking</strong>, <strong>length bias</strong> and <strong>all-equal groups</strong> that teach nothing.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Compute group advantages in NumPy, then train a tiny "policy" over a few candidate answers with a GRPO-style update against a verifier, and watch it learn which answer is right. About 20 minutes, CPU only.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m3-5-grpo-advantages.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m3-5-a","front":"What is RL with verifiable rewards (RLVR)?","back":"RL where the reward comes from a program that checks correctness (maths answer match, unit tests, format checks) instead of a learned reward model. Usually a 0/1 reward."},
+  {"id":"m3-5-b","front":"Write GRPO's advantage for response $i$ in a group of $G$.","back":"$\\hat A_i = (r_i - \\operatorname{mean}(r_1..r_G)) / \\operatorname{std}(r_1..r_G)$, shared by every token of response $i$."},
+  {"id":"m3-5-c","front":"Why does GRPO need no value model?","back":"The value model only provides a baseline. GRPO uses the mean reward of several samples for the same prompt as the baseline instead."},
+  {"id":"m3-5-d","front":"Rewards $[1,0,0,0]$: what are the GRPO advantages?","back":"Mean 0.25, std ≈ 0.433, so the correct answer gets ≈ +1.73 and each wrong one ≈ −0.58. They sum to zero."},
+  {"id":"m3-5-e","front":"What happens when every answer in a group gets the same reward?","back":"All advantages are 0, so the prompt gives no learning signal that step. Recipes filter such groups or choose prompts of the right difficulty."},
+  {"id":"m3-5-f","front":"Name two classic GRPO/RLVR failure modes.","back":"Reward hacking of the verifier (empty format tags, multiple answers, hard-coded test outputs) and length bias from per-response length normalisation (long wrong answers penalised less per token)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m3-5-grpo.js"></script>
+<script src="../assets/js/anims/m3-5-grpo-playground.js"></script>
+</body>
+</html>

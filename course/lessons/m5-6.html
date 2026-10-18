@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m5-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Batching &amp; serving metrics · LLMs, Animated</title>
+<meta name="description" content="Prefill vs decode, the metrics that matter when serving LLMs (TTFT, TPOT, throughput, p99, cost per million tokens), and why continuous batching changed everything.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Batching &amp; serving metrics</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of Optimization</span></div>
+<p class="lede">Serving an LLM to many people at once is a balancing act. Put more requests on a GPU together and the cost per token falls, but each person waits a little longer for every token. This lesson gives you the vocabulary to reason about that trade-off and shows the scheduling trick every modern serving engine uses: <strong>continuous batching</strong>.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Say why prefill is compute-bound and decode is memory-bound, using arithmetic intensity.</li>
+    <li>Define TTFT, TPOT/ITL, throughput and p50/p99 latency, and compute a request's latency and the cost per million tokens.</li>
+    <li>Explain static, dynamic and continuous batching, and read a latency–throughput curve.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> this lesson uses the <strong>KV cache</strong> from <a href="m1-5.html">KV cache &amp; sampling</a>, the idea of a <strong>memory-bound</strong> operation and PagedAttention from <a href="m5-4.html">FlashAttention &amp; paged attention</a>, and connects to <a href="m5-5.html">speculative decoding</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>A guess now makes the answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A GPU serves 32 users at once instead of 1, same model. Roughly what happens to each user's speed (tokens per second)?</p>
+    <ol class="q-src">
+      <li>It drops 32-fold</li>
+      <li>It stays exactly the same</li>
+      <li>It drops a bit, while the GPU's total output rises many-fold</li>
+      <li>It goes up</li>
+    </ol>
+    <div class="q-explain">At small batch sizes, a decode step is dominated by reading the weights, and that read is shared by everyone in the batch. Adding users costs each of them a little time but multiplies total output.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which part of handling a chat request keeps the GPU's arithmetic units busiest?</p>
+    <ol class="q-src">
+      <li>Processing the prompt (all its tokens at once)</li>
+      <li>Generating the answer one token at a time</li>
+      <li>Tokenizing the text</li>
+      <li>Sending tokens back over the network</li>
+    </ol>
+    <div class="q-explain">The prompt's tokens are processed in parallel, so every weight that is read gets used for thousands of tokens. Generating one token at a time uses each weight once per read.</div>
+  </div>
+</section>
+
+<h2>Two phases: prefill and decode</h2>
+<p>Every request goes through two very different phases:</p>
+<ul>
+  <li><strong>Prefill:</strong> the whole prompt goes through the model in <em>one</em> forward pass. This builds the KV cache (<a href="m1-5.html">M1.5</a>) and produces the first output token.</li>
+  <li><strong>Decode:</strong> then the model generates one token per forward pass, each time reading the weights and the KV cache, until it stops.</li>
+</ul>
+<p>The difference is <strong>arithmetic intensity</strong>, the FLOPs done per byte read from memory. A forward pass costs about $2N$ FLOPs per token for a model with $N$ parameters, and reading 16-bit weights moves $2N$ bytes. If one pass handles $T$ tokens, the intensity from the weights is</p>
+$$\text{intensity} \approx \frac{2N \cdot T}{2N} = T \ \text{FLOPs per byte}$$
+<p>For a 2,000-token prompt, $T = 2{,}000$, far above the roughly 156 FLOPs/byte an A100 needs to keep its compute busy (312 TFLOP/s ÷ 2 TB/s). Prefill is <strong>compute-bound</strong>. In decode with a batch of $B$ requests, each pass handles $T = B$ tokens, one per request. At small $B$, decode is <strong>memory-bound</strong>, and reading every request's KV cache only adds bytes. So the main lever for decode is <strong>batching</strong>: share each weight read among as many requests as possible.</p>
+<p class="math-note">This roofline view ignores attention's own FLOPs, the KV-cache reads in the ratio, and imperfect kernels. It's a first-order model, but it explains most of what you see in practice.</p>
+
+<h2>The metrics that matter</h2>
+<ul>
+  <li><strong>TTFT</strong> (time to first token): from the request arriving to the first output token. It covers queueing plus prefill. This is how responsive the app feels.</li>
+  <li><strong>TPOT</strong> (time per output token): the average time between output tokens during decode. <strong>ITL</strong> (inter-token latency) usually means the individual gaps, whose distribution shows stalls that an average hides.</li>
+  <li><strong>End-to-end latency</strong> for $n$ output tokens: $\;\text{TTFT} + \text{TPOT} \times (n - 1)$.</li>
+  <li><strong>Throughput:</strong> total tokens per second across all users (usually output tokens; some reports count input too, so check), or requests per second.</li>
+  <li><strong>Percentiles:</strong> p50 is the median; p99 means 99% of requests do better. Service-level objectives (SLOs) are usually set on the tail, e.g. "p99 TTFT under 2 s", because a user who sends many requests meets the slow 1% often. <strong>Goodput</strong> counts only the requests per second that meet the SLOs (Zhong et al., 2024, DistServe).</li>
+  <li><strong>Cost per million tokens:</strong> what the GPU time costs divided by the tokens it produced.</li>
+</ul>
+
+<h3>Worked example</h3>
+<ol class="steps">
+  <li><strong>Latency:</strong> TTFT = 300 ms, TPOT = 20 ms, answer of 500 tokens: $0.3 + 0.02 \times 499 = 10.28$ s.</li>
+  <li><strong>Per-user speed:</strong> $1 / 0.02 = 50$ tokens/s once the stream starts.</li>
+  <li><strong>Cost:</strong> a GPU rented at $\$2.00$ per hour (an illustrative price) sustains 2,000 output tokens/s across all users. That's $2{,}000 \times 3{,}600 = 7.2$ million tokens per hour, so $\$2.00 / 7.2 \approx \$0.28$ per million tokens.</li>
+  <li><strong>The lever:</strong> double the throughput at the same GPU price and the cost per token halves, which is why batching matters so much.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>TTFT = 0.5 s, TPOT = 25 ms, 200 output tokens. End-to-end latency in seconds: <span class="blank" data-answer="5.475" data-tol="0.01" data-hint="0.5 + 0.025 × (200 − 1)."></span></li>
+    <li>A GPU at $\$3.00$ per hour sustains 500 tokens/s. Cost per million tokens, in dollars: <span class="blank" data-answer="1.67" data-tol="0.01" data-hint="500 × 3,600 = 1.8 million tokens per hour; divide 3.00 by 1.8."></span></li>
+    <li>Batching raises that to 4,000 tokens/s on the same GPU. New cost per million tokens: <span class="blank" data-answer="0.21" data-tol="0.01" data-hint="4,000 × 3,600 = 14.4 million tokens per hour."></span></li>
+    <li>Arithmetic intensity (FLOPs per byte of weights) of a decode step with 32 requests in the batch: <span class="blank" data-answer="32" data-tol="0.5" data-hint="One token per request per step, so T = B."></span></li>
+  </ol>
+</section>
+
+<h2>Batching: static, dynamic, continuous</h2>
+<p>So we want big batches. The question is <em>how</em> to group requests whose answers have wildly different lengths:</p>
+<ul>
+  <li><strong>Static batching:</strong> pick a group of requests and run them until the <em>longest</em> one finishes. Short answers finish early and their slots sit idle; new requests wait for the whole batch.</li>
+  <li><strong>Dynamic batching:</strong> the server collects incoming requests until the batch is full or a short timeout passes, then launches it. That handles uneven arrivals, but each batch still runs to completion, so the idle-slot problem remains for generation.</li>
+  <li><strong>Continuous batching</strong> (also called iteration-level scheduling or in-flight batching): introduced by <strong>Orca</strong> (Yu et al., 2022, "Orca: A Distributed Serving System for Transformer-Based Generative Models"). The scheduler decides <em>after every decode step</em>: finished requests leave, waiting ones join.</li>
+</ul>
+
+<figure class="anim wide" data-anim="m5-6-batching"></figure>
+
+<p>In their GPT-3 175B experiments, Orca's authors reported up to 36.9× the throughput of NVIDIA FasterTransformer at the same latency. That figure is specific to their setup, but continuous batching is now standard in vLLM, SGLang, Hugging Face TGI and TensorRT-LLM. It pairs naturally with PagedAttention (<a href="m5-4.html">M5.4</a>): requests come and go every step, so their KV memory must be easy to hand out and take back.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-batching-bus.webp" alt="A school bus picking up many children at a stop, while a long line of single-passenger taxis behind it is stuck in a traffic jam." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine every child in town needs a ride to school, and there's only <strong>one road</strong>.</p>
+      <p>If each child takes their own <strong>taxi</strong>, the road fills up with taxis and everyone sits in a traffic jam. That's serving one request at a time: the road (the memory link) is busy, but each trip carries just one passenger.</p>
+      <p>A <strong>school bus</strong> uses the same road once and carries a whole crowd. And a smart bus doesn't wait for everyone to reach the last stop: whenever a child gets off, a new one gets on at the next stop. That's continuous batching.</p>
+      <p><em>Where it breaks:</em> a fuller bus stops more often, so each child's ride gets a bit slower (higher latency per token), and the bus only has so many seats: the KV-cache memory.</p>
+    </div>
+  </div>
+</details>
+
+<h2>The latency–throughput trade-off</h2>
+<p>Bigger batches always raise per-token latency a little, because every step has more work in it. But while decode is memory-bound, they raise throughput a lot. Past some batch size the GPU becomes compute-bound, or runs out of memory for KV caches, and the extra latency buys nothing. Explore it with a deliberately simple model:</p>
+
+<div class="playground" id="batch-playground">
+  <h3>Playground: how big should the batch be?</h3>
+  <p class="math-note" style="margin:0">Toy roofline model of decode only (no prefill, no queueing, perfect kernels): a 7B model in 16-bit (14 GB of weights) on an 80 GB GPU with 2 TB/s and 312 TFLOP/s, and 0.125 MB of KV cache per context token. Step time $=\max\big(\tfrac{14\,\text{GB} + B \cdot \text{KV}}{2\,\text{TB/s}},\ \tfrac{B \cdot 14\,\text{GFLOP}}{312\,\text{TFLOP/s}}\big)$.</p>
+  <div class="pg-stage" style="margin-top:10px"></div>
+  <div class="pg-controls">
+    <label><span>Batch size B = <output>32</output></span>
+      <input type="range" min="0" max="10" step="1" value="5" aria-describedby="batch-hint" aria-label="Batch size, from 1 to 1024 in powers of two">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Context length per request" style="margin-top:12px">
+    <button type="button" class="chip" data-ctx="500" aria-pressed="false">Short context · 500 tokens</button>
+    <button type="button" class="chip" data-ctx="2000" aria-pressed="true">Medium · 2,000</button>
+    <button type="button" class="chip" data-ctx="8000" aria-pressed="false">Long · 8,000</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="batch-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p>In this model, going from $B = 1$ to $B = 64$ (2,000-token contexts) makes each user's tokens about 2× slower (7.1 → 15 ms) but the GPU's total output 30× higher (140 → 4,267 tokens/s), and the cost per million tokens falls from about $\$4$ to $\$0.13$. Real engines expose this as settings such as the maximum number of concurrent sequences and the fraction of GPU memory reserved for KV cache. Operators pick the largest batch that still meets their latency SLOs.</p>
+
+<h2>Two more tricks: chunked prefill and prefix caching</h2>
+<p><strong>Chunked prefill.</strong> When a request with a 4,000-token prompt joins a running batch, its prefill is a big, compute-heavy step. Run it all at once and every other user's next token is delayed, a visible stutter in their stream. <strong>Chunked prefill</strong> (Agrawal et al., 2023, Sarathi; 2024, Sarathi-Serve) splits the prompt into chunks of, say, 512 tokens and adds one chunk to each decode step. Decode steps are memory-bound and have spare compute, so the chunks ride along almost for free, and inter-token latency stays smooth. Several engines now enable it by default.</p>
+<p><strong>Prefix caching.</strong> Many requests start with the same tokens: a long system prompt, few-shot examples, or the earlier turns of a conversation. With paged KV blocks (<a href="m5-4.html">M5.4</a>) the engine can keep those blocks and reuse them, skipping most of the prefill. That cuts TTFT and cost. Many API providers bill cached input tokens at a discount for this reason.</p>
+<p class="math-note">Going further, some systems <strong>disaggregate</strong> the two phases onto different GPUs (e.g. DistServe and Splitwise, 2024), so compute-bound prefill and memory-bound decode stop competing for the same hardware.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> these numbers shape real products and prices. Prefill is efficient batched compute and decode is memory-bound, which is one reason API prices for output tokens are typically several times those for input tokens. Long contexts are expensive mainly because their KV caches crowd other requests out of memory. And a technique that helps at batch size 1, such as speculative decoding (<a href="m5-5.html">M5.5</a>), may help much less on a busy, well-batched server. Always ask at which batch size a speed-up was measured.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does continuous batching beat static batching for LLM generation, and what is the trade-off when you raise the batch size?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Answers have very different lengths. Static batching keeps finished requests' slots idle until the longest one ends, while continuous batching reschedules after every decode step, so a waiting request takes a free slot immediately and the GPU stays busy. Raising the batch size shares each memory read among more requests, so throughput rises and cost per token falls, but every step does more work, so each user's time per token (and TTFT under load) goes up, until compute or KV-cache memory runs out.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which of these is usually compute-bound on a modern GPU?</p>
+    <ol class="q-src">
+      <li>Decoding one token for a single user</li>
+      <li>Prefilling a 4,000-token prompt</li>
+      <li>Reading the KV cache during decode</li>
+      <li>Sampling the next token from the softmax</li>
+    </ol>
+    <div class="q-explain">Prefill processes thousands of tokens per weight read, about 4,000 FLOPs per byte here, far above an A100's ~156. Single-user decode is about 1 FLOP per byte.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">TTFT is 200 ms, then the model streams 100 tokens at a TPOT of 30 ms. What's the end-to-end latency?</p>
+    <ol class="q-src">
+      <li>3.17 s</li>
+      <li>3.0 s</li>
+      <li>0.23 s</li>
+      <li>20 s</li>
+    </ol>
+    <div class="q-explain">$0.2 + 0.03 \times (100 - 1) = 3.17$ s. The first token arrives at TTFT, and the remaining 99 each take one TPOT. 3.0 s forgets the TTFT.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What exactly does continuous batching change compared with static batching?</p>
+    <ol class="q-src">
+      <li>It makes each forward pass compute fewer FLOPs</li>
+      <li>It pads every request to the same length</li>
+      <li>It waits longer to collect a bigger batch</li>
+      <li>It reschedules after every decode step, so finished requests leave and waiting ones join immediately</li>
+    </ol>
+    <div class="q-explain">The model math is unchanged; only the scheduling granularity changes, from whole requests to single iterations. Waiting to collect a batch is dynamic batching.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Interleaving with M5.5: why does speculative decoding usually give a smaller speedup on a heavily loaded server than for a single user?</p>
+    <ol class="q-src">
+      <li>The draft model's acceptance rate drops when many users are active</li>
+      <li>Speculative decoding changes the output distribution at large batch sizes</li>
+      <li>With a big batch the GPU is closer to compute-bound, so verifying extra draft tokens is no longer nearly free</li>
+      <li>The KV cache can't store draft tokens</li>
+    </ol>
+    <div class="q-explain">Speculation spends spare compute to save memory-bound steps. A large batch already uses that spare compute, so the extra verification work starts to cost real time. The output distribution stays exact either way.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Prefill</strong> (whole prompt at once) is compute-bound; <strong>decode</strong> (one token per step) is memory-bound, with intensity ≈ batch size.</li>
+    <li>Measure <strong>TTFT</strong>, <strong>TPOT/ITL</strong>, <strong>throughput</strong> and tail percentiles (<strong>p99</strong>). Latency ≈ TTFT + TPOT × (n − 1); cost per million tokens = GPU price per hour ÷ millions of tokens per hour.</li>
+    <li><strong>Continuous batching</strong> (Orca) reschedules every step, so slots never wait for the longest request in a batch.</li>
+    <li>Bigger batches trade a little per-token latency for a lot of throughput, until compute or KV memory runs out.</li>
+    <li><strong>Chunked prefill</strong> keeps streams smooth when new requests join; <strong>prefix caching</strong> reuses KV blocks of shared prompts.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m5-6-a","front":"Why is prefill compute-bound and decode memory-bound?","back":"Arithmetic intensity ≈ tokens processed per weight read. Prefill handles the whole prompt (thousands of tokens) per pass; decode handles one token per request, so intensity ≈ batch size, far below a GPU's ~150–300 FLOPs/byte."},
+  {"id":"m5-6-b","front":"Define TTFT, TPOT and ITL.","back":"TTFT: time from request arrival to the first output token (queueing + prefill). TPOT: average time per output token during decode. ITL: the individual gaps between consecutive tokens (their distribution reveals stalls)."},
+  {"id":"m5-6-c","front":"End-to-end latency for $n$ output tokens?","back":"TTFT + TPOT × (n − 1). E.g. 0.3 s + 0.02 s × 499 = 10.28 s for 500 tokens."},
+  {"id":"m5-6-d","front":"How do you compute cost per million tokens?","back":"(GPU price per hour) ÷ (tokens per hour ÷ 10⁶). E.g. $\\$2$ per hour at 2,000 tokens/s = 7.2 M tokens/hour → about $\\$0.28$ per million."},
+  {"id":"m5-6-e","front":"Static vs dynamic vs continuous batching?","back":"Static: a fixed group runs until its longest request ends. Dynamic: collect requests until full or a timeout, then run the batch to completion. Continuous (Orca, 2022): reschedule after every decode step, so requests join and leave at any step."},
+  {"id":"m5-6-f","front":"What are chunked prefill and prefix caching for?","back":"Chunked prefill splits a long prompt's prefill into pieces mixed into decode steps, so running streams don't stall. Prefix caching reuses the KV cache of shared prefixes (system prompts, history) to skip prefill, cutting TTFT and cost."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m5-6-batching.js"></script>
+<script src="../assets/js/anims/m5-6-batch-playground.js"></script>
+</body>
+</html>

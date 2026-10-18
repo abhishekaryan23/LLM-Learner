@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m2-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Distributed training &amp; mixed precision · LLMs, Animated</title>
+<meta name="description" content="Why one GPU can't train an LLM, and how teams split the work: data parallelism, ZeRO/FSDP sharding, tensor and pipeline parallelism, bf16 vs fp16, loss scaling and activation checkpointing.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Distributed training &amp; mixed precision</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Pretraining</span></div>
+<p class="lede">A 7B model doesn't fit in one GPU's memory for training, and even if it did, pretraining it on one GPU would take years. This lesson shows how the work is split across thousands of GPUs, and how lower-precision numbers make every GPU go further.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Account for the ~16 bytes per parameter of mixed-precision AdamW training, and compute it for a 7B model.</li>
+    <li>Explain data, ZeRO/FSDP, tensor and pipeline parallelism, including the pipeline bubble.</li>
+    <li>Compare fp32, fp16 and bf16, and explain loss scaling and activation checkpointing.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> this lesson leans on Adam's two moment estimates from <a href="m2-3.html">M2.3 Optimizers</a> and on $C \approx 6ND$ from <a href="m2-4.html">M2.4 Scaling laws</a>. Knowing what backpropagation stores (<a href="p2-3.html">P2.3</a>) helps with the activations part.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take a guess; the numbers may surprise you.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A 7B-parameter model's weights take 14 GB in bf16. Roughly how much GPU memory does <em>training</em> it with AdamW need, before counting activations?</p>
+    <ol class="q-src">
+      <li>About 14 GB, the same as the weights</li>
+      <li>About 28 GB</li>
+      <li>About 112 GB</li>
+      <li>About 1 TB</li>
+    </ol>
+    <div class="q-explain">Training also stores gradients, an fp32 master copy of the weights and Adam's two moments: about 16 bytes per parameter, so $7\text{B} \times 16 = 112$ GB.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">bf16 and fp16 both use 16 bits. What is bf16's main advantage for training?</p>
+    <ol class="q-src">
+      <li>It covers the same huge range of values as fp32, so gradients rarely underflow or overflow</li>
+      <li>It is more precise than fp16</li>
+      <li>It uses less memory than fp16</li>
+      <li>It needs no hardware support</li>
+    </ol>
+    <div class="q-explain">bf16 keeps fp32's 8 exponent bits and gives up precision instead. fp16 is actually <em>more</em> precise, but its range tops out at 65,504.</div>
+  </div>
+</section>
+
+<h2>Why one GPU isn't enough</h2>
+<p><strong>Memory.</strong> Mixed-precision training with AdamW keeps, for every parameter (Rajbhandari et al., 2020):</p>
+<ul>
+  <li>bf16 (or fp16) <strong>weights</strong> for the forward and backward pass: 2 bytes</li>
+  <li>bf16 <strong>gradients</strong>: 2 bytes</li>
+  <li>an fp32 <strong>master copy</strong> of the weights, which the optimizer updates: 4 bytes</li>
+  <li>Adam's <strong>first and second moments</strong> $m$ and $v$ in fp32 (M2.3): 4 + 4 bytes</li>
+</ul>
+<p>That's $2 + 2 + 4 + 4 + 4 = 16$ bytes per parameter. For 7B parameters: $7\times10^9 \times 16 = 1.12\times10^{11}$ bytes, <strong>112 GB</strong>, against 80 GB on an H100. And that's before <strong>activations</strong>, the intermediate values saved for the backward pass, which grow with batch size, sequence length and depth.</p>
+<p><strong>Compute.</strong> Pretraining a 7B model on 2T tokens takes $6ND = 6 \times 7\times10^9 \times 2\times10^{12} = 8.4\times10^{22}$ FLOPs. At a realistic $4\times10^{14}$ FLOP/s on one H100, that's $2.1\times10^{8}$ seconds: about <strong>6.7 years</strong>. We need many GPUs, and ways to split both the memory and the work.</p>
+
+<h2>Data parallelism, then sharding (ZeRO / FSDP)</h2>
+<p><strong>Data parallelism</strong> (DP) is the simplest split: every GPU holds the whole model, processes a different slice of the batch, and then the GPUs <strong>all-reduce</strong> (sum and share) their gradients so everyone applies the same update. It divides the compute, but every GPU still needs all 16 bytes per parameter.</p>
+<p><strong>ZeRO</strong> (Rajbhandari et al., 2020) removes that redundancy by giving each of the $N_d$ data-parallel GPUs only a shard of the training state. With $\Psi$ parameters, per-GPU memory is:</p>
+<ul>
+  <li><strong>Stage 1</strong>, shard the 12 bytes of optimizer state: $4\Psi + 12\Psi/N_d$</li>
+  <li><strong>Stage 2</strong>, also shard gradients: $2\Psi + 14\Psi/N_d$</li>
+  <li><strong>Stage 3</strong>, also shard the weights: $16\Psi/N_d$. Each layer's weights are gathered from the other GPUs just before use and dropped afterwards. PyTorch's <strong>FSDP</strong> (Fully Sharded Data Parallel) works the same way.</li>
+</ul>
+<p>The price is communication: stage 3 moves about 1.5× as much data as plain DP, so fast interconnects matter.</p>
+
+<figure class="anim wide" data-anim="m2-5-memory"></figure>
+
+<h2>Tensor parallelism: split each layer</h2>
+<p>Sharding stores the weights in pieces, but each GPU still computes whole layers. <strong>Tensor parallelism</strong> (Megatron-LM, Shoeybi et al., 2019) splits the matrix multiplications themselves. In the MLP, the first weight matrix is split by columns, so each GPU computes its own slice of the hidden units; the second is split by rows, and one all-reduce adds the partial results:</p>
+$$Y = \big[\,X A_1 \;\big|\; X A_2\,\big], \qquad Z = Y_1 B_1 + Y_2 B_2$$
+<p>Here $A = [A_1 \mid A_2]$ is the first weight matrix split between two GPUs and $B$ the second, split the other way; attention is split by heads in the same spirit. This needs communication inside every layer, so tensor parallelism usually stays within one server, whose 8 GPUs are linked by very fast NVLink.</p>
+
+<h2>Pipeline parallelism: split the stack of layers</h2>
+<p><strong>Pipeline parallelism</strong> puts consecutive groups of layers on different GPUs, like an assembly line. Its problem is idle time: the last stage waits for the first to finish, and vice versa on the way back. GPipe (Huang et al., 2019) splits each batch into $m$ <strong>micro-batches</strong> to keep the line busy. With $p$ stages, the idle fraction (the <strong>bubble</strong>) is</p>
+$$\text{bubble} = \frac{p-1}{m+p-1}$$
+
+<figure class="anim wide" data-anim="m2-5-pipeline"></figure>
+
+<p>Schedules such as <strong>1F1B</strong> (one forward, one backward; Narayanan et al., 2019) interleave the passes so fewer micro-batches' activations are held at once, and interleaved stages shrink the bubble further.</p>
+<p>Big runs combine all of these, often called <strong>3D parallelism</strong>. Llama 3 405B was trained on up to 16,384 H100 GPUs: 8-way tensor parallelism inside each server, 16-way pipeline parallelism, and 128-way data parallelism with FSDP-style sharding, plus context parallelism for long sequences. Meta reported keeping roughly 38–43% of the GPUs' peak throughput busy with useful work.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-distributed-pizza.webp" alt="Chefs at separate tables each preparing part of a giant pizza that is assembled on one board." width="1200" height="900" loading="lazy">
+    <div>
+      <p>One chef can't make a pizza the size of a room: it won't fit on their table, and it would take forever. So <strong>many chefs at separate tables</strong> each make <strong>one part</strong> of it.</p>
+      <p>Then all the parts are carried to <strong>one big board</strong> and fitted together. The chefs have to keep talking ("my slice ends here!") so the pieces match up. That talking is the communication between GPUs.</p>
+      <p>Where it breaks: GPUs don't only split one pizza into pieces. Sometimes they each bake a <em>whole</em> pizza from different dough and then agree on one recipe change (data parallelism), or pass the pizza down a line where each chef adds one topping (pipeline parallelism).</p>
+    </div>
+  </div>
+</details>
+
+<h2>Mixed precision: fp32, fp16 and bf16</h2>
+<p>A floating-point number has a <strong>sign</strong>, an <strong>exponent</strong> (which sets its range) and a <strong>mantissa</strong> (which sets its precision). Modern GPUs run 16-bit matrix maths many times faster than 32-bit and halve the memory, so training does the heavy work in 16 bits:</p>
+
+<figure class="anim">
+  <div class="anim-head"><p class="anim-title">Three number formats</p></div>
+  <div class="anim-stage">
+    <svg viewBox="0 0 360 196" role="img" aria-label="Bit layouts. fp32: 1 sign bit, 8 exponent bits, 23 mantissa bits. fp16: 1 sign, 5 exponent, 10 mantissa. bf16: 1 sign, 8 exponent, 7 mantissa, so bf16 has fp32's range with fewer digits of precision." style="max-width:560px;margin:0 auto">
+      <text x="14" y="18" class="t t-sm">fp32 · 1 + 8 + 23 bits · range ±3.4×10³⁸ · ~7 digits</text>
+      <rect x="14" y="26" width="8.5" height="18" rx="2" class="f-ink"/>
+      <rect x="24" y="26" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="34" y="26" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="44" y="26" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="54" y="26" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="64" y="26" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="74" y="26" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="84" y="26" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="94" y="26" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="104" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="114" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="124" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="134" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="144" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="154" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="164" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="174" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="184" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="194" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="204" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="214" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="224" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="234" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="244" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="254" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="264" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="274" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="284" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="294" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="304" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="314" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="324" y="26" width="8.5" height="18" rx="2" class="f-blue"/>
+      <text x="14" y="74" class="t t-sm">fp16 · 1 + 5 + 10 bits · max 65,504 · ~3 digits</text>
+      <rect x="14" y="82" width="8.5" height="18" rx="2" class="f-ink"/>
+      <rect x="24" y="82" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="34" y="82" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="44" y="82" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="54" y="82" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="64" y="82" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="74" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="84" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="94" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="104" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="114" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="124" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="134" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="144" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="154" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="164" y="82" width="8.5" height="18" rx="2" class="f-blue"/>
+      <text x="14" y="130" class="t t-sm">bf16 · 1 + 8 + 7 bits · range ±3.4×10³⁸ · ~2–3 digits</text>
+      <rect x="14" y="138" width="8.5" height="18" rx="2" class="f-ink"/>
+      <rect x="24" y="138" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="34" y="138" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="44" y="138" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="54" y="138" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="64" y="138" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="74" y="138" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="84" y="138" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="94" y="138" width="8.5" height="18" rx="2" class="f-orange"/>
+      <rect x="104" y="138" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="114" y="138" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="124" y="138" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="134" y="138" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="144" y="138" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="154" y="138" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="164" y="138" width="8.5" height="18" rx="2" class="f-blue"/>
+      <rect x="14" y="171" width="12" height="12" rx="2" class="f-ink"/><text x="32" y="182" class="t t-sm">sign</text>
+      <rect x="76" y="171" width="12" height="12" rx="2" class="f-orange"/><text x="94" y="182" class="t t-sm">exponent: range</text>
+      <rect x="206" y="171" width="12" height="12" rx="2" class="f-blue"/><text x="224" y="182" class="t t-sm">mantissa: precision</text>
+    </svg>
+  </div>
+  <figcaption class="anim-caption"><strong>fp16</strong> has 3 more mantissa bits than bf16 (more precise) but 3 fewer exponent bits (tiny range). <strong>bf16</strong> keeps fp32's exponent, so it can hold roughly any value fp32 can, just less precisely.</figcaption>
+</figure>
+
+<ul>
+  <li><strong>fp16</strong> can't represent anything above 65,504, and its smallest positive value is about $6\times10^{-8}$, so smaller gradients <strong>underflow</strong> to zero. The fix is <strong>loss scaling</strong> (Micikevicius et al., 2018): multiply the loss by a large factor $S$ (e.g. $2^{16}$) so all gradients are scaled up into range, divide them by $S$ in fp32 before the update, and lower $S$ (skipping that step) if any gradient overflows to infinity.</li>
+  <li><strong>bf16</strong> has fp32's range, so loss scaling is usually unnecessary. It's the default for LLM training on modern hardware.</li>
+  <li>Either way, an <strong>fp32 master copy</strong> of the weights receives the updates. Updates are often thousands of times smaller than the weights, and 16-bit numbers can't register such small changes.</li>
+  <li>Since 2024 some labs go further with <strong>FP8</strong> matrix multiplications, for example DeepSeek-V3, with careful scaling to manage FP8's tiny range and precision.</li>
+</ul>
+
+<h3>Worked example: a lost update</h3>
+<p>Numbers between 1 and 2 in bf16 are spaced $2^{-7} = 0.0078125$ apart (7 mantissa bits).</p>
+<ol class="steps">
+  <li>A weight equals 1.0 and the optimizer's update is $+0.001$.</li>
+  <li>The exact result 1.001 lies between 1.0 and the next bf16 number, 1.0078125.</li>
+  <li>It's much closer to 1.0, so it rounds to <strong>1.0</strong>: the update vanished.</li>
+  <li>Repeat that for thousands of steps and the weight never moves. In the fp32 master copy (spacing about $1.2\times10^{-7}$ near 1), the update survives, and the bf16 copy is re-made from it each step.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <ol class="steps">
+    <li>fp16 has 10 mantissa bits, so numbers between 1 and 2 are spaced $2^{-10}$ apart. As a decimal: <span class="blank" data-answer="0.000977" data-tol="0.000005" data-hint="2^-10 = 1/1024."></span></li>
+    <li>In fp16, $1 + 0.0004$ rounds to: <span class="blank" data-answer="1" data-tol="0.00001" data-hint="0.0004 is less than half the spacing (≈ 0.00049), so it rounds back down."></span></li>
+    <li>A gradient of $10^{-8}$ underflows in fp16. With loss scale $S = 65{,}536$ it becomes (as a decimal): <span class="blank" data-answer="0.000655" data-tol="0.000002" data-hint="10^-8 × 65,536 = 6.5536 × 10^-4."></span></li>
+    <li>In bf16, numbers between 256 and 512 are spaced 2 apart. $256 + 1$ rounds to (ties go to the even mantissa): <span class="blank" data-answer="256" data-tol="0.01" data-hint="257 is exactly halfway between 256 and 258; round-to-even picks 256."></span></li>
+  </ol>
+</section>
+
+<h2>Activation checkpointing</h2>
+<p>Backpropagation (P2.3) needs the activations from the forward pass, and for long sequences they can take more memory than the weights. <strong>Activation checkpointing</strong> (Chen et al., 2016) keeps only some of them, typically each layer's input, and <strong>recomputes</strong> the rest during the backward pass. Full recomputation costs about one extra forward pass, roughly $2N$ more FLOPs per token on top of $6N$, about 33% more compute, in exchange for a large cut in activation memory. <strong>Selective</strong> recomputation (Korthikanti et al., 2022) recomputes only the cheap-to-redo but memory-hungry parts, such as attention scores, for a much smaller overhead.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> choosing a parallelism layout is a juggling act between memory, communication and idle time, and it decides how much of a cluster's theoretical speed you actually get (model FLOPs utilization, often 30–50% for large runs). The same 16-bytes-per-parameter arithmetic explains why fine-tuning tricks like <strong>LoRA and QLoRA</strong> (M3.7) are so popular, and why inference uses <strong>quantization</strong> (M5.1): with no gradients or optimizer state, a model can be served in a fraction of its training memory.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why doesn't plain data parallelism solve the memory problem, and what does ZeRO-3 / FSDP do differently?</p>
+  <div class="model-answer"><strong>Model answer:</strong> In data parallelism every GPU keeps a full copy of the weights, gradients and optimizer state (about 16 bytes per parameter), so adding GPUs speeds training up but doesn't reduce per-GPU memory. ZeRO-3 / FSDP shards all of that across the GPUs so each stores only $1/N_d$ of it, gathering each layer's weights just in time for its computation, at the cost of more communication.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">With ZeRO stage 3 on 8 GPUs, how much memory per GPU does a 7B model's training state (16 bytes/parameter) take?</p>
+    <ol class="q-src">
+      <li>112 GB</li>
+      <li>14 GB</li>
+      <li>38.5 GB</li>
+      <li>7 GB</li>
+    </ol>
+    <div class="q-explain">$16 \times 7\text{B} / 8 = 14$ GB. 38.5 GB would be ZeRO-1 on 8 GPUs: $4\Psi + 12\Psi/8 = 28 + 10.5$.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A pipeline has 8 stages and you use 8 micro-batches. What fraction of time is lost to the bubble?</p>
+    <ol class="q-src">
+      <li>0%</li>
+      <li>12.5%</li>
+      <li>87.5%</li>
+      <li>About 47%</li>
+    </ol>
+    <div class="q-explain">$(p-1)/(m+p-1) = 7/15 \approx 47\%$. You need many more micro-batches than stages to make the bubble small.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Linking back to M2.3: which part of the 16 bytes per parameter exists because of the <em>optimizer</em>, and how big is it?</p>
+    <ol class="q-src">
+      <li>Adam's $m$ and $v$ plus the fp32 master weights: 12 bytes</li>
+      <li>The bf16 gradients: 2 bytes</li>
+      <li>The bf16 weights: 2 bytes</li>
+      <li>Nothing; Adam needs no extra memory</li>
+    </ol>
+    <div class="q-explain">Adam keeps two fp32 running averages per parameter (8 bytes), and the fp32 master copy it updates adds 4 more. That 12-byte block is exactly what ZeRO stage 1 shards.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why does fp16 training need loss scaling while bf16 training usually doesn't?</p>
+    <ol class="q-src">
+      <li>fp16 is less precise than bf16</li>
+      <li>bf16 uses 32 bits</li>
+      <li>fp16 has only 5 exponent bits, so small gradients underflow to zero unless scaled up; bf16 has fp32's 8 exponent bits</li>
+      <li>Loss scaling is only for inference</li>
+    </ol>
+    <div class="q-explain">It's about <em>range</em>, not precision. fp16 is actually more precise than bf16, but its smallest values are far larger than fp32's or bf16's.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Mixed-precision AdamW needs about <strong>16 bytes per parameter</strong> (7B → 112 GB) plus activations: more than one GPU holds.</li>
+    <li><strong>Data parallelism</strong> splits the batch; <strong>ZeRO/FSDP</strong> shards optimizer state, gradients and weights across those GPUs.</li>
+    <li><strong>Tensor parallelism</strong> splits matrices inside a layer (within a server); <strong>pipeline parallelism</strong> splits the layers, with bubble $(p-1)/(m+p-1)$.</li>
+    <li><strong>bf16</strong> has fp32's range with less precision; <strong>fp16</strong> needs <strong>loss scaling</strong>; fp32 master weights keep small updates from vanishing.</li>
+    <li><strong>Activation checkpointing</strong> trades about a third more compute for much less activation memory.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m2-5-a","front":"Break down the ~16 bytes per parameter of mixed-precision AdamW training.","back":"bf16 weights 2 + bf16 gradients 2 + fp32 master weights 4 + Adam m 4 + Adam v 4 = 16 bytes. A 7B model needs ~112 GB before activations."},
+  {"id":"m2-5-b","front":"What do ZeRO stages 1, 2 and 3 shard?","back":"Stage 1: optimizer states (12 bytes/param). Stage 2: + gradients. Stage 3 (≈ FSDP): + the weights themselves, so per-GPU memory ≈ $16\\Psi/N_d$."},
+  {"id":"m2-5-c","front":"Tensor vs pipeline parallelism?","back":"Tensor: split the matrices inside each layer across GPUs (needs per-layer communication, so usually within one NVLink server). Pipeline: put different layers on different GPUs and stream micro-batches through."},
+  {"id":"m2-5-d","front":"What is the pipeline bubble and its size?","back":"Idle time while the pipeline fills and drains. With p stages and m micro-batches (GPipe-style), the idle fraction is $(p-1)/(m+p-1)$."},
+  {"id":"m2-5-e","front":"bf16 vs fp16: what's the trade-off, and what is loss scaling for?","back":"bf16: 8 exponent bits (fp32's range), 7 mantissa bits. fp16: 5 exponent bits (max 65,504), 10 mantissa bits. fp16's small range makes tiny gradients underflow, so the loss is multiplied by a scale factor and gradients are unscaled before the update."},
+  {"id":"m2-5-f","front":"What is activation checkpointing?","back":"Store only some activations (e.g. each layer's input) in the forward pass and recompute the rest during backward: roughly 33% more compute for full recomputation, in exchange for much less activation memory."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m2-5-memory.js"></script>
+<script src="../assets/js/anims/m2-5-pipeline.js"></script>
+</body>
+</html>

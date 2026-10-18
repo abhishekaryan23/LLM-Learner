@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p4-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>A training loop · LLMs, Animated</title>
+<meta name="description" content="The five-line PyTorch training loop: nn.Module, a loss, an optimizer, batches from a DataLoader, train vs eval mode and logging, with a small classifier you can train in seconds.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>A training loop</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of PyTorch in an hour</span></div>
+<p class="lede">Every model in this course, from a straight line to a frontier LLM, is trained by the same five lines of PyTorch, repeated: <strong>zero the gradients, run the model, compute the loss, backpropagate, step</strong>.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write a model as an <code>nn.Module</code> and pick a loss and an optimizer for it.</li>
+    <li>Write the five-line training loop from memory and say what each line does.</li>
+    <li>Use a <code>DataLoader</code> for mini-batches, switch between train and eval mode, and log useful numbers.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p4-1.html">P4.1 Tensors &amp; autograd</a> (<code>.backward()</code>, <code>.grad</code>, <code>no_grad</code>), <a href="p2-1.html">P2.1 Loss functions</a>, <a href="p2-2.html">P2.2 Gradient descent</a> (mini-batches, learning rate) and <a href="p2-4.html">P2.4 Overfitting &amp; data splits</a> (validation, dropout).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Put these in the order a training step runs them: (a) <code>loss.backward()</code>, (b) <code>optimizer.step()</code>, (c) <code>pred = model(x)</code>, (d) <code>optimizer.zero_grad()</code>.</p>
+    <ol class="q-src">
+      <li>c, b, a, d</li>
+      <li>a, c, d, b</li>
+      <li>b, d, c, a</li>
+      <li>d, c, a, b</li>
+    </ol>
+    <div class="q-explain">Clear old gradients, run forward, backpropagate, then update. You can't backpropagate before the forward pass has built the graph, and you can't step before the gradients exist.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Your model uses dropout. You evaluate it on the validation set but forget to call <code>model.eval()</code>. What happens?</p>
+    <ol class="q-src">
+      <li>Nothing; dropout only matters for the gradients</li>
+      <li>Dropout keeps randomly zeroing activations, so validation scores come out noisy and usually worse</li>
+      <li>PyTorch raises an error</li>
+      <li>The model trains on the validation set</li>
+    </ol>
+    <div class="q-explain">Train/eval mode switches the behaviour of layers like dropout (P2.4) and batch norm. It doesn't change gradient tracking; that's what <code>torch.no_grad()</code> is for.</div>
+  </div>
+</section>
+
+<h2>The ingredients</h2>
+<h3>1. A model: <code>nn.Module</code></h3>
+<p>A model is a class that subclasses <code>nn.Module</code>. You create its layers in <code>__init__</code> and say how data flows through them in <code>forward</code>. Any <code>nn.Parameter</code> inside, including the weights of built-in layers like <code>nn.Linear</code>, is registered automatically, so <code>model.parameters()</code> can hand all of them to the optimizer.</p>
+<pre><code>import torch
+from torch import nn
+
+class TinyClassifier(nn.Module):
+    def __init__(self, d_in, d_hidden, n_classes):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_in, d_hidden),
+            nn.ReLU(),
+            nn.Dropout(p=0.1),
+            nn.Linear(d_hidden, n_classes),
+        )
+
+    def forward(self, x):
+        return self.net(x)    # logits: (B, n_classes)
+
+model = TinyClassifier(2, 32, 3)
+sum(p.numel() for p in model.parameters())   # 195</code></pre>
+<p>Call the model like a function, <code>model(x)</code>, not <code>model.forward(x)</code>: the call runs PyTorch's hooks around <code>forward</code>.</p>
+
+<h3>2. A loss</h3>
+<p>For classification, <code>nn.CrossEntropyLoss()</code> takes raw scores (<strong>logits</strong>, shape (B, C)) and integer class labels (shape (B,)). It applies the softmax internally, so don't add one yourself. The result is the average of $-\ln p_{\text{correct}}$ over the batch (P2.1). For regression, use <code>nn.MSELoss()</code>. An LLM uses the very same cross-entropy: its logits of shape (B, T, V) are flattened to (B·T, V) so that every token position counts as one classification.</p>
+
+<h3>3. An optimizer</h3>
+<pre><code>loss_fn = nn.CrossEntropyLoss()
+opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=0.01)</code></pre>
+<p>The optimizer holds references to the parameters and knows how to update them from their <code>.grad</code>. <code>torch.optim.SGD</code> is the plain $\theta \leftarrow \theta - \eta\,\nabla L$ from P2.2; <strong>AdamW</strong> is what LLMs use (M2.3).</p>
+
+<h3>4. Batches: <code>DataLoader</code></h3>
+<pre><code>from torch.utils.data import TensorDataset, DataLoader
+
+train_ds = TensorDataset(X_train, y_train)
+train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)</code></pre>
+<p>Iterating over <code>train_loader</code> yields mini-batches <code>(xb, yb)</code>, reshuffled every epoch. With 1,000 examples and <code>batch_size=64</code> that's 16 batches per epoch (the last one has only 40 examples, unless you pass <code>drop_last=True</code>).</p>
+
+<h2>The loop</h2>
+<figure class="anim wide" data-anim="p4-2-loop"></figure>
+
+<pre><code>for epoch in range(20):
+    model.train()                       # dropout on
+    for xb, yb in train_loader:
+        opt.zero_grad()                 # 1. clear old gradients
+        logits = model(xb)              # 2. forward
+        loss = loss_fn(logits, yb)      # 3. one number
+        loss.backward()                 # 4. fill every .grad
+        opt.step()                      # 5. update parameters
+
+    model.eval()                        # dropout off
+    with torch.no_grad():               # no graph needed
+        val_logits = model(X_val)
+        val_loss = loss_fn(val_logits, y_val).item()
+        val_acc = (val_logits.argmax(dim=1) == y_val).float().mean().item()
+    print(f"epoch {epoch}: val loss {val_loss:.3f}, acc {val_acc:.1%}")</code></pre>
+<p>On three well-separated clusters of 2-D points, this reaches about 98% validation accuracy within a few epochs on a laptop CPU. A few details carry most of the weight:</p>
+<ul>
+  <li><strong><code>model.train()</code> / <code>model.eval()</code></strong> switch layer behaviour (dropout, batch norm). They do <em>not</em> turn off gradients; <code>torch.no_grad()</code> does that. Evaluation needs both.</li>
+  <li><strong><code>.item()</code></strong> turns a one-element tensor into a Python number. Log with it, not with the tensor: keeping the tensor around would keep its whole graph alive in memory.</li>
+  <li><strong>Devices:</strong> move the model once (<code>model.to(device)</code>) and each batch as it arrives (<code>xb, yb = xb.to(device), yb.to(device)</code>).</li>
+</ul>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>Learning to shoot hoops. Each round: <strong>forget</strong> what the coach said last time (zero the gradients), <strong>shoot</strong> a handful of balls (forward), <strong>count</strong> how far you missed (loss), <strong>hear</strong> the coach say "aim a bit left, a bit softer" (backward), and <strong>adjust</strong> (step). Then the next handful of balls.</p>
+      <p>Do that for hours and you're good. Where the analogy breaks: a model gets exact, numeric advice for every single "muscle" (parameter) at once, millions of them, every round.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example: counting steps</h3>
+<p>50,000 training examples, <code>batch_size=128</code>, 10 epochs, plain SGD with lr $= 0.1$.</p>
+<ol class="steps">
+  <li>Batches per epoch: $\lceil 50{,}000 / 128 \rceil = \lceil 390.6 \rceil = 391$ (the last batch is partial).</li>
+  <li>Optimizer steps in total: $391 \times 10 = 3{,}910$. One <code>opt.step()</code> per batch.</li>
+  <li>One step on a weight $w = 0.5$ with <code>w.grad</code> $= 2$: $w \leftarrow 0.5 - 0.1 \times 2 = 0.3$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>1,000 training examples, <code>batch_size=64</code>, 5 epochs, SGD with lr $= 0.05$.</p>
+  <ol class="steps">
+    <li>Batches per epoch: <span class="blank" data-answer="16" data-tol="0.001" data-hint="1000 / 64 = 15.6; the leftover 40 examples still form a batch, so round up."></span></li>
+    <li>Total optimizer steps: <span class="blank" data-answer="80" data-tol="0.001" data-hint="Batches per epoch × epochs."></span></li>
+    <li>A weight $w = 1.2$ with <code>w.grad</code> $= -4$ after one step: <span class="blank" data-answer="1.4" data-tol="0.001" data-hint="w − lr × grad = 1.2 − 0.05 × (−4)."></span></li>
+    <li>You forgot <code>zero_grad()</code>, and the next batch's gradient is again $-4$. What is in <code>w.grad</code> when <code>step()</code> runs? <span class="blank" data-answer="-8" data-tol="0.001" data-hint="Gradients accumulate: the old −4 plus the new −4."></span></li>
+  </ol>
+</section>
+
+<h2>What an LLM training loop adds</h2>
+<p>The five lines don't change; what grows around them does:</p>
+<ul>
+  <li><strong>Gradient clipping</strong> between <code>backward</code> and <code>step</code> rescales the gradients if their total norm exceeds a limit (often 1.0), which protects against rare loss spikes:
+<pre><code>loss.backward()
+nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+opt.step()</code></pre></li>
+  <li><strong>A learning-rate schedule</strong> (warm-up, then decay), stepped once per optimizer step (M2.3).</li>
+  <li><strong>Mixed precision</strong>: running the forward pass in bfloat16 under <code>torch.autocast</code> (M2.5).</li>
+  <li><strong>Gradient accumulation</strong>: calling <code>backward()</code> on several micro-batches before one <code>step()</code> to simulate a bigger batch. It works precisely because <code>.grad</code> accumulates; just divide each micro-batch loss by the number of micro-batches.</li>
+  <li><strong>Distributed training</strong> across many GPUs (M2.5), <strong>checkpointing</strong> the model and optimizer state, and <strong>logging</strong> the loss, learning rate and gradient norm every step.</li>
+</ul>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> pretraining (M2), fine-tuning (M3.1) and even DPO (M3.4) are this same loop with a different dataset and a different loss. A typical pretraining step might process a batch of about a million tokens, for example 512 sequences of 2,048 tokens. When a run misbehaves, the first suspects are in these five lines: a missing <code>zero_grad</code>, a forgotten <code>model.eval()</code>, a loss on the wrong shapes, or a learning rate that's too high.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Write the five lines of the inner loop from memory, and say in one phrase what each does.</p>
+  <div class="model-answer"><strong>Model answer:</strong> <code>opt.zero_grad()</code> clears the previous gradients; <code>pred = model(xb)</code> runs the forward pass and records the graph; <code>loss = loss_fn(pred, yb)</code> reduces the batch to one number; <code>loss.backward()</code> backpropagates and fills every parameter's <code>.grad</code>; <code>opt.step()</code> updates the parameters from those gradients.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which pair do you need for a correct evaluation pass on a model with dropout?</p>
+    <ol class="q-src">
+      <li><code>model.train()</code> and <code>torch.no_grad()</code></li>
+      <li><code>model.eval()</code> alone</li>
+      <li><code>model.eval()</code> and <code>torch.no_grad()</code></li>
+      <li><code>opt.zero_grad()</code> and <code>model.eval()</code></li>
+    </ol>
+    <div class="q-explain"><code>eval()</code> switches dropout off; <code>no_grad()</code> stops autograd recording, saving memory and time. They're independent switches.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A classifier's last layer outputs logits of shape (32, 10). What should you pass to <code>nn.CrossEntropyLoss()</code> along with them?</p>
+    <ol class="q-src">
+      <li>Integer class labels of shape (32,)</li>
+      <li>Softmax probabilities of shape (32, 10)</li>
+      <li>Labels of shape (10,)</li>
+      <li>The argmax of the logits</li>
+    </ol>
+    <div class="q-explain">The loss takes raw logits plus one integer label per example; it applies the (log-)softmax itself. Passing probabilities would apply softmax twice.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You remove <code>opt.zero_grad()</code> from the loop. What goes wrong?</p>
+    <ol class="q-src">
+      <li>Nothing; the optimizer clears gradients in <code>step()</code></li>
+      <li>Each step uses the sum of all gradients so far, so updates grow and training drifts or diverges</li>
+      <li>The model stops recording the graph</li>
+      <li>PyTorch raises an error on the second <code>backward()</code></li>
+    </ol>
+    <div class="q-explain"><code>.grad</code> accumulates (P4.1), so the "gradient" becomes a running sum of stale gradients from earlier batches.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Your training loss keeps falling but validation loss started rising several epochs ago (P2.4). With this loop, what's the simplest fix?</p>
+    <ol class="q-src">
+      <li>Remove <code>model.eval()</code> so validation matches training</li>
+      <li>Raise the learning rate</li>
+      <li>Evaluate on the training set instead</li>
+      <li>Save a checkpoint whenever validation loss improves and keep the best one (early stopping); consider more weight decay or dropout</li>
+    </ol>
+    <div class="q-explain">The validation numbers you log each epoch are exactly what early stopping needs. Hiding the gap doesn't fix it.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Model = <code>nn.Module</code> with layers in <code>__init__</code> and the data flow in <code>forward</code>.</li>
+    <li>The inner loop: <strong>zero_grad → forward → loss → backward → step</strong>, once per mini-batch.</li>
+    <li><code>DataLoader</code> serves shuffled mini-batches; one pass over the data is an epoch.</li>
+    <li><code>model.train()</code>/<code>model.eval()</code> switch dropout and similar layers; <code>torch.no_grad()</code> switches off autograd. Evaluation needs both.</li>
+    <li>LLM training is the same loop plus clipping, LR schedules, mixed precision and many GPUs.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 20 minutes, CPU only: write the loop yourself, fit a line with <code>nn.Linear</code>, then train a small classifier with a <code>DataLoader</code>, validation and logging. Then break it on purpose (no <code>zero_grad</code>, huge learning rate) and watch what happens.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p4-2-training-loop.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p4-2-a","front":"Write the five-line PyTorch training step.","back":"<code>opt.zero_grad()</code>; <code>pred = model(xb)</code>; <code>loss = loss_fn(pred, yb)</code>; <code>loss.backward()</code>; <code>opt.step()</code>."},
+  {"id":"p4-2-b","front":"What goes in <code>__init__</code> and in <code>forward</code> of an <code>nn.Module</code>?","back":"<code>__init__</code> creates the layers (their parameters are registered automatically); <code>forward</code> says how input flows through them. Call the model as <code>model(x)</code>."},
+  {"id":"p4-2-c","front":"What does <code>nn.CrossEntropyLoss</code> expect?","back":"Raw logits of shape (B, C) and integer class labels of shape (B,). It applies log-softmax internally and averages $-\\ln p_{\\text{correct}}$ over the batch."},
+  {"id":"p4-2-d","front":"<code>model.eval()</code> vs <code>torch.no_grad()</code>?","back":"<code>eval()</code> changes layer behaviour (dropout off, batch norm uses running stats). <code>no_grad()</code> stops autograd recording. Evaluation should use both."},
+  {"id":"p4-2-e","front":"How many optimizer steps for 50,000 examples, batch size 128, 10 epochs?","back":"$\\lceil 50000/128 \\rceil = 391$ batches per epoch × 10 = 3,910 steps (one <code>step()</code> per batch)."},
+  {"id":"p4-2-f","front":"What is gradient accumulation and why does it work?","back":"Running <code>backward()</code> on several micro-batches before one <code>step()</code> to simulate a larger batch. It works because <code>.grad</code> adds up; scale each micro-batch loss by 1/(number of micro-batches)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p4-2-loop.js"></script>
+</body>
+</html>

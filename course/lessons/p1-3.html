@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p1-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Derivatives &amp; the chain rule · LLMs, Animated</title>
+<meta name="description" content="The derivative as a slope and a rate of change, the handful of rules you need, and the chain rule worked through with real numbers: the idea behind backpropagation.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Derivatives &amp; the chain rule</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Math you actually need</span></div>
+<p class="lede">Training a model comes down to one question, asked billions of times: <em>"if I nudge this number a little, how much does the error change?"</em> The answer is a <strong>derivative</strong>. A neural network is a long chain of simple steps, so the tool that computes it is the <strong>chain rule</strong>.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain a derivative as the slope of a curve and as a rate of change, and estimate one numerically.</li>
+    <li>Differentiate powers, sums, $e^x$ and $\ln x$ with a handful of rules.</li>
+    <li>Apply the chain rule to a composed function with real numbers, and explain how it leads to backpropagation.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> school algebra: functions like $f(x) = x^2$ and the slope of a straight line. No earlier lesson needed. This one feeds straight into <a href="p1-4.html">Gradients (P1.4)</a>, <a href="p2-2.html">Gradient descent (P2.2)</a> and <a href="p2-3.html">Backpropagation (P2.3)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A straight line passes through $(1, 3)$ and $(3, 7)$. What is its slope?</p>
+    <ol class="q-src">
+      <li>$4$</li>
+      <li>$2$</li>
+      <li>$7/3$</li>
+      <li>$10$</li>
+    </ol>
+    <div class="q-explain">Slope = rise ÷ run = $(7 - 3) / (3 - 1) = 4 / 2 = 2$. A derivative is this same idea for curves.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">$u$ changes 3 times as fast as $x$, and $y$ changes 2 times as fast as $u$. How fast does $y$ change compared with $x$?</p>
+    <ol class="q-src">
+      <li>5 times as fast</li>
+      <li>1.5 times as fast</li>
+      <li>6 times as fast</li>
+      <li>You can't tell without the formulas</li>
+    </ol>
+    <div class="q-explain">Rates multiply along a chain: $2 \times 3 = 6$. That's the whole chain rule, and you'll see it at work below.</div>
+  </div>
+</section>
+
+<h2>From the slope of a line to the slope of a curve</h2>
+<p>A straight line has one slope everywhere: rise over run. A curve's steepness changes from place to place, so we ask for its slope <em>at a point</em>. The trick is to take the slope between two nearby points and slide them together:</p>
+
+<figure class="anim wide" data-anim="p1-3-slope"></figure>
+
+<p>Written as a formula, the <strong>derivative</strong> of $f$ at $x$ is</p>
+$$f'(x) = \lim_{h \to 0} \frac{f(x + h) - f(x)}{h}$$
+<p>$h$ is the size of the step, and "$\lim_{h\to 0}$" means "the value this ratio settles on as $h$ shrinks towards zero". Another common notation is $\frac{df}{dx}$ (or $\frac{dy}{dx}$ when $y = f(x)$), read "the change in $f$ per change in $x$".</p>
+<p>Two ways to read the number, and you'll need both:</p>
+<ul>
+  <li><strong>Slope:</strong> how steep the curve is at that point. For $f(x) = x^2$ at $x = 1$, the slope is 2.</li>
+  <li><strong>Rate, or sensitivity:</strong> nudge $x$ by a small amount $\Delta x$ and $f$ changes by about $f'(x)\,\Delta x$. Nudge $x = 1$ to $1.01$ and $x^2$ goes from 1 to $1.0201$, a change of about $2 \times 0.01$.</li>
+</ul>
+<p class="math-note">In code you can estimate a derivative without any calculus: <code>(f(x + h) - f(x - h)) / (2 * h)</code> with a small <code>h</code> like <code>1e-5</code>. This "central difference" is how people check that hand-written or library gradients are correct.</p>
+
+<h2>The handful of rules you need</h2>
+<ul>
+  <li><strong>Constant:</strong> the derivative of a constant $c$ is $0$. It doesn't change.</li>
+  <li><strong>Power rule:</strong> $\frac{d}{dx}\,x^n = n\,x^{n-1}$. So $x^2 \to 2x$, $x^3 \to 3x^2$, and $x \to 1$.</li>
+  <li><strong>Constant multiple and sum:</strong> $\frac{d}{dx}\big(c\,f + g\big) = c\,f' + g'$. Derivatives go through sums term by term.</li>
+  <li><strong>Exponential and log:</strong> $\frac{d}{dx}\,e^x = e^x$ and $\frac{d}{dx}\,\ln x = \frac{1}{x}$ (natural log).</li>
+  <li><strong>Product rule</strong> (occasionally useful): $\frac{d}{dx}\big(f\,g\big) = f'\,g + f\,g'$.</li>
+</ul>
+<p>Example: $f(x) = 3x^2 + 5x$ gives $f'(x) = 6x + 5$, so at $x = 2$ the slope is $17$.</p>
+
+<h2>The chain rule: slopes multiply</h2>
+<p>Most interesting functions are built by feeding one function into another. If $u = g(x)$ and $y = f(u)$, then</p>
+$$\frac{dy}{dx} = \frac{dy}{du} \cdot \frac{du}{dx}$$
+<p>In words: a nudge to $x$ gets scaled by $\frac{du}{dx}$ on its way into $u$, then scaled again by $\frac{dy}{du}$ on its way into $y$. <strong>The total effect is the product of the local slopes.</strong> With more links you just keep multiplying.</p>
+
+<h3>Worked example</h3>
+<p>$y = (3x + 1)^2$ at $x = 2$. Split it as $u = 3x + 1$ and $y = u^2$.</p>
+<ol class="steps">
+  <li>Forward: $u = 3 \cdot 2 + 1 = 7$, so $y = 49$</li>
+  <li>Local slopes: $\frac{du}{dx} = 3$ and $\frac{dy}{du} = 2u = 14$</li>
+  <li>Multiply: $\frac{dy}{dx} = 14 \times 3 = 42$</li>
+  <li>Numerical check: $\frac{(3 \cdot 2.001 + 1)^2 - 49}{0.001} = \frac{49.042009 - 49}{0.001} \approx 42.009$ ✓</li>
+</ol>
+<p>Now a chain with three links, done the way a computer does it: forward to get the values, then backward multiplying slopes.</p>
+
+<figure class="anim wide" data-anim="p1-3-chain"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-chain-rule.webp" alt="A child turning a crank that drives a chain of three gears of different sizes, which spins a pinwheel." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You turn a crank. It drives a gear, which drives a second gear, which drives a third gear, which spins a pinwheel.</p>
+      <p>If the first gear turns <strong>twice</strong> for each turn of the crank, and the next one turns <strong>3 times</strong> for each of those, and the last one turns <strong>2 times</strong> for each of <em>those</em>… then one turn of your crank spins the pinwheel $2 \times 3 \times 2 = 12$ times.</p>
+      <p>Each gear multiplies. That's the chain rule.</p>
+      <p class="math-note">Where it breaks: a gear's ratio never changes, but a curve's slope does. For a curve, each "gear ratio" is only true right around the current point, so you recompute the slopes at every new point.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Your turn (faded example)</h3>
+<p>$y = (x^2 + 1)^3$ at $x = 1$. Use $u = x^2 + 1$ and $y = u^3$.</p>
+<ol class="steps">
+  <li>Forward: $u =$ <span class="blank" data-answer="2" data-tol="0.001" data-hint="1² + 1."></span></li>
+  <li>$\frac{dy}{du} = 3u^2 =$ <span class="blank" data-answer="12" data-tol="0.001" data-hint="3 × 2²."></span></li>
+  <li>$\frac{du}{dx} = 2x =$ <span class="blank" data-answer="2" data-tol="0.001" data-hint="Power rule at x = 1."></span></li>
+  <li>$\frac{dy}{dx} =$ <span class="blank" data-answer="24" data-tol="0.001" data-hint="Multiply the two local slopes."></span></li>
+</ol>
+
+<h2>From the chain rule to backpropagation</h2>
+<p>A neural network is a very long chain: input → layer 1 → layer 2 → … → output → loss. To train it we need $\frac{\partial \text{loss}}{\partial w}$ for every weight $w$. (The curly $\partial$ just means "with everything else held fixed"; it's the next lesson.) By the chain rule, each of those is a product of local slopes along the path from $w$ to the loss.</p>
+<p>The clever part is the <strong>order</strong>. Start at the loss and walk backwards, as in the animation. The running product you've built up at each node ("how much does the loss care about this node?") is shared by everything upstream of it, so one backward sweep produces the derivative for <em>every</em> weight at once. That's <strong>backpropagation</strong>, and it typically costs only about twice the compute of the forward pass, whether the model has a thousand weights or a trillion. You'll build it properly in <a href="p2-3.html">Backpropagation (P2.3)</a>.</p>
+<p>One warning sign is built into the maths. If a chain has 100 links and each local slope is around 0.5, the product is $0.5^{100} \approx 10^{-30}$: the signal <strong>vanishes</strong>. If each is around 1.5, it <strong>explodes</strong>. Much of deep-network design, such as residual connections and normalisation layers, exists to keep these products well-behaved.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> nobody differentiates an LLM by hand. Frameworks like PyTorch record the chain of operations during the forward pass and apply the chain rule backwards automatically (that's <em>autograd</em>, P4.1). But knowing that gradients are <em>products of local slopes</em> is what lets you reason about vanishing and exploding gradients, about why some activation functions train better than others, and about why the loss uses a log (next lessons).</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">For $y = f(g(x))$, why do we <em>multiply</em> the two derivatives rather than add them?</p>
+  <div class="model-answer"><strong>Model answer:</strong> A small nudge $\Delta x$ changes $g$ by about $g'\,\Delta x$. That change is the input nudge to $f$, which scales it again by $f'$. So $\Delta y \approx f' \cdot g' \cdot \Delta x$: each link scales the nudge, and scalings compound by multiplying.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What is the slope of $f(x) = x^3$ at $x = 2$?</p>
+    <ol class="q-src">
+      <li>$8$</li>
+      <li>$6$</li>
+      <li>$12$</li>
+      <li>$3$</li>
+    </ol>
+    <div class="q-explain">Power rule: $f'(x) = 3x^2$, so $f'(2) = 3 \times 4 = 12$. (8 is the value $f(2)$, not the slope.)</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What is $\frac{d}{dx}\,e^{5x}$?</p>
+    <ol class="q-src">
+      <li>$5\,e^{5x}$</li>
+      <li>$e^{5x}$</li>
+      <li>$5x\,e^{5x - 1}$</li>
+      <li>$e^{5}$</li>
+    </ol>
+    <div class="q-explain">Chain rule with $u = 5x$: $\frac{d}{du}e^u = e^u$ times $\frac{du}{dx} = 5$. The power rule doesn't apply, because $x$ is in the exponent.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In a backward pass, the derivative of the loss with respect to an early weight is…</p>
+    <ol class="q-src">
+      <li>the sum of all the local slopes in the network</li>
+      <li>just the local slope of that weight's own layer</li>
+      <li>the loss divided by the weight</li>
+      <li>the product of local slopes along the path from that weight to the loss</li>
+    </ol>
+    <div class="q-explain">That's the chain rule applied along the path. (With several paths, as in real networks, you add up the products for each path, but each path is still a product.)</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">(From P1.2) Two linear steps with no activation: $u = 2x$, then $y = 3u$. What is $\frac{dy}{dx}$, and which idea does it mirror?</p>
+    <ol class="q-src">
+      <li>5: you add the layers' effects</li>
+      <li>6: one linear map after another is their product, just like matrix composition</li>
+      <li>3: only the last layer matters</li>
+      <li>2: only the first layer matters</li>
+    </ol>
+    <div class="q-explain">$\frac{dy}{du}\cdot\frac{du}{dx} = 3 \times 2 = 6$. For matrices, the derivative of $y = A(Bx)$ is likewise the product $AB$. It's the same "composition = multiplication" idea.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>The derivative $f'(x)$ is the slope at a point: the limit of rise ÷ run as the run shrinks to 0.</li>
+    <li>It's also a sensitivity: nudge $x$ by $\Delta x$ and $f$ moves by about $f'(x)\,\Delta x$.</li>
+    <li>Core rules: $x^n \to n x^{n-1}$, $e^x \to e^x$, $\ln x \to 1/x$, sums term by term.</li>
+    <li><strong>Chain rule:</strong> $\frac{dy}{dx} = \frac{dy}{du}\cdot\frac{du}{dx}$. Slopes multiply along a chain.</li>
+    <li>Walking the chain backwards from the loss, reusing the running product, is <strong>backpropagation</strong>.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p1-3-a","front":"Define the derivative $f'(x)$ in words and as a formula.","back":"The slope of $f$ at $x$ (its instantaneous rate of change): $f'(x) = \\lim_{h\\to 0} \\frac{f(x+h) - f(x)}{h}$."},
+  {"id":"p1-3-b","front":"What does $f'(x)$ tell you about a small nudge $\\Delta x$?","back":"$f$ changes by about $f'(x)\\,\\Delta x$. The derivative is a sensitivity."},
+  {"id":"p1-3-c","front":"Derivatives of $x^n$, $e^x$ and $\\ln x$?","back":"$n x^{n-1}$, $e^x$ and $1/x$."},
+  {"id":"p1-3-d","front":"State the chain rule and give the intuition.","back":"If $u = g(x)$ and $y = f(u)$: $\\frac{dy}{dx} = \\frac{dy}{du}\\cdot\\frac{du}{dx}$. Each link scales a nudge by its local slope, so the slopes multiply."},
+  {"id":"p1-3-e","front":"How does the chain rule become backpropagation?","back":"A network is a chain of simple steps. Going backward from the loss and multiplying local slopes gives $\\partial L / \\partial$ (each node), and the running product is reused, so one backward sweep yields every weight's gradient."},
+  {"id":"p1-3-f","front":"How can you numerically check a derivative in code?","back":"Central difference: $(f(x+h) - f(x-h)) / (2h)$ with a small $h$ (e.g. $10^{-5}$), compared with the analytic value."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p1-3-slope.js"></script>
+<script src="../assets/js/anims/p1-3-chain.js"></script>
+</body>
+</html>

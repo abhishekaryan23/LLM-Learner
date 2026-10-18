@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m5-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FlashAttention &amp; paged attention · LLMs, Animated</title>
+<meta name="description" content="Why attention is limited by memory traffic, how FlashAttention computes exact attention in tiles with an online softmax, and how PagedAttention stores the KV cache in blocks like virtual memory.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>FlashAttention &amp; paged attention</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Optimization</span></div>
+<p class="lede">On a modern GPU, attention is slow less because of the arithmetic and more because of <em>moving data</em>. Two ideas fixed most of that. <strong>FlashAttention</strong> computes exactly the same attention without ever storing the $n \times n$ matrix. <strong>PagedAttention</strong> stores the KV cache in small blocks, the way an operating system stores memory in pages.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain why standard attention is limited by memory bandwidth, using the HBM vs SRAM gap.</li>
+    <li>Merge two blocks of a softmax with the online-softmax update (running max and sum), by hand.</li>
+    <li>Explain how PagedAttention's block tables cut KV-cache waste and let requests share memory.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> this lesson builds on <a href="m1-1.html">Attention</a> (the $n \times n$ score matrix and the softmax over each row) and <a href="m1-5.html">KV cache &amp; sampling</a> (why generation stores every token's keys and values). It helps to remember the "subtract the max" trick for a stable softmax.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>A guess now makes the answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">For long sequences on a GPU, what mostly limits the speed of plain (unfused) attention?</p>
+    <ol class="q-src">
+      <li>The number of multiply-adds in $QK^\top$</li>
+      <li>Reading and writing large $n \times n$ matrices to and from GPU main memory</li>
+      <li>The CPU preparing the inputs</li>
+      <li>The softmax needing a square root</li>
+    </ol>
+    <div class="q-explain">GPUs can do arithmetic far faster than they can move bytes from main memory. Writing an $n \times n$ matrix out and reading it back, twice, dominates the time.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">FlashAttention makes attention faster by…</p>
+    <ol class="q-src">
+      <li>approximating attention with a low-rank matrix</li>
+      <li>only attending to nearby tokens</li>
+      <li>computing exactly the same result while moving far less data</li>
+      <li>storing the attention weights in 4-bit</li>
+    </ol>
+    <div class="q-explain">FlashAttention is <strong>exact</strong>. It reorganises the computation into tiles that fit in fast on-chip memory, so the big matrices never travel to main memory.</div>
+  </div>
+</section>
+
+<h2>Two kinds of GPU memory</h2>
+<p>A GPU has a memory <strong>hierarchy</strong>. The FlashAttention paper uses an NVIDIA A100 as its example:</p>
+<ul>
+  <li><strong>HBM</strong> (high-bandwidth memory) is the GPU's main memory: 40–80 GB, read and written at about <strong>1.5–2.0 TB/s</strong>. Your weights, activations and KV cache live here.</li>
+  <li><strong>SRAM</strong> is on the chip itself: 192 KB next to each of the 108 streaming multiprocessors, about <strong>20 MB</strong> in total, with an estimated bandwidth of about <strong>19 TB/s</strong>.</li>
+</ul>
+<p>Newer GPUs move the numbers but keep the shape: an H100 has 80 GB of HBM3 at about 3.35 TB/s, and still only a few hundred KB of SRAM per multiprocessor. Meanwhile the A100 does about 312 trillion 16-bit floating-point operations per second (FLOP/s). Divide compute by bandwidth: $312 \times 10^{12} / 2 \times 10^{12} \approx 156$. An operation must do about <strong>156 FLOPs for every byte it moves</strong> from HBM, or the arithmetic units sit idle waiting for data. Such an operation is called <strong>memory-bound</strong>.</p>
+<p class="math-note">FLOPs per byte moved is called <strong>arithmetic intensity</strong>. Matrix multiplies on big matrices have plenty of it. Softmax, masking and other element-wise steps do a few FLOPs per number, so they are memory-bound.</p>
+
+<h2>Where standard attention spends its time</h2>
+<p>Recall from <a href="m1-1.html">M1.1</a>: $O = \mathrm{softmax}(QK^\top/\sqrt{d_k})\,V$. A straightforward implementation runs it as separate GPU kernels (programs), each reading its inputs from HBM and writing its result back:</p>
+<ol class="steps">
+  <li>Read $Q$, $K$; compute $S = QK^\top/\sqrt{d_k}$; <strong>write $S$</strong> ($n \times n$) to HBM.</li>
+  <li>Read $S$; compute $P = \mathrm{softmax}(S)$ row by row; <strong>write $P$</strong> ($n \times n$) to HBM.</li>
+  <li>Read $P$ and $V$; compute $O = PV$; write $O$ ($n \times d$).</li>
+</ol>
+<p>The $n \times n$ matrices are huge. At $n = 8{,}192$ tokens in 16-bit, $S$ alone is $8192^2 \times 2$ bytes $= 128$ MiB <em>per head</em>. With 32 heads that's 4 GiB per layer for one sequence, written and read back twice. Memory use grows as $O(n^2)$, and so does the traffic.</p>
+
+<figure class="anim wide" data-anim="m5-4-flash"></figure>
+<p class="math-note">Traffic numbers from Dao et al., 2022, Fig. 2: GPT-2 medium attention (forward + backward) on an A100. The drawing is schematic; real tiles are e.g. 128 rows by the head dimension.</p>
+
+<h2>The trick that makes tiling possible: online softmax</h2>
+<p>Tiling a matrix multiply is easy. The obstacle is the softmax in the middle: to normalise row $i$ you seem to need the <em>whole</em> row first, its max (for stability) and its sum. FlashAttention gets around this with an <strong>online softmax</strong> (Milakov &amp; Gimelshein, 2018; used for memory-efficient attention by Rabe &amp; Staats, 2021). It keeps three running quantities per query row:</p>
+<ul>
+  <li>$m$: the largest score seen so far,</li>
+  <li>$\ell$: the sum of $e^{s_j - m}$ over the keys seen so far,</li>
+  <li>$a$: the matching weighted sum of values, $\sum_j e^{s_j - m}\,v_j$ (the output before dividing by $\ell$).</li>
+</ul>
+<p>When a new block $B$ of keys arrives with scores $s_j$:</p>
+$$m' = \max\!\Big(m,\ \max_{j \in B} s_j\Big)$$
+$$\ell' = e^{\,m - m'}\,\ell \;+\; \sum_{j \in B} e^{\,s_j - m'} \qquad a' = e^{\,m - m'}\,a \;+\; \sum_{j \in B} e^{\,s_j - m'}\,v_j$$
+<p>After the last block, the output is $o = a / \ell$. The factor $e^{m - m'}$ is a <strong>correction</strong>: the old terms were computed as $e^{s_j - m}$, and multiplying by $e^{m - m'}$ turns each into $e^{s_j - m'}$, as if the new max had been known all along. It is at most 1, so nothing overflows. Because every step is an exact rewrite, the final answer is <strong>exactly</strong> the ordinary softmax, up to floating-point rounding.</p>
+
+<h3>Worked example: merging two blocks</h3>
+<p>One query, four keys in two blocks of two. Scores $s = [2, 1 \,|\, 3, 0]$, values (scalars, to keep it short) $v = [1, 2 \,|\, 3, 4]$.</p>
+<ol class="steps">
+  <li><strong>Block 1:</strong> $m = 2$. $\ell = e^{0} + e^{-1} = 1 + 0.368 = 1.368$. $a = 1 \cdot 1 + 0.368 \cdot 2 = 1.736$.</li>
+  <li><strong>Block 2 raises the max:</strong> $m' = \max(2, 3) = 3$. Correction $e^{2-3} = 0.368$.</li>
+  <li>$\ell' = 0.368 \times 1.368 + e^{0} + e^{-3} = 0.503 + 1 + 0.050 = 1.553$.</li>
+  <li>$a' = 0.368 \times 1.736 + 1 \cdot 3 + 0.050 \cdot 4 = 0.639 + 3 + 0.199 = 3.838$.</li>
+  <li><strong>Output:</strong> $o = 3.838 / 1.553 = 2.471$. Check with an ordinary softmax over all four scores: weights $[0.237, 0.087, 0.644, 0.032]$, and $0.237 + 0.174 + 1.932 + 0.128 = 2.471$ ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>First a size check, then a new merge. Scores $s = [1, 0 \,|\, 3, 1]$, values $v = [2, 4 \,|\, 1, 3]$.</p>
+  <ol class="steps">
+    <li>Memory for $S$ at $n = 16{,}384$, 16-bit, one head, in MiB: <span class="blank" data-answer="512" data-tol="0.5" data-hint="16384² × 2 bytes, then divide by 2²⁰ = 1,048,576."></span></li>
+    <li>Running max after block 1, $m =$ <span class="blank" data-answer="1" data-tol="0.001" data-hint="The larger of 1 and 0."></span></li>
+    <li>Running sum after block 1, $\ell =$ <span class="blank" data-answer="1.37" data-tol="0.01" data-hint="e^(1−1) + e^(0−1) = 1 + 0.368."></span></li>
+    <li>Correction factor when block 2 arrives, $e^{m - m'} =$ <span class="blank" data-answer="0.135" data-tol="0.003" data-hint="The new max is 3, so e^(1−3) = e^(−2)."></span></li>
+    <li>Running sum after block 2, $\ell' =$ <span class="blank" data-answer="1.32" data-tol="0.01" data-hint="0.135 × 1.368 + e^(3−3) + e^(1−3)."></span></li>
+    <li>Final output $o = a'/\ell'$ (here $a' = 1.876$): <span class="blank" data-answer="1.42" data-tol="0.01" data-hint="1.876 / 1.320."></span></li>
+  </ol>
+</section>
+
+<h2>FlashAttention: tiles, a fused kernel and recomputation</h2>
+<p><strong>FlashAttention</strong> (Dao et al., 2022, "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness") puts the pieces together in a single <strong>fused kernel</strong>:</p>
+<ol class="steps">
+  <li>Split $Q$ into row blocks and $K$, $V$ into blocks small enough to fit in SRAM.</li>
+  <li>For each $Q$ block: loop over the $K/V$ blocks. Score the tile in SRAM, apply the scale and causal mask, and update $m$, $\ell$ and the output accumulator with the online-softmax rule.</li>
+  <li>After the last $K/V$ block, divide by $\ell$ and write that block of $O$ to HBM, plus one number per row (the log-sum-exp $m + \log \ell$) for the backward pass.</li>
+</ol>
+<p>Training also needs the backward pass, which normally reads $P$ from memory. FlashAttention doesn't store $P$. Instead it <strong>recomputes</strong> the tiles of $S$ and $P$ from $Q$, $K$ and the saved log-sum-exp. That is extra arithmetic, but arithmetic is cheap and memory traffic is not.</p>
+<p>The results, from the paper:</p>
+<ul>
+  <li><strong>Memory:</strong> extra memory is $O(n)$ instead of $O(n^2)$. That is what made long context windows practical.</li>
+  <li><strong>Traffic and time:</strong> on GPT-2 medium's attention (A100, forward + backward), HBM reads and writes fell from 40.3 GB to 4.4 GB and runtime from 41.7 ms to 7.3 ms, even though FlashAttention did <em>more</em> FLOPs (75.2 vs 66.6 GFLOPs) because of the recomputation.</li>
+  <li><strong>End to end:</strong> about 3× faster GPT-2 training at sequence length 1K, and 15% faster BERT-large training than the MLPerf 1.1 record.</li>
+</ul>
+<p class="math-note">The paper also proves the I/O cost: about $\Theta(n^2 d^2 / M)$ HBM accesses, where $M$ is the SRAM size and $d$ the head dimension, compared with $\Theta(nd + n^2)$ for standard attention. With typical $d$ (64–128) and $M$ (around 100 KB), that is many times fewer.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-flash-library.webp" alt="A tired child fetching books one at a time from a far-away library, next to a happy child sitting at a desk with a stack of books already in front of them." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Two kids have the same homework, and the answers are in books at a <strong>library far away</strong>.</p>
+      <p>The <strong>tired kid</strong> walks to the library for one book, reads it, walks back, writes a note on a giant sheet, carries the sheet back to the library… all day long. Most of the day is walking.</p>
+      <p>The <strong>happy kid</strong> brings a <strong>stack of books</strong> to the desk at once, works through them right there, keeps a tiny running tally on a sticky note, and walks back only once, with the finished answer. Same homework, same answer, far less walking.</p>
+      <p>The library is HBM, the desk is SRAM, the sticky note is $m$ and $\ell$. <em>Where it breaks:</em> on a GPU the cost is how many bytes per second fit through the link, not walking distance, and the happy kid still has to read every book at least once.</p>
+    </div>
+  </div>
+</details>
+
+<h3>FlashAttention-2, -3 and what you actually use</h3>
+<p><strong>FlashAttention-2</strong> (Dao, 2023) kept the algorithm but split the work better across the GPU, including along the sequence, and cut non-matmul operations. It reported about 2× over the first version, reaching 50–73% of the A100's peak FLOP/s. <strong>FlashAttention-3</strong> (Shah et al., 2024) targets H100 (Hopper) GPUs: it overlaps the softmax with the matrix multiplies using the chip's asynchronous hardware and adds FP8 support. The paper reports 1.5–2.0× over FlashAttention-2 in 16-bit. Exact speedups depend on the GPU, head dimension and sequence length, and newer versions keep appearing for newer hardware.</p>
+<p>You rarely call these kernels yourself. PyTorch's <code>scaled_dot_product_attention</code> picks a FlashAttention-style kernel when the inputs allow it, and training frameworks and serving engines ship their own fused attention kernels built on the same ideas.</p>
+
+<h2>PagedAttention: the KV cache as virtual memory</h2>
+<p>FlashAttention fixes the cost of computing attention. Serving many users at once has a second memory problem: the <strong>KV cache</strong> (<a href="m1-5.html">M1.5</a>). It grows by one token per generated token, and it's big. For Llama 2 7B (32 layers, hidden size 4,096, 16-bit), keys plus values take $2 \times 32 \times 4096 \times 2$ bytes $= 0.5$ MiB <em>per token</em>, so one 4,096-token conversation needs 2 GiB.</p>
+<p>A server doesn't know how long each answer will be. Earlier systems therefore reserved one <strong>contiguous</strong> chunk per request, sized for the maximum length. Most of it sat empty (<strong>internal fragmentation</strong>), and the leftover gaps between chunks were often too small to use (<strong>external fragmentation</strong>). Kwon et al. measured that only 20.4–38.2% of KV-cache memory held actual token states in the systems they studied.</p>
+<p><strong>PagedAttention</strong> (Kwon et al., 2023, "Efficient Memory Management for Large Language Model Serving with PagedAttention", the paper behind <strong>vLLM</strong>) borrows the operating system's idea of <strong>paging</strong>:</p>
+<ul>
+  <li>The cache is split into fixed-size <strong>blocks</strong> (vLLM's default is 16 tokens each).</li>
+  <li>Each request has a <strong>block table</strong> mapping its logical blocks to physical blocks anywhere in memory. The attention kernel follows the table to gather keys and values.</li>
+  <li>Blocks are allocated <strong>on demand</strong>, so the waste is at most one part-filled block per request. The paper reports under 4% waste.</li>
+  <li>Blocks can be <strong>shared</strong>. Parallel samples or beams of one prompt point at the same prompt blocks, with a reference count, and a shared block is copied only if one of them must change it (<strong>copy-on-write</strong>).</li>
+</ul>
+
+<figure class="anim wide" data-anim="m5-4-paged"></figure>
+
+<p>Less waste means more requests fit in memory at once, which means bigger batches and more tokens per second (<a href="m5-6.html">M5.6</a> shows why). The vLLM paper reported 2–4× the throughput of earlier systems (FasterTransformer and Orca) at a similar level of latency. Sharing also enables <strong>prefix caching</strong>: requests that start with the same long system prompt can reuse its cached blocks instead of recomputing them. vLLM's automatic prefix caching and SGLang's RadixAttention (Zheng et al., 2024) do this.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> context windows of 128K tokens and more would be unthinkable with a materialised score matrix: at $n = 131{,}072$, $S$ is 32 GiB per head in 16-bit. FlashAttention-style kernels are now the default in LLM training, and paged KV caches are standard in serving engines such as vLLM, SGLang and TensorRT-LLM. Both are pure systems work: the model and its outputs don't change, only how the bytes move.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">FlashAttention does <em>more</em> arithmetic than standard attention in training. Why is it still faster, and why is its answer exact?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Attention is memory-bound: the time goes on moving the $n \times n$ matrices $S$ and $P$ through slow HBM, not on the arithmetic. FlashAttention keeps tiles in fast on-chip SRAM, never writes $S$ or $P$, and recomputes them in the backward pass, trading cheap FLOPs for expensive memory traffic. It is exact because the online-softmax update (running max $m$, running sum $\ell$, rescaling by $e^{m - m'}$) is an exact algebraic rewrite of the softmax, not an approximation.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In the online softmax, a new block raises the running max from $m$ to $m'$. What happens to the old running sum $\ell$ and accumulator $a$?</p>
+    <ol class="q-src">
+      <li>They are thrown away and recomputed from the start of the row</li>
+      <li>They are kept unchanged; only the new block uses $m'$</li>
+      <li>Both are multiplied by $e^{m - m'}$, then the new block's terms are added</li>
+      <li>Both are divided by $e^{m - m'}$</li>
+    </ol>
+    <div class="q-explain">Multiplying by $e^{m-m'}$ (≤ 1) converts every old term $e^{s_j - m}$ into $e^{s_j - m'}$, so old and new terms share the same reference max. Keeping them unchanged would mix two different scales; dividing would scale them the wrong way.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Beyond its inputs and output, how much extra memory does FlashAttention's forward pass need for a sequence of length $n$?</p>
+    <ol class="q-src">
+      <li>$O(n)$: a running max and sum per query row</li>
+      <li>$O(n^2)$, but kept in SRAM instead of HBM</li>
+      <li>$O(n^2)$ in HBM, same as standard attention</li>
+      <li>$O(1)$, regardless of sequence length</li>
+    </ol>
+    <div class="q-explain">The $n \times n$ matrices never exist in full anywhere; SRAM only holds one tile at a time (and couldn't hold $n^2$ numbers anyway). What survives per row is $m$ and $\ell$ (saved as the log-sum-exp), which is linear in $n$.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What problem does PagedAttention mainly solve?</p>
+    <ol class="q-src">
+      <li>Attention needs too many FLOPs at long context</li>
+      <li>The KV cache values need too many bits, so it quantizes them</li>
+      <li>The softmax is numerically unstable</li>
+      <li>KV-cache memory is wasted by max-length contiguous reservations, which limits how many requests fit in a batch</li>
+    </ol>
+    <div class="q-explain">PagedAttention is memory management: fixed-size blocks allocated on demand, plus block tables, so almost no KV memory is reserved-but-empty and blocks can be shared. It doesn't change the attention math or the precision.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Interleaving with M1.1: a decoder LLM uses a causal mask. In a causal FlashAttention kernel, what happens to a $K/V$ tile that lies entirely in the "future" of a $Q$ tile?</p>
+    <ol class="q-src">
+      <li>It is loaded and multiplied as usual, then the mask is applied to $O$</li>
+      <li>It can be skipped entirely: every score in it would be $-\infty$, so its weights are exactly 0</li>
+      <li>Its scores are divided by $\sqrt{d_k}$ twice</li>
+      <li>It is written to HBM for the backward pass</li>
+    </ol>
+    <div class="q-explain">Masked scores become $-\infty$ and $e^{-\infty} = 0$, so a fully masked tile contributes nothing to $m$, $\ell$ or $a$. Skipping such tiles roughly halves the work for causal attention. Tiles on the diagonal still get the usual element-wise mask, inside SRAM.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>GPU <strong>HBM</strong> is big but slow; on-chip <strong>SRAM</strong> is tiny but about 10× faster. Standard attention is <strong>memory-bound</strong> because it moves $n \times n$ matrices through HBM.</li>
+    <li>The <strong>online softmax</strong> keeps a running max $m$ and sum $\ell$, rescaling old terms by $e^{m - m'}$, so softmax can be computed block by block, exactly.</li>
+    <li><strong>FlashAttention</strong> = tiling + online softmax + recomputation in one fused kernel: exact output, $O(n)$ extra memory, far less HBM traffic.</li>
+    <li><strong>PagedAttention</strong> stores the KV cache in fixed-size blocks with per-request block tables: near-zero waste, sharing between samples and prefixes, and bigger batches.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Implement the online-softmax merge, then a tiled attention loop in NumPy that never builds the full $n \times n$ matrix, and verify it matches standard attention to floating-point precision. About 20 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m5-4-online-softmax.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m5-4-a","front":"HBM vs on-chip SRAM on a GPU: sizes and speeds (A100 example)?","back":"HBM: 40–80 GB at about 1.5–2 TB/s. SRAM: about 20 MB total (192 KB per SM), estimated ~19 TB/s. Big and slow vs tiny and fast."},
+  {"id":"m5-4-b","front":"Why is standard attention memory-bound?","back":"It writes the $n \\times n$ matrices $S = QK^\\top$ and $P = \\mathrm{softmax}(S)$ to HBM and reads them back. Softmax does few FLOPs per byte, so moving $O(n^2)$ data dominates the time."},
+  {"id":"m5-4-c","front":"Online softmax: how do you update $m$, $\\ell$ and the accumulator $a$ for a new block?","back":"$m' = \\max(m, \\max_B s_j)$; $\\ell' = e^{m-m'}\\ell + \\sum_B e^{s_j - m'}$; $a' = e^{m-m'}a + \\sum_B e^{s_j-m'}v_j$. Output $= a/\\ell$ at the end."},
+  {"id":"m5-4-d","front":"What three ideas make up FlashAttention, and is it exact?","back":"Tiling (blocks in SRAM), online softmax (running max and sum), and recomputation of $S$, $P$ in the backward pass, all in one fused kernel. Yes: exact, with $O(n)$ extra memory (Dao et al., 2022)."},
+  {"id":"m5-4-e","front":"What is PagedAttention?","back":"vLLM's KV-cache manager (Kwon et al., 2023): the cache is split into fixed-size blocks (default 16 tokens), each request has a block table mapping logical to physical blocks, and blocks are allocated on demand, so waste is at most one part-full block per request."},
+  {"id":"m5-4-f","front":"How does PagedAttention let requests share memory?","back":"Block tables of several sequences can point at the same physical block (with a reference count): parallel samples of one prompt, beams, or a common prefix (prefix caching). A shared block is copied only when one sequence must modify it (copy-on-write)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m5-4-flash.js"></script>
+<script src="../assets/js/anims/m5-4-paged.js"></script>
+</body>
+</html>

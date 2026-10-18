@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m5-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Speculative decoding · LLMs, Animated</title>
+<meta name="description" content="A small draft model guesses several tokens, the big model checks them all in one pass, and a clever accept/reject rule keeps the output distribution exactly the big model's.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Speculative decoding</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Optimization</span></div>
+<p class="lede">Generating text one token at a time leaves a big GPU mostly waiting on memory. Speculative decoding lets a small, fast model guess a few tokens ahead and the big model check all the guesses at once. With the right accept/reject rule, the text you get is distributed <em>exactly</em> as if the big model had written it alone, just sooner.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain why decoding is memory-bandwidth-bound, and why checking $k$ tokens costs about as much as generating one.</li>
+    <li>Apply the acceptance rule $\min(1, p/q)$ and the residual resampling step, and show why the output distribution is exactly the target's.</li>
+    <li>Compute the expected tokens per step, $(1-\alpha^{k+1})/(1-\alpha)$, and the resulting speedup.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> you'll need <a href="m1-5.html">KV cache &amp; sampling</a> (generating one token per forward pass, sampling from a probability distribution) and the idea of a <strong>memory-bound</strong> operation from <a href="m5-4.html">FlashAttention &amp; paged attention</a>. Draft models are often small distilled models (<a href="m5-2.html">M5.2</a>).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>A guess now makes the answer stick later.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">An 8B-parameter model generates text for a single user on a big GPU. Each new token mostly waits on…</p>
+    <ol class="q-src">
+      <li>reading all the model's weights from GPU memory</li>
+      <li>the multiply-adds of the forward pass</li>
+      <li>the tokenizer</li>
+      <li>sampling from the softmax</li>
+    </ol>
+    <div class="q-explain">Every decode step reads every weight once to produce just one token per sequence. The GPU can do the arithmetic hundreds of times faster than it can stream the weights.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A small "draft" model guesses the next 4 tokens and a big model checks them. Can the final text be distributed exactly as if the big model had generated it alone?</p>
+    <ol class="q-src">
+      <li>No, the draft always makes quality slightly worse</li>
+      <li>Yes, with the right probabilistic accept/reject rule</li>
+      <li>Only with greedy decoding (temperature 0)</li>
+      <li>Only if the draft model is the same size as the big one</li>
+    </ol>
+    <div class="q-explain">Speculative sampling is provably <strong>lossless</strong>: accepting each guess with probability $\min(1, p/q)$ and resampling cleverly on rejection gives exactly the big model's distribution, at any temperature.</div>
+  </div>
+</section>
+
+<h2>Why one token at a time is wasteful</h2>
+<p>To generate a token, a decoder runs a forward pass, and a forward pass must read <strong>every weight</strong> from GPU memory. Take an 8B-parameter model in 16-bit on an H100 (about 3.35 TB/s of memory bandwidth, about 990 TFLOP/s of dense 16-bit compute):</p>
+<ul>
+  <li><strong>Memory:</strong> 16 GB of weights ÷ 3.35 TB/s ≈ <strong>4.8 ms</strong> per step, so at most about 210 tokens/s for one user.</li>
+  <li><strong>Compute:</strong> about $2 \times 8 \times 10^9 = 16$ GFLOP per token ÷ 990 TFLOP/s ≈ <strong>0.016 ms</strong>.</li>
+</ul>
+<p>The arithmetic units are idle more than 99% of the time. That's what <strong>memory-bandwidth-bound</strong> means. Now the key observation: if we hand the model <strong>5 tokens</strong> in one forward pass (like during prefill), it still reads the weights only once. The time barely changes, and we get the model's prediction at all 5 positions. Checking several tokens is almost as cheap as generating one.</p>
+<p class="math-note">These are idealised peak numbers; real kernels reach less, and the KV cache adds more reads. The ratio is what matters: about 1 FLOP per byte at batch size 1, while an H100 needs roughly 300 to keep its compute busy.</p>
+
+<h2>Guess, then verify</h2>
+<p>That suggests a plan. Let a small <strong>draft model</strong> (probabilities $q$) cheaply guess the next $k$ tokens. Then let the big <strong>target model</strong> (probabilities $p$) score all of them in one pass, keep the good guesses, and fix the first bad one. The idea was published independently by <strong>Leviathan, Kalman &amp; Matias</strong> (2023, "Fast Inference from Transformers via Speculative Decoding") and <strong>Chen et al.</strong> at DeepMind (2023, "Accelerating Large Language Model Decoding with Speculative Sampling").</p>
+
+<figure class="anim wide" data-anim="m5-5-spec"></figure>
+
+<p>One round, precisely:</p>
+<ol class="steps">
+  <li>The draft samples $x_1, \dots, x_k$ one by one, recording $q_i(x_i)$.</li>
+  <li>The target runs one forward pass on the prefix plus $x_1, \dots, x_k$, giving distributions $p_1, \dots, p_{k+1}$.</li>
+  <li>For $i = 1, \dots, k$: draw $u \sim \mathrm{Uniform}(0,1)$ and <strong>accept</strong> $x_i$ if $u &lt; \min\!\big(1, \frac{p_i(x_i)}{q_i(x_i)}\big)$.</li>
+  <li>At the first rejection, sample a replacement from the <strong>normalised residual</strong> $p'(x) = \dfrac{\max(0,\ p_i(x) - q_i(x))}{\sum_y \max(0,\ p_i(y) - q_i(y))}$, discard the remaining drafts, and stop.</li>
+  <li>If all $k$ were accepted, sample one <strong>bonus</strong> token from $p_{k+1}$, which the target computed anyway.</li>
+</ol>
+<p>Each round yields between 1 and $k+1$ tokens for one target pass. Rejected drafts' entries are simply dropped from the KV cache.</p>
+
+<h2>Why the output is exactly the target's distribution</h2>
+<p>Look at one position. Write $p(x)$ and $q(x)$ for the two models' probabilities there. The output is $x$ either because the draft proposed $x$ and it was accepted, or because some draft was rejected and the residual produced $x$:</p>
+$$P(\text{out} = x) = \underbrace{q(x)\,\min\!\Big(1, \tfrac{p(x)}{q(x)}\Big)}_{=\ \min(p(x),\ q(x))} \;+\; P(\text{reject})\cdot p'(x)$$
+<p>The chance of a rejection is $1 - \sum_y \min(p(y), q(y)) = \sum_y \max(0, p(y) - q(y))$, because the probabilities sum to 1. That is exactly the residual's normaliser, so the second term is simply $\max(0, p(x) - q(x))$. And</p>
+$$\min(p, q) + \max(0,\ p - q) = p \qquad\text{for any numbers } p, q \ge 0.$$
+<p>So $P(\text{out} = x) = p(x)$: <strong>exactly the target's distribution</strong>, whatever the draft model is. A bad draft only makes things slower, never worse. The per-token acceptance chance is $\beta = \sum_x \min(p(x), q(x))$, which is one minus the total-variation distance between $p$ and $q$. Its average over the text is the <strong>acceptance rate</strong> $\alpha$.</p>
+
+<h3>Worked example</h3>
+<p>Vocabulary of three tokens A, B, C. Target $p = [0.5, 0.3, 0.2]$, draft $q = [0.2, 0.6, 0.2]$.</p>
+<ol class="steps">
+  <li>Draft proposes A: $p/q = 2.5$, so it's <strong>always accepted</strong>. Same for C ($p/q = 1$).</li>
+  <li>Draft proposes B: accept with probability $\min(1, 0.3/0.6) = 0.5$.</li>
+  <li>Residual: $\max(0, p - q) = [0.3, 0, 0]$, normalised $[1, 0, 0]$. A rejected B always becomes A.</li>
+  <li>Check: $P(A) = 0.2 \cdot 1 + 0.6 \cdot 0.5 \cdot 1 = 0.5$ ✓, $P(B) = 0.6 \cdot 0.5 = 0.3$ ✓, $P(C) = 0.2$ ✓. Exactly $p$.</li>
+  <li>Acceptance chance $\beta = \min(0.5, 0.2) + \min(0.3, 0.6) + \min(0.2, 0.2) = 0.7$.</li>
+</ol>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-speculative-blocks.webp" alt="An apprentice quickly laying a row of blocks while a master builder glances along the row, approving the first few and swapping out the last one." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A master builder is slow because every block takes him a long walk to fetch. His <strong>apprentice</strong> is quick, so she lays a <strong>whole row of blocks</strong> herself, guessing what the master would pick.</p>
+      <p>The master looks along the row <strong>in one glance</strong>. The first few blocks are just what he wanted, so he keeps them. At the first wrong block he <strong>swaps in his own choice</strong>, and the blocks after it come off. Then the apprentice starts the next row.</p>
+      <p>Because the master checks every block and fixes the first wrong one himself, the wall ends up exactly the way he would have built it, only much faster.</p>
+      <p><em>Where it breaks:</em> the real "master" doesn't judge blocks right or wrong. He keeps each one with a probability, $\min(1, p/q)$, and swaps in a block chosen from what the apprentice under-picked, which is what keeps the result exact.</p>
+    </div>
+  </div>
+</details>
+
+<h2>How much faster? Acceptance rate and draft length</h2>
+<p>Assume, as Leviathan et al. do for their analysis, that each draft token is accepted independently with probability $\alpha$. A round yields $n$ tokens when the first $n-1$ drafts are accepted and the next is rejected, and $k+1$ tokens when all $k$ are accepted. Summing up:</p>
+$$\mathbb{E}[\text{tokens per target pass}] = 1 + \alpha + \alpha^2 + \dots + \alpha^k = \frac{1 - \alpha^{k+1}}{1 - \alpha}$$
+<p>Here $\alpha$ is the acceptance rate and $k$ the number of drafted tokens. With $\alpha = 0.8$ and $k = 4$: $(1 - 0.8^5)/0.2 = (1 - 0.328)/0.2 = 3.36$ tokens per target pass.</p>
+<p>Drafting isn't free. If one draft pass costs a fraction $c$ of a target pass, a round costs $1 + ck$ target passes, and the speedup over ordinary decoding is about</p>
+$$\text{speedup} \approx \frac{1 - \alpha^{k+1}}{(1 - \alpha)(1 + ck)}$$
+<p>With $c = 0.05$ (a draft about 20× cheaper): $3.36 / 1.2 \approx 2.8\times$. Notice that every extra draft token needs <em>all</em> earlier ones accepted, so the gain from bigger $k$ shrinks quickly. Try it:</p>
+
+<div class="playground" id="spec-playground">
+  <h3>Playground: tune the speculation</h3>
+  <p class="math-note" style="margin:0">Toy model from the formulas above: independent acceptance with rate $\alpha$, and verifying $k$ tokens costs one ordinary step.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Acceptance rate α = <output data-out="alpha">0.80</output></span>
+      <input type="range" name="alpha" min="0.3" max="0.95" step="0.05" value="0.8" aria-describedby="spec-hint">
+    </label>
+    <label><span>Draft length k = <output data-out="k">4</output></span>
+      <input type="range" name="k" min="1" max="10" step="1" value="4" aria-describedby="spec-hint">
+    </label>
+    <label><span>Draft cost c (fraction of a target pass) = <output data-out="c">0.05</output></span>
+      <input type="range" name="c" min="0" max="0.3" step="0.01" value="0.05" aria-describedby="spec-hint">
+    </label>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="spec-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p>In the papers, Leviathan et al. reported about 2–3× faster T5-XXL (11B) decoding, and Chen et al. about 2–2.5× for the 70B Chinchilla, with no change to the outputs. Real speedups vary a lot. Acceptance is high on predictable text such as code or text that repeats the prompt, and lower on open-ended creative writing. They also shrink at large batch sizes: a busy server's GPU is already doing useful arithmetic, so the "free" verification isn't free any more (<a href="m5-6.html">M5.6</a>).</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Target $p = [0.5, 0.1, 0.4]$ and draft $q = [0.2, 0.6, 0.2]$ for tokens A, B, C.</p>
+  <ol class="steps">
+    <li>The draft proposes B. Probability it is accepted: <span class="blank" data-answer="0.167" data-tol="0.005" data-hint="min(1, p(B)/q(B)) = 0.1 / 0.6."></span></li>
+    <li>If B is rejected, probability the replacement is A: <span class="blank" data-answer="0.6" data-tol="0.01" data-hint="max(0, p − q) = [0.3, 0, 0.2]. Normalise by its sum, 0.5."></span></li>
+    <li>Check exactness: overall $P(\text{output} = C)$: <span class="blank" data-answer="0.4" data-tol="0.01" data-hint="C proposed and accepted: 0.2 × 1. Plus B proposed and rejected (0.6 × 0.833 = 0.5) times the residual's chance of C (0.4)."></span></li>
+    <li>Acceptance chance $\beta = \sum_x \min(p(x), q(x))$: <span class="blank" data-answer="0.5" data-tol="0.01" data-hint="min(0.5, 0.2) + min(0.1, 0.6) + min(0.4, 0.2)."></span></li>
+    <li>Expected tokens per target pass with $\alpha = 0.6$, $k = 4$: <span class="blank" data-answer="2.31" data-tol="0.01" data-hint="(1 − 0.6⁵) / (1 − 0.6), and 0.6⁵ = 0.078."></span></li>
+    <li>Speedup with draft cost $c = 0.05$: <span class="blank" data-answer="1.92" data-tol="0.02" data-hint="Divide the previous answer by 1 + 4 × 0.05."></span></li>
+  </ol>
+</section>
+
+<h2>Variants: where do the drafts come from?</h2>
+<ul>
+  <li><strong>A small model from the same family</strong>, such as a 1B model drafting for a 70B one. It must use the same tokenizer. It is often distilled from the target to raise $\alpha$.</li>
+  <li><strong>Medusa</strong> (Cai et al., 2024) adds a few extra decoding heads to the target itself, each predicting a token further ahead, and verifies a tree of candidates in one pass using tree attention. Its optional "typical acceptance" rule trades exactness for speed.</li>
+  <li><strong>EAGLE</strong> (Li et al., 2024; later EAGLE-2 and EAGLE-3) drafts with a light head that works on the target's own hidden features rather than tokens, and is among the fastest lossless methods reported.</li>
+  <li><strong>Prompt lookup / n-gram drafting</strong> needs no draft model at all. It copies the continuation of a matching n-gram from the prompt, which works well when the output repeats the input (summaries, code edits, retrieval-augmented answers).</li>
+</ul>
+<p class="math-note">Reported speedups for these methods depend heavily on the model, task, hardware and batch size, so compare them on your own workload. Models trained with multi-token-prediction heads (for example DeepSeek-V3, 2024) can reuse those heads as drafters.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> speculative decoding is a standard option in serving engines such as vLLM, SGLang and TensorRT-LLM. It shines where latency matters and batches are small, as in interactive chat and coding assistants. Because the output distribution is unchanged, you can turn it on without re-running quality evaluations, but you pay in memory for the drafter and its KV cache, and the gain fades as batch size grows.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does speculative decoding speed things up, and why doesn't it change what the model outputs?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Decoding is memory-bound: each step reads all the weights to produce one token, so the target can score $k$ drafted tokens in one pass for about the cost of one step, and every accepted draft is a token gained. It's exact because each draft is accepted with probability $\min(1, p/q)$ and a rejection is replaced by a sample from the normalised $\max(0, p - q)$; together these give $\min(p,q) + \max(0, p-q) = p$, the target's own distribution.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">The draft gave its token probability $q = 0.5$; the target gives it $p = 0.2$. What happens?</p>
+    <ol class="q-src">
+      <li>It is always rejected, because $p &lt; q$</li>
+      <li>It is accepted with probability 0.2</li>
+      <li>It is accepted with probability 0.4</li>
+      <li>It is accepted with probability 0.7</li>
+    </ol>
+    <div class="q-explain">Accept with probability $\min(1, p/q) = 0.2/0.5 = 0.4$. Rejecting it always would under-produce this token: the target still wants it 20% of the time.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">After a rejection, the replacement token is sampled from…</p>
+    <ol class="q-src">
+      <li>$\max(0, p - q)$, renormalised</li>
+      <li>the draft distribution $q$</li>
+      <li>the target distribution $p$</li>
+      <li>a uniform distribution over the vocabulary</li>
+    </ol>
+    <div class="q-explain">The accept step already produced $\min(p, q)$ of each token's probability. The residual supplies exactly the missing part, $p - \min(p,q) = \max(0, p - q)$. Sampling from $p$ would double-count tokens the draft already covers.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">With acceptance rate $\alpha = 0.5$ and $k = 3$ drafts, how many tokens does each target pass produce on average?</p>
+    <ol class="q-src">
+      <li>1.5</li>
+      <li>1.875</li>
+      <li>2.0</li>
+      <li>4</li>
+    </ol>
+    <div class="q-explain">$(1 - 0.5^4)/(1 - 0.5) = 0.9375/0.5 = 1.875$, i.e. $1 + 0.5 + 0.25 + 0.125$. The maximum is 4 (all three drafts plus the bonus token), but that needs all three accepted.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Interleaving with M1.5: with greedy decoding (temperature 0), $p$ and $q$ put all their probability on their top token. What does verification become?</p>
+    <ol class="q-src">
+      <li>Every draft is accepted</li>
+      <li>Drafts are accepted with probability 0.5</li>
+      <li>The target re-generates every token one by one</li>
+      <li>Keep drafts while they equal the target's top token; at the first mismatch, use the target's top token instead</li>
+    </ol>
+    <div class="q-explain">With one-hot distributions, $p(x)/q(x)$ is 1 if the target's argmax is the drafted token and 0 otherwise, and the residual is one-hot on the target's argmax. So the output is exactly what greedy decoding of the target would produce.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Decoding at small batch sizes is <strong>memory-bound</strong>: scoring $k$ extra tokens in one pass costs about the same as one step.</li>
+    <li>A draft proposes $k$ tokens; the target verifies all of them in <strong>one forward pass</strong> and yields 1 to $k+1$ tokens.</li>
+    <li>Accept with $\min(1, p/q)$; on rejection, resample from normalised $\max(0, p - q)$. The output is <strong>exactly</strong> the target's distribution.</li>
+    <li>Expected tokens per pass: $(1 - \alpha^{k+1})/(1 - \alpha)$; speedup ≈ that divided by $1 + ck$. Gains flatten as $k$ grows and shrink at large batch sizes.</li>
+    <li>Drafts can come from a small model, extra heads (Medusa, EAGLE) or the prompt itself (n-gram lookup).</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Build toy target and draft distributions in NumPy, implement speculative sampling, and check empirically that the outputs follow the target's distribution exactly while measuring acceptance rate and tokens per step. About 25 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m5-5-speculative-decoding.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m5-5-a","front":"Why can a big model verify $k$ drafted tokens for about the cost of generating one?","back":"Decoding at small batch is memory-bound: each forward pass is dominated by reading all the weights. Processing $k$ tokens in one pass reads the weights once, so it takes about the same time."},
+  {"id":"m5-5-b","front":"Speculative sampling: when is a draft token accepted?","back":"Draw $u \\sim U(0,1)$ and accept if $u < \\min(1, p(x)/q(x))$, where $p$ is the target's and $q$ the draft's probability. Tokens with $p \\ge q$ are always accepted."},
+  {"id":"m5-5-c","front":"What is sampled after a draft token is rejected, and why?","back":"A token from $\\max(0, p - q)$, renormalised. Acceptance already yields $\\min(p, q)$ of each token's probability; the residual adds $\\max(0, p-q)$, and $\\min(p,q) + \\max(0,p-q) = p$."},
+  {"id":"m5-5-d","front":"Expected tokens per target pass with acceptance rate $\\alpha$ and $k$ drafts?","back":"$\\frac{1 - \\alpha^{k+1}}{1 - \\alpha} = 1 + \\alpha + \\dots + \\alpha^k$. E.g. $\\alpha = 0.8$, $k = 4$: 3.36. Speedup ≈ this divided by $1 + ck$ ($c$ = draft cost relative to the target)."},
+  {"id":"m5-5-e","front":"Name three ways to get draft tokens.","back":"A small model with the same tokenizer (often distilled); extra heads on the target (Medusa, EAGLE drafting from hidden features); copying n-grams from the prompt (prompt lookup decoding)."},
+  {"id":"m5-5-f","front":"When does speculative decoding help least?","back":"At large batch sizes (the GPU is no longer idle, so verification isn't free), with low acceptance rates (unpredictable text, mismatched draft), or when the draft is expensive relative to the target."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m5-5-spec.js"></script>
+<script src="../assets/js/anims/m5-5-spec-playground.js"></script>
+</body>
+</html>

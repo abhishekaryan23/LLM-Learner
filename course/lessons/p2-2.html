@@ -24,8 +24,6 @@
 <div class="lesson-meta"><span data-mins></span><span>Needs: what a derivative is</span></div>
 <p class="lede">Every model in this course learns the same way, from a two-parameter line to a trillion-parameter LLM: <strong>feel the slope, take a small step downhill, repeat.</strong> That loop is gradient descent.</p>
 
-<div class="cover"><img src="../assets/img/cover-p2.webp" alt="Illustration: a glowing ball rolling down a winding path into the lowest valley of a hilly landscape." width="1200" height="800"></div>
-
 <section class="objectives" aria-labelledby="obj">
   <h2 id="obj">By the end you can</h2>
   <ul>
@@ -64,7 +62,7 @@
 <h2>Training = finding the bottom of a landscape</h2>
 <p>A model is a function with adjustable numbers inside it, its <strong>parameters</strong>. We'll call them $\theta$ (theta). A <strong>loss function</strong> $L(\theta)$ scores how wrong the model is on the training data for a given setting of $\theta$: lower is better. Training means finding the $\theta$ that makes $L$ as small as possible.</p>
 <p>With one parameter the loss is a curve; with two it's a landscape of hills and valleys; with an LLM it's a "landscape" in billions of dimensions. We can't look at all of it. We can only evaluate the loss, and its slope, <strong>right where we are</strong>.</p>
-<p class="math-note">Rusty on derivatives? Lesson P1.3 <em>Derivatives &amp; the chain rule</em> (coming soon) covers them. For now: the derivative $\frac{dL}{d\theta}$ is the slope of the curve at a point.</p>
+<p class="math-note">Rusty on derivatives? Lesson <a href="p1-3.html">P1.3 <em>Derivatives &amp; the chain rule</em></a> covers them. In short: the derivative $\frac{dL}{d\theta}$ is the slope of the curve at a point.</p>
 
 <h2>The slope points uphill, so step the other way</h2>
 <p>If the slope $\frac{dL}{d\theta}$ is positive, increasing $\theta$ increases the loss, so we decrease $\theta$. If it's negative, we increase $\theta$. Both cases are one rule:</p>

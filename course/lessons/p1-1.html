@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p1-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Vectors &amp; dot products · LLMs, Animated</title>
+<meta name="description" content="Vectors as lists and arrows, length, the dot product two ways, and cosine similarity: the measure of 'same direction' that embeddings and attention are built on.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Vectors &amp; dot products</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Math you actually need</span></div>
+<p class="lede">Inside an LLM, every token, every query and every hidden state is a <strong>vector</strong>: a list of numbers. And the most common question the model asks about two vectors is <em>"how much do these point the same way?"</em> The answer is one tiny operation, the <strong>dot product</strong>.</p>
+
+<div class="cover"><img src="../assets/img/cover-p1.webp" alt="Illustration: floating arrows, a gently warped grid, a curve with a tangent line and a bell-shaped hill, arranged like a constellation." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute a vector's length and the dot product of two vectors by hand.</li>
+    <li>Explain the geometric meaning $a\cdot b = \lVert a\rVert\,\lVert b\rVert\cos\theta$ and what its sign tells you.</li>
+    <li>Compute cosine similarity, and say why embeddings and attention rely on it.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> only school arithmetic and Pythagoras ($c^2 = a^2 + b^2$). Already fluent with vectors? Take the quiz at the bottom first. If you ace it, go straight to <a href="p1-2.html">Matrices as transformations (P1.2)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What is the dot product of $(3, 1)$ and $(1, 2)$?</p>
+    <ol class="q-src">
+      <li>$(3, 2)$</li>
+      <li>$4$</li>
+      <li>$5$</li>
+      <li>$7$</li>
+    </ol>
+    <div class="q-explain">Multiply matching entries and add: $3 \times 1 + 1 \times 2 = 5$. The result is a single number, not a vector. That's why it's also called the <em>scalar product</em>.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Two arrows meet at a right angle (90°). Their dot product is…</p>
+    <ol class="q-src">
+      <li>as large as possible</li>
+      <li>zero</li>
+      <li>negative</li>
+      <li>it depends only on how long they are</li>
+    </ol>
+    <div class="q-explain">Perpendicular vectors always have dot product 0, whatever their lengths. You'll see why in the animation: the "shadow" of one on the other vanishes.</div>
+  </div>
+</section>
+
+<h2>A vector is a list of numbers (and an arrow)</h2>
+<p>To a programmer, a vector is just an array: <code>a = [3, 1]</code>. Each entry is called a <strong>component</strong>. With two components you can draw it: start at the origin, go 3 right and 1 up, and draw an arrow. The list and the arrow are the same object, seen two ways.</p>
+<p>LLMs use the same idea with far more components. A token embedding in a 7-billion-parameter model such as Llama 2 7B has 4,096 of them. Nobody can draw 4,096 dimensions, but every rule in this lesson works identically, because each rule is a loop over the components.</p>
+<p>Two basic moves, both done entry by entry:</p>
+<ul>
+  <li><strong>Add</strong> vectors: $(3, 1) + (1, 2) = (4, 3)$. As arrows: put the second one's tail on the first one's tip.</li>
+  <li><strong>Scale</strong> a vector by a number: $2 \times (3, 1) = (6, 2)$. Same direction, twice as long.</li>
+</ul>
+<p>The <strong>length</strong> (or <strong>norm</strong>) of a vector is Pythagoras, extended to any number of components:</p>
+$$\lVert a\rVert = \sqrt{a_1^2 + a_2^2 + \dots + a_n^2}$$
+<p>Here $a_i$ is the $i$-th component and $n$ is how many there are. For $a = (3, 1)$: $\lVert a\rVert = \sqrt{9 + 1} = \sqrt{10} \approx 3.16$.</p>
+
+<h2>The dot product, two ways</h2>
+<p><strong>Algebra:</strong> multiply matching components, then add everything up:</p>
+$$a \cdot b = a_1 b_1 + a_2 b_2 + \dots + a_n b_n = \sum_{i=1}^{n} a_i b_i$$
+<p>In code it's one line: <code>sum(x * y for x, y in zip(a, b))</code>, or <code>a @ b</code> in NumPy and PyTorch. <strong>Geometry:</strong> the very same number equals</p>
+$$a \cdot b = \lVert a\rVert\,\lVert b\rVert\,\cos\theta$$
+<p>where $\theta$ (theta) is the angle between the two arrows. $\cos\theta$ is 1 when they point the same way, 0 at a right angle and $-1$ when they point in opposite directions. Watch both formulas give the same answer:</p>
+
+<figure class="anim wide" data-anim="p1-1-dot-product"></figure>
+
+<p>So the dot product mixes two things: <strong>how long</strong> the vectors are and <strong>how aligned</strong> they are. Its sign alone tells you the angle's story:</p>
+<ul>
+  <li><strong>Positive:</strong> the angle is under 90°, so they point roughly the same way.</li>
+  <li><strong>Zero:</strong> exactly 90°. The vectors are <strong>perpendicular</strong> (mathematicians say <em>orthogonal</em>).</li>
+  <li><strong>Negative:</strong> over 90°, so they point roughly apart.</li>
+</ul>
+<p class="math-note">Why are the two formulas equal? Both are unchanged when you rotate the picture, so rotate until $a$ lies on the x-axis: $a = (\lVert a\rVert, 0)$ and $b = (\lVert b\rVert\cos\theta,\ \lVert b\rVert\sin\theta)$. The algebraic formula then gives $\lVert a\rVert\,\lVert b\rVert\cos\theta$ directly.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-dot-product.webp" alt="Three scenes: two kids pulling a wagon the same way, at a right angle, and in opposite directions." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Two kids pull a wagon with ropes. If they both pull <strong>the same way</strong>, the wagon zooms: their pulls add up. That's a big, positive dot product.</p>
+      <p>If one pulls forward and the other pulls <strong>sideways</strong>, the sideways kid doesn't help the forward kid at all. That's a dot product of zero.</p>
+      <p>If they pull in <strong>opposite directions</strong>, they fight each other. That's a negative dot product.</p>
+      <p class="math-note" style="margin-top:.6em">Where it breaks: real pulls are forces you'd add together. The dot product isn't a sum of pulls. It's a single number that measures how much one pull helps the other.</p>
+    </div>
+  </div>
+</details>
+
+<div class="playground" id="dot-playground">
+  <h3>Playground: turn and stretch b</h3>
+  <p class="math-note" style="margin:0">$a = (3, 1)$ stays put. Turn $b$ and change its length. Watch the dot product, the orange shadow and the cosine gauge.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Angle between a and b: <output data-o="ang">45°</output></span>
+      <input type="range" data-k="ang" min="0" max="360" step="1" value="45">
+    </label>
+  </div>
+  <div class="pg-controls">
+    <label><span>Length of b: <output data-o="len">2.2</output></span>
+      <input type="range" data-k="len" min="0.5" max="2.5" step="0.1" value="2.2">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Angle presets" style="margin-top:12px">
+    <button type="button" class="chip" data-ang="0" aria-pressed="false">Same way · 0°</button>
+    <button type="button" class="chip" data-ang="45" aria-pressed="false">45°</button>
+    <button type="button" class="chip" data-ang="90" aria-pressed="false">Right angle · 90°</button>
+    <button type="button" class="chip" data-ang="180" aria-pressed="false">Opposite · 180°</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+<p>Try this: set the angle to 45° and drag the length. The dot product changes, but the cosine gauge doesn't move. That's the next idea.</p>
+
+<h2>Cosine similarity: direction only</h2>
+<p>Often we care only about <em>direction</em>, not length. Divide the dot product by both lengths and what's left is the cosine:</p>
+$$\cos\theta = \frac{a \cdot b}{\lVert a\rVert\,\lVert b\rVert}$$
+<p>This is <strong>cosine similarity</strong>. It always lies between $-1$ (opposite) and $1$ (same direction), and stretching either vector doesn't change it: $(3, 1)$ and $(6, 2)$ have cosine similarity exactly 1. If you first <strong>normalise</strong> every vector to length 1 (divide it by its own length), the plain dot product <em>is</em> the cosine similarity. Many systems do exactly that, so that a fast dot product does the job.</p>
+
+<h3>Worked example</h3>
+<p>Two 3-component vectors: $a = (1, 2, 2)$ and $b = (2, 1, 2)$.</p>
+<ol class="steps">
+  <li>Dot product: $1\cdot 2 + 2\cdot 1 + 2\cdot 2 = 2 + 2 + 4 = 8$</li>
+  <li>Lengths: $\lVert a\rVert = \sqrt{1 + 4 + 4} = 3$ and $\lVert b\rVert = \sqrt{4 + 1 + 4} = 3$</li>
+  <li>Cosine similarity: $\dfrac{8}{3 \times 3} \approx 0.889$, quite similar directions (about 27°)</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<p>Take $p = (4, 3)$, $q = (3, 4)$ and $r = (-3, 4)$.</p>
+<ol class="steps">
+  <li>$p \cdot q$: <span class="blank" data-answer="24" data-tol="0.001" data-hint="4·3 + 3·4."></span></li>
+  <li>$\lVert p\rVert$ (and $\lVert q\rVert$ is the same): <span class="blank" data-answer="5" data-tol="0.001" data-hint="√(4² + 3²) = √25."></span></li>
+  <li>Cosine similarity of $p$ and $q$: <span class="blank" data-answer="0.96" data-tol="0.005" data-hint="Divide the dot product by 5 × 5."></span></li>
+  <li>$p \cdot r$: <span class="blank" data-answer="0" data-tol="0.001" data-hint="4·(−3) + 3·4. What does that say about the angle?"></span></li>
+</ol>
+
+<h2>Why LLMs are full of dot products</h2>
+<ul>
+  <li><strong>Embeddings and search.</strong> A text-embedding model maps each sentence to a vector, trained so that texts with related meaning get vectors pointing in similar directions. Retrieval (the "R" in RAG) embeds your question and returns the documents with the highest cosine similarity.</li>
+  <li><strong>Attention.</strong> Each token's query vector is dot-multiplied with every other token's key vector to decide how much to attend to it: $q \cdot k / \sqrt{d_k}$. That's lesson <a href="m1-1.html">Attention (M1.1)</a>.</li>
+  <li><strong>Picking the next token.</strong> The model's final hidden vector is dot-multiplied with one learned vector per vocabulary entry. Each result is that token's score (its <em>logit</em>). That's tens of thousands of dot products per generated token, packed into one matrix multiply (next lesson).</li>
+</ul>
+<p>A useful fact about high dimensions: two <em>random</em> directions are almost perpendicular. In $d$ dimensions their cosine similarity is typically within about $\pm 1/\sqrt{d}$ of zero, roughly $\pm 0.016$ for $d = 4096$. So a cosine of 0.3 between two embeddings is far from random. Raw cosine values aren't comparable across models, though; each model has its own typical range.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> "similar meaning ≈ similar direction" is the working assumption behind embeddings, vector databases and attention. Whenever you see <code>q @ k.T</code>, <code>x @ W</code> or "cosine similarity" in LLM code, it's this lesson's operation, run millions of times on a GPU.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Two embedding vectors have a large dot product. Why doesn't that alone prove the texts are similar, and what would you compute instead?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The dot product is $\lVert a\rVert\,\lVert b\rVert\cos\theta$, so it can be large just because the vectors are long. Cosine similarity divides out both lengths and keeps only the alignment, $\cos\theta$, which is what "similar direction" means.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">$a = (2, -1)$ and $b = (1, 2)$. What is the angle between them?</p>
+    <ol class="q-src">
+      <li>90°, because $a \cdot b = 0$</li>
+      <li>45°, because both have length $\sqrt 5$</li>
+      <li>0°, because they have the same length</li>
+      <li>180°, because $a$ has a negative component</li>
+    </ol>
+    <div class="q-explain">$2 \cdot 1 + (-1) \cdot 2 = 0$, so $\cos\theta = 0$ and $\theta = 90°$. Equal lengths say nothing about the angle.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What is the cosine similarity between a vector $v$ and $3v$?</p>
+    <ol class="q-src">
+      <li>3</li>
+      <li>1/3</li>
+      <li>1</li>
+      <li>It depends on $v$</li>
+    </ol>
+    <div class="q-explain">Scaling by a positive number keeps the direction, so $\theta = 0$ and the cosine is 1. The dot product, $3\lVert v\rVert^2$, does depend on $v$, which is exactly why cosine similarity divides the lengths out.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A query vector has a <em>negative</em> dot product with a key vector. What does that tell you?</p>
+    <ol class="q-src">
+      <li>One of the vectors must contain only negative numbers</li>
+      <li>The vectors are perpendicular</li>
+      <li>One of the vectors has length less than 1</li>
+      <li>They point more apart than together: the angle is over 90°</li>
+    </ol>
+    <div class="q-explain">The lengths are never negative, so the sign comes from $\cos\theta$, which is negative exactly when $\theta &gt; 90°$. In attention, such a key gets a low score.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You want the dot-product formula to still be there next week. Based on how this course works (M0), what's the best move?</p>
+    <ol class="q-src">
+      <li>Re-read this page a few times tonight</li>
+      <li>Add the cards below, then recall the formula from memory when they come back in a few days</li>
+      <li>Highlight the two formulas</li>
+      <li>Copy the formulas out ten times in a row</li>
+    </ol>
+    <div class="q-explain">Retrieval practice plus spacing (<a href="m0-1.html">M0.1</a>) beats re-reading, highlighting and massed copying. Effortful recall a few days later is what makes it stick.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A vector is a list of numbers and also an arrow. Length: $\lVert a\rVert = \sqrt{\sum_i a_i^2}$.</li>
+    <li>Dot product: $a\cdot b = \sum_i a_i b_i = \lVert a\rVert\,\lVert b\rVert\cos\theta$.</li>
+    <li>Sign: positive means same-ish direction, zero means perpendicular, negative means apart.</li>
+    <li><strong>Cosine similarity</strong> $\frac{a\cdot b}{\lVert a\rVert\lVert b\rVert}$ keeps only direction. It's how embeddings are compared.</li>
+    <li>Attention scores and next-token logits are dot products too.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 15 minutes: write the dot product and cosine similarity in NumPy, check the two formulas agree, rank toy "embeddings" by similarity, and see why random high-dimensional vectors are nearly perpendicular. Runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p1-1-vectors.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p1-1-a","front":"How do you compute the length (norm) of a vector $a$?","back":"$\\lVert a\\rVert = \\sqrt{a_1^2 + a_2^2 + \\dots + a_n^2}$: Pythagoras over all components. E.g. $\\lVert(3,1)\\rVert = \\sqrt{10}$."},
+  {"id":"p1-1-b","front":"Give both formulas for the dot product $a \\cdot b$.","back":"Algebra: $\\sum_i a_i b_i$. Geometry: $\\lVert a\\rVert\\,\\lVert b\\rVert\\cos\\theta$, where $\\theta$ is the angle between them."},
+  {"id":"p1-1-c","front":"What does the sign of a dot product tell you?","back":"Positive: angle under 90° (same-ish direction). Zero: perpendicular. Negative: angle over 90° (pointing apart)."},
+  {"id":"p1-1-d","front":"What is cosine similarity and why use it instead of the raw dot product?","back":"$\\frac{a\\cdot b}{\\lVert a\\rVert\\lVert b\\rVert} = \\cos\\theta \\in [-1, 1]$. It ignores length and measures only direction, so long vectors don't look 'similar' just for being long."},
+  {"id":"p1-1-e","front":"Name three places LLMs use dot products.","back":"Comparing embeddings (cosine similarity, retrieval), attention scores $q\\cdot k/\\sqrt{d_k}$, and next-token logits (hidden state · each token's output vector)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p1-1-dot-product.js"></script>
+<script src="../assets/js/anims/p1-1-dot-playground.js"></script>
+</body>
+</html>

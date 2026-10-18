@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m2-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pretraining data · LLMs, Animated</title>
+<meta name="description" content="Where an LLM's trillions of training tokens come from, and the pipeline that cleans them: extraction, language ID, quality filtering, MinHash deduplication, PII and decontamination.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Pretraining data</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Pretraining</span></div>
+<p class="lede">An LLM only knows what was in its training text. Modern models read <strong>trillions of tokens</strong>, mostly scraped from the web, and most of the raw web is junk. This lesson follows the pipeline that turns a messy crawl into a training set, and shows why <em>cleaner</em> data often beats <em>more</em> data.</p>
+
+<div class="cover"><img src="../assets/img/cover-m2.webp" alt="Illustration: an ocean of blank pages flowing through a funnel into a glowing brain-shaped network, with server towers behind." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Name the main sources of pretraining text and the scale of modern datasets.</li>
+    <li>Walk through the cleaning pipeline: extraction, language ID, quality filtering, deduplication, PII/toxicity filtering and decontamination.</li>
+    <li>Estimate how similar two documents are with shingles and Jaccard similarity, the idea behind MinHash.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> it helps to know what a token is (<a href="p3-3.html">P3.3 Tokenization</a>) and why repeating the same examples leads to memorization (<a href="p2-4.html">P2.4 Overfitting &amp; data splits</a>). Neither is required.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A team crawls billions of web pages to build a pretraining set. How much of the raw crawl typically ends up in the final, cleaned dataset?</p>
+    <ol class="q-src">
+      <li>Nearly all of it; the web is mostly fine</li>
+      <li>About half</li>
+      <li>A small minority; most pages are thrown away</li>
+      <li>None of it; LLMs are trained on books only</li>
+    </ol>
+    <div class="q-explain">Most raw pages are boilerplate, spam, duplicates or near-empty. In the RefinedWeb pipeline (Penedo et al., 2023), the filtering and deduplication stages removed close to 90% of the crawled documents.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Two small models get the same training budget of tokens. One reads a broad web dataset; the other reads only the pages a classifier rated as "educational". Which does better on knowledge and reasoning benchmarks?</p>
+    <ol class="q-src">
+      <li>The broad web one, because more variety always wins</li>
+      <li>The educational subset one</li>
+      <li>They tie, because only the token count matters</li>
+      <li>Neither can learn anything from web text</li>
+    </ol>
+    <div class="q-explain">That's the FineWeb-Edu result (Penedo et al., 2024): at equal training tokens, the filtered subset gave clearly better scores on benchmarks such as MMLU and ARC. Quality per token matters.</div>
+  </div>
+</section>
+
+<h2>Where the text comes from</h2>
+<p>A pretraining corpus is a blend of a few kinds of source:</p>
+<ul>
+  <li><strong>Web crawl.</strong> The bulk of almost every corpus. <strong>Common Crawl</strong>, a nonprofit, has published free snapshots of the web since 2008; each snapshot holds a few billion pages.</li>
+  <li><strong>Code.</strong> Public repositories (for example The Stack v2, Lozhkov et al., 2024). Code also seems to help reasoning, not just coding.</li>
+  <li><strong>Books, papers and reference text.</strong> Long, carefully edited prose: arXiv and other scientific papers, Wikipedia, public-domain books.</li>
+  <li><strong>Math, multilingual and other targeted data,</strong> plus, increasingly, <strong>synthetic</strong> text written by other models (how much varies a lot between labs, and many don't say).</li>
+</ul>
+<p>Everything is measured in <strong>tokens</strong>, the units the model reads (in English, very roughly 4 characters or ¾ of a word each). Some reference points:</p>
+<ul>
+  <li><strong>GPT-3</strong> (Brown et al., 2020) trained on about <strong>300 billion</strong> tokens.</li>
+  <li><strong>Llama 2</strong> (2023): about <strong>2 trillion</strong>. <strong>Llama 3</strong> (Dubey et al., 2024): about <strong>15 trillion</strong>. Recent open models report anywhere from roughly 15 to over 30 trillion.</li>
+  <li><strong>FineWeb</strong> (Penedo et al., 2024), an open dataset built from 96 Common Crawl snapshots, has about <strong>15 trillion</strong> tokens. Its educational subset, <strong>FineWeb-Edu</strong>, has about 1.3 trillion.</li>
+  <li>Other well-known open sets: The Pile (Gao et al., 2020, about 825 GiB of text), C4 (Raffel et al., 2020), Dolma (Soldaini et al., 2024, about 3 trillion tokens) and DCLM (Li et al., 2024).</li>
+</ul>
+<p class="math-note">Exact counts depend on the tokenizer and on how a lab counts repeated data, so treat these as orders of magnitude.</p>
+
+<h2>The cleaning pipeline</h2>
+<p>Raw HTML is not training text. Every serious dataset runs it through roughly the same sequence of stages. Watch a toy crawl of 60 pages go through them:</p>
+
+<figure class="anim wide" data-anim="m2-1-pipeline"></figure>
+
+<ol class="steps">
+  <li><strong>Extraction.</strong> Pull the main text out of the HTML and drop menus, ads and footers. FineWeb found that running its own extractor (trafilatura) on raw HTML gave better models than using Common Crawl's pre-extracted text.</li>
+  <li><strong>Language ID.</strong> A small, fast classifier (often fastText) labels each page's language and how confident it is. FineWeb keeps English pages scoring at least 0.65.</li>
+  <li><strong>Quality filtering.</strong> First <em>rules</em>: the Gopher rules (Rae et al., 2021) drop pages with fewer than 50 or more than 100,000 words, an odd average word length, or too few words containing letters; C4 kept only lines ending in punctuation. Then a <strong>classifier</strong>: FineWeb-Edu had Llama-3-70B-Instruct rate about 450,000 pages for educational value from 0 to 5, trained a small model on those ratings, and kept pages scoring 3 or more.</li>
+  <li><strong>Deduplication.</strong> Remove exact copies (hash each document or line) and <strong>near-duplicates</strong>, the same page with a different date or footer, using MinHash (next section). Lee et al. (2022) found deduplicated training makes models emit memorized text about ten times less often.</li>
+  <li><strong>PII and toxicity.</strong> Mask personal data such as email addresses and IP numbers, block adult URLs and drop toxic pages. There's a trade-off: C4's word blocklist disproportionately removed African-American English and text about LGBTQ+ identities (Dodge et al., 2021), and heavy toxicity filtering can make models worse at <em>recognizing</em> toxic text (Longpre et al., 2023).</li>
+  <li><strong>Decontamination.</strong> Remove training text that overlaps with benchmark test sets, for example any 13-word sequence shared with a test question (the check GPT-3 used). Otherwise a model can "ace" a test it has memorized. Lesson <a href="m4-3.html">M4.3 Contamination</a> covers this in depth.</li>
+</ol>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-data-sieve.webp" alt="Children panning for gold: junk falls through the sieve and gold nuggets go into a clean bucket." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine kids <strong>panning for gold</strong> in a river. They scoop up buckets of muddy gravel: that's the whole internet.</p>
+      <p>They shake it through a <strong>sieve</strong>. Mud and pebbles fall through: spam, broken pages, copies of the same thing. Only the <strong>shiny nuggets</strong> go into the clean bucket, and that bucket is what the model learns from.</p>
+      <p>Where it breaks: a real sieve keeps or drops each stone on its own. A data pipeline also has to spot <em>copies</em> of nuggets already in the bucket, and decide how much of each kind of gold to keep.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Finding near-duplicates: shingles, Jaccard and MinHash</h2>
+<p>To compare two documents, chop each into overlapping word <strong>n-grams</strong> called <strong>shingles</strong>, then measure how much the two sets overlap with the <strong>Jaccard similarity</strong>:</p>
+$$J(A,B) = \frac{|A \cap B|}{|A \cup B|}$$
+<p>$A$ and $B$ are the two sets of shingles, $|A \cap B|$ counts the shingles they share, and $|A \cup B|$ counts the distinct shingles in either. $J = 1$ means identical sets, $J = 0$ means nothing in common.</p>
+<p>Comparing every pair is hopeless: a billion documents make about $5 \times 10^{17}$ pairs. <strong>MinHash</strong> (Broder, 1997) gets around it: apply a hash function to every shingle and keep only the <em>smallest</em> value. For two documents, the chance that their minimums match is exactly $J(A,B)$. So each document is boiled down to a short <strong>signature</strong> of, say, 128 minimums, and the fraction of matching entries estimates $J$. A trick called <strong>locality-sensitive hashing</strong> then buckets signatures so only likely duplicates are ever compared.</p>
+
+<h3>Worked example</h3>
+<p>Use 2-word shingles. A = "the cat sat on the mat", B = "the cat sat on a mat".</p>
+<ol class="steps">
+  <li>Shingles of A: {the cat, cat sat, sat on, on the, the mat}: 5 shingles.</li>
+  <li>Shingles of B: {the cat, cat sat, sat on, on a, a mat}: 5 shingles.</li>
+  <li>Shared: {the cat, cat sat, sat on} = 3. Union: $5 + 5 - 3 = 7$.</li>
+  <li>$J = 3/7 \approx 0.43$. With 128 MinHash functions, expect about $0.43 \times 128 \approx 55$ matching signature entries.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A = "we train language models on web text" and B = "we train language models on clean web text". Use 2-word shingles again: A has 6 shingles and B has 7.</p>
+  <ol class="steps">
+    <li>Number of shingles they share: <span class="blank" data-answer="5" data-tol="0.01" data-hint="Only 'on web' (in A) and 'on clean', 'clean web' (in B) are unshared."></span></li>
+    <li>Size of the union $|A \cup B|$: <span class="blank" data-answer="8" data-tol="0.01" data-hint="|A| + |B| − shared = 6 + 7 − 5."></span></li>
+    <li>Jaccard similarity $J$: <span class="blank" data-answer="0.625" data-tol="0.006" data-hint="Shared ÷ union = 5 ÷ 8."></span></li>
+    <li>Expected matching entries in a 128-hash MinHash signature: <span class="blank" data-answer="80" data-tol="1" data-hint="J × 128."></span></li>
+  </ol>
+</section>
+
+<h2>Mixtures: how much of each source</h2>
+<p>After cleaning, you decide the <strong>data mixture</strong>: what fraction of training tokens comes from each source. Small, high-quality sources are often <strong>upsampled</strong>, meaning seen more than once. GPT-3 drew 60% of its training tokens from filtered Common Crawl but saw it only about 0.44 times, while Wikipedia, just 3% of the tokens, was seen about 3.4 times (Brown et al., 2020). Llama 3 reports a final mix of roughly half general knowledge, a quarter math and reasoning, 17% code and 8% multilingual text, and finishes training with an "annealing" phase on upsampled high-quality data.</p>
+<p>Repeating data is fine in moderation: Muennighoff et al. (2023) found that up to about 4 epochs of repeated data is almost as good as fresh data, with returns fading quickly after that.</p>
+
+<h2>Why quality beats raw quantity</h2>
+<p>Every training token costs the same compute, whether it's a textbook paragraph or a spam page. Spending that budget on better tokens pays off:</p>
+<ul>
+  <li><strong>FineWeb-Edu</strong> (about 1.3T tokens) beat the full 15T-token FineWeb on knowledge and reasoning benchmarks at the same training budget.</li>
+  <li>Microsoft's phi-1 (Gunasekar et al., 2023, "Textbooks Are All You Need") reached strong coding scores at 1.3B parameters by training mostly on "textbook-quality" and synthetic data.</li>
+  <li>DCLM (Li et al., 2024) found the choice of quality classifier was among the most important decisions in its whole pipeline.</li>
+</ul>
+<p>And quantity is running out: Villalobos et al. (2024) estimate the stock of public human-written text at a few hundred trillion tokens, which frontier training could use up within years. That's one reason labs care so much about filtering and synthetic data.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> when two labs train similar architectures with similar compute, data is often what separates them, which is also why data recipes are among the most closely guarded details in technical reports. The same tools reappear later: classifiers and dedup for <strong>SFT data</strong> (M3.1), n-gram overlap checks for <strong>contamination</strong> (M4.3), and token counts for <strong>scaling laws</strong> (M2.4).</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why do pretraining pipelines deduplicate, and how does MinHash make it possible at web scale?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Duplicates waste compute and push the model to memorize and regurgitate repeated text. Comparing every pair of documents is impossible at billions of documents, so MinHash turns each document's shingles into a short signature whose matching fraction estimates the Jaccard similarity, and locality-sensitive hashing only compares documents whose signatures collide.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What is the main purpose of <em>decontamination</em>?</p>
+    <ol class="q-src">
+      <li>Removing toxic pages from the corpus</li>
+      <li>Removing pages in the wrong language</li>
+      <li>Removing personal data such as emails</li>
+      <li>Removing text that overlaps with benchmark test sets, so evaluation scores stay honest</li>
+    </ol>
+    <div class="q-explain">If test questions leak into training, the model can memorize answers and benchmark scores overstate its ability. The other options are separate pipeline stages.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Two documents have Jaccard similarity 0.9 over their shingles. Out of 200 MinHash values, about how many will match?</p>
+    <ol class="q-src">
+      <li>About 20</li>
+      <li>About 180</li>
+      <li>All 200, always</li>
+      <li>About 100, since it's random</li>
+    </ol>
+    <div class="q-explain">Each MinHash entry matches with probability $J$, so expect about $0.9 \times 200 = 180$ matches. Not exactly 180 every time: it's an estimate.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A boilerplate paragraph appears 50,000 times in a crawl and nobody deduplicates it. Linking back to overfitting (P2.4), what's the most likely effect?</p>
+    <ol class="q-src">
+      <li>The model memorizes it and can reproduce it word for word, wasting compute that could have taught something new</li>
+      <li>Nothing, because repetition has no effect on gradient descent</li>
+      <li>The model learns to ignore that paragraph entirely</li>
+      <li>Training crashes</li>
+    </ol>
+    <div class="q-explain">Each copy is another gradient step towards that exact text, like training many epochs on one example. That's overfitting in miniature: memorization, plus wasted compute.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In GPT-3's mix, Wikipedia was only 3% of training tokens but was seen about 3.4 times, while Common Crawl was seen less than once. Why?</p>
+    <ol class="q-src">
+      <li>Wikipedia was accidentally duplicated</li>
+      <li>Common Crawl ran out of pages</li>
+      <li>High-quality sources were deliberately upsampled, even though they're small</li>
+      <li>Wikipedia text has fewer tokens per page</li>
+    </ol>
+    <div class="q-explain">Mixture weights are a choice. Small, clean sources get extra epochs; the huge, noisy crawl is sampled only partly.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Pretraining corpora are measured in <strong>trillions of tokens</strong>, mostly web crawl plus code, papers, books and math.</li>
+    <li>The pipeline: <strong>extract → language ID → quality filter → deduplicate → PII/toxicity → decontaminate → mix</strong>. Most raw pages are dropped.</li>
+    <li><strong>MinHash</strong> estimates Jaccard similarity from short signatures, making near-duplicate detection feasible at web scale.</li>
+    <li>Every token costs the same compute, so <strong>quality per token</strong> (classifier filtering, upsampling good sources) often beats more raw data.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m2-1-a","front":"Name the main stages of a pretraining data pipeline, in order.","back":"Text extraction from HTML → language ID → quality filtering (rules + classifier) → deduplication (exact + near-duplicate) → PII masking / toxicity filtering → decontamination against eval sets → mixing sources."},
+  {"id":"m2-1-b","front":"What is the Jaccard similarity of two shingle sets?","back":"$J(A,B) = |A \\cap B| / |A \\cup B|$: shared shingles divided by distinct shingles in either. 1 = identical, 0 = nothing shared."},
+  {"id":"m2-1-c","front":"What is the key property of MinHash?","back":"For a random hash function, the probability that two sets have the same minimum hash value equals their Jaccard similarity. A signature of k minimums estimates J by the fraction that match."},
+  {"id":"m2-1-d","front":"What is decontamination and why is it done?","back":"Removing training text that overlaps with benchmark test sets (e.g. shared 13-grams), so evaluation measures ability rather than memorization."},
+  {"id":"m2-1-e","front":"Give one piece of evidence that data quality can beat quantity.","back":"FineWeb-Edu (~1.3T tokens, classifier-filtered for educational value) beat the full ~15T-token FineWeb on benchmarks like MMLU and ARC at the same training budget (Penedo et al., 2024)."},
+  {"id":"m2-1-f","front":"Roughly how many tokens are modern LLMs pretrained on?","back":"Trillions: GPT-3 ~300B (2020), Llama 2 ~2T (2023), Llama 3 ~15T (2024); recent open models report roughly 15–30+T."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m2-1-pipeline.js"></script>
+</body>
+</html>

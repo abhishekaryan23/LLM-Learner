@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m5-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Quantization · LLMs, Animated</title>
+<meta name="description" content="Store LLM weights in 8 or 4 bits instead of 16: scales and zero-points, per-channel and group-wise quantization, outliers, LLM.int8(), GPTQ, AWQ, QAT and KV-cache quantization.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<style>
+  .mem-table { width: 100%; border-collapse: collapse; margin: 16px 0 8px; font-size: .97rem; }
+  .mem-table th, .mem-table td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); }
+  .mem-table th { font: 600 .82rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+  .mem-table td:first-child { font-weight: 650; white-space: nowrap; }
+</style>
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Quantization</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Optimization</span></div>
+<p class="lede">A 70-billion-parameter model in 16-bit needs 140 GB just for its weights: two big GPUs before it says a word. Store each weight in 4 bits instead and it fits on one, and it generates text faster too. This lesson shows how you squeeze numbers into so few bits, and what it costs.</p>
+
+<div class="cover"><img src="../assets/img/cover-m5.webp" alt="Illustration: a large, heavy brain-shaped machine being compressed into a sleek, small glowing one, with speed lines and a tiny rocket." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Work out a model's weight memory in fp32, bf16, int8 and int4, and explain why fewer bytes also means faster decoding.</li>
+    <li>Quantize and dequantize numbers by hand with a scale and a zero-point.</li>
+    <li>Explain why outliers hurt, and how per-channel and group-wise scales, LLM.int8(), GPTQ, AWQ and quantization-aware training respond to them.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> number formats such as bf16 from <a href="m2-5.html">M2.5 Distributed training &amp; mixed precision</a>, the KV cache from <a href="m1-5.html">M1.5 KV cache &amp; sampling</a>, and perplexity from <a href="m4-1.html">M4.1 Perplexity</a>. A quick look at <a href="m3-7.html">M3.7 LoRA &amp; QLoRA</a> helps but isn't required.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A 70-billion-parameter model stored in bf16 needs roughly how much memory just for its weights?</p>
+    <ol class="q-src">
+      <li>35 GB</li>
+      <li>70 GB</li>
+      <li>140 GB</li>
+      <li>280 GB</li>
+    </ol>
+    <div class="q-explain">bf16 uses 2 bytes per parameter, so $70 \times 10^9 \times 2$ bytes $= 140$ GB. In int4 (half a byte each) it would be about 35 GB.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">When a model generates one token at a time for a single user, the GPU must read every weight from memory for each token. If you halve the bytes per weight, you mostly…</p>
+    <ol class="q-src">
+      <li>save memory but gain no speed</li>
+      <li>roughly double the ceiling on tokens per second, because reading weights is the bottleneck</li>
+      <li>make generation slower, because the weights must be unpacked</li>
+      <li>speed up training, but not generation</li>
+    </ol>
+    <div class="q-explain">Single-stream decoding is limited by <strong>memory bandwidth</strong>, not arithmetic. Fewer bytes to read means more tokens per second, even though the GPU unpacks the weights before multiplying.</div>
+  </div>
+</section>
+
+<h2>Why: memory and bandwidth</h2>
+<p>Every parameter is a number, and the format decides how many bytes it takes:</p>
+<table class="mem-table">
+  <thead><tr><th>Format</th><th>Bytes / param</th><th>7B model</th><th>70B model</th></tr></thead>
+  <tbody>
+    <tr><td>fp32</td><td>4</td><td>28 GB</td><td>280 GB</td></tr>
+    <tr><td>bf16 / fp16</td><td>2</td><td>14 GB</td><td>140 GB</td></tr>
+    <tr><td>int8 / fp8</td><td>1</td><td>7 GB</td><td>70 GB</td></tr>
+    <tr><td>int4</td><td>0.5</td><td>3.5 GB</td><td>35 GB</td></tr>
+  </tbody>
+</table>
+<p class="math-note">GB here means $10^9$ bytes. Real 4-bit formats add a little for their scales (about 4.1 to 4.5 bits per weight), and serving also needs room for the KV cache and activations.</p>
+<p>So a 70B model in bf16 needs two 80 GB GPUs just to hold the weights, while in int4 it fits on one with room to spare. That's the <strong>memory</strong> win.</p>
+<p>The <strong>speed</strong> win is less obvious. When a model generates text for one user, each new token needs one pass through the network, and every weight must be read from GPU memory once. The arithmetic per weight is tiny, so the GPU spends most of its time <em>waiting for bytes</em>. An H100 SXM reads about 3.35 TB/s from its memory, which gives a ceiling of:</p>
+$$\text{tokens/s} \;\lesssim\; \frac{\text{memory bandwidth}}{\text{bytes of weights}} = \frac{3.35\ \text{TB/s}}{14\ \text{GB}} \approx 240 \quad(\text{7B in bf16})$$
+<p>In int4 the weights are 3.5 GB, so the ceiling rises to about 960 tokens/s. Real systems reach only part of this, but the ratio holds: <strong>fewer bytes per weight means proportionally faster single-stream decoding</strong>. With large batches the GPU becomes busy with arithmetic instead, which is where 8-bit <em>compute</em> formats help (more in <a href="m5-6.html">M5.6</a>).</p>
+
+<h2>Uniform affine quantization</h2>
+<p>The basic recipe maps a range of real numbers onto a small set of evenly spaced integer <strong>codes</strong>. With $b$ bits there are $2^b$ codes: 16 for 4-bit, 256 for 8-bit.</p>
+$$q = \mathrm{clamp}\!\left(\mathrm{round}\!\left(\frac{x}{s}\right) + z,\; q_{\min},\; q_{\max}\right) \qquad\qquad \hat{x} = s\,(q - z)$$
+<ul>
+  <li>$x$ is the real number (a weight) and $q$ the integer code we store.</li>
+  <li>$s$ is the <strong>scale</strong>: the gap between neighbouring levels, in real units.</li>
+  <li>$z$ is the <strong>zero-point</strong>: the code that stands for exactly $0.0$.</li>
+  <li>$\hat{x}$ ("x-hat") is the <strong>dequantized</strong> value used in the computation. $x - \hat{x}$ is the rounding error, at most $s/2$ inside the range.</li>
+</ul>
+<p>For the <strong>asymmetric</strong> (affine) version with codes $0 \ldots 2^b - 1$, fit the grid to the data: $s = \dfrac{x_{\max} - x_{\min}}{2^b - 1}$ and $z = -\mathrm{round}(x_{\min}/s)$. The <strong>symmetric</strong> version sets $z = 0$ and $s = \max|x| / (2^{b-1} - 1)$, using codes $-127 \ldots 127$ for int8. It wastes a little range when the data is lopsided, but it's simpler and faster, so it's the usual choice for weights, which are roughly centred on zero.</p>
+
+<figure class="anim wide" data-anim="m5-1-quantize"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-quantization-crayons.webp" alt="A huge box of crayons beside a small box of just a few, and a child drawing nearly the same picture with the small box." width="1200" height="900" loading="lazy">
+    <div>
+      <p>The giant crayon box has hundreds of colours: three slightly different blues, five greens. The small box has only a few.</p>
+      <p>If you draw the same picture with the small box, you pick the <strong>closest crayon</strong> for every colour. Up close it's a tiny bit different, but from across the room it looks <strong>nearly the same</strong>, and the small box fits in your pocket.</p>
+      <p>Where the analogy breaks: a model doesn't just look at the picture. Its tiny colour errors add up through dozens of layers, so a few weights need extra care.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>Quantize $x = [-1.20,\ -0.35,\ 0.00,\ 0.47,\ 1.80]$ to asymmetric 4-bit (codes 0 to 15).</p>
+<ol class="steps">
+  <li><strong>Scale:</strong> $s = (1.80 - (-1.20)) / 15 = 3.00 / 15 = 0.20$.</li>
+  <li><strong>Zero-point:</strong> $z = -\mathrm{round}(-1.20 / 0.20) = -(-6) = 6$.</li>
+  <li><strong>Codes:</strong> $x/s = [-6,\ -1.75,\ 0,\ 2.35,\ 9]$. Round and add 6: $q = [0,\ 4,\ 6,\ 8,\ 15]$.</li>
+  <li><strong>Dequantize:</strong> $\hat{x} = 0.2\,(q - 6) = [-1.20,\ -0.40,\ 0.00,\ 0.40,\ 1.80]$.</li>
+  <li><strong>Errors:</strong> $0,\ 0.05,\ 0,\ 0.07,\ 0$, all below $s/2 = 0.10$. Zero came back exactly, which matters: zeros from padding or ReLU-style activations stay zero.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>First a memory check, then a quantization with range $[-0.60,\ 2.40]$ and 4-bit codes 0 to 15. Quantize $x = 1.13$.</p>
+  <ol class="steps">
+    <li>A 13B model in int4, ignoring scales, needs <span class="blank" data-answer="6.5" data-tol="0.05" data-hint="int4 is half a byte per parameter: 13 × 0.5."></span> GB.</li>
+    <li>Scale $s =$ <span class="blank" data-answer="0.2" data-tol="0.001" data-hint="(2.40 − (−0.60)) / 15."></span></li>
+    <li>Zero-point $z =$ <span class="blank" data-answer="3" data-tol="0.001" data-hint="−round(−0.60 / 0.20) = −round(−3)."></span></li>
+    <li>Code $q = \mathrm{round}(x/s) + z =$ <span class="blank" data-answer="9" data-tol="0.001" data-hint="1.13 / 0.2 = 5.65, which rounds to 6. Then add z."></span></li>
+    <li>Dequantized $\hat{x} = s\,(q - z) =$ <span class="blank" data-answer="1.2" data-tol="0.001" data-hint="0.2 × (9 − 3)."></span>, so the rounding error is <span class="blank" data-answer="0.07" data-tol="0.002" data-hint="|1.13 − 1.20|."></span></li>
+  </ol>
+</section>
+
+<h2>How many numbers share a scale?</h2>
+<p>Every scale is a compromise for all the numbers that share it: one big value forces a coarse grid on everyone else. So the main design choice is the <strong>granularity</strong>:</p>
+<ul>
+  <li><strong>Per-tensor:</strong> one scale for the whole weight matrix. Cheapest, but the largest weight anywhere sets the grid for millions of others.</li>
+  <li><strong>Per-channel:</strong> one scale per output row of the matrix. Rows can differ a lot in size, so this is much better and still nearly free. It's the standard for int8 weights.</li>
+  <li><strong>Group-wise:</strong> one scale (and maybe a zero-point) per block of, say, 32, 64 or 128 consecutive weights. This is what makes 4-bit work. The cost is storage: an fp16 scale per 128 weights adds $16/128 = 0.125$ bits per weight, so "4-bit" is really about 4.125 bits.</li>
+</ul>
+<p>Not every format is integer. <strong>FP8</strong> (E4M3 and E5M2) is a tiny floating-point number, so its levels are dense near zero and sparse far out, a good match for bell-shaped data. QLoRA's <strong>NF4</strong> places its 16 levels at the quantiles of a normal distribution. And recent NVIDIA GPUs (Blackwell) run 4-bit floating-point formats in hardware, <strong>MXFP4</strong> and <strong>NVFP4</strong>, which share one scale per block of 32 or 16 values. OpenAI's gpt-oss models (2025), for example, shipped with their expert weights in MXFP4.</p>
+
+<section class="playground" id="quant-playground" aria-labelledby="qpg">
+  <h3 id="qpg">Playground: how many bits?</h3>
+  <p class="math-note" style="margin:0">512 bell-curve weights, symmetric round-to-nearest. Slide the bits, then add an outlier and switch to per-group scales.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Bits per weight = <output>4</output></span>
+      <input type="range" min="2" max="8" step="1" value="4" aria-describedby="qpg-hint">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Quantization options" style="margin-top:12px">
+    <button type="button" class="chip" data-opt="outlier" aria-pressed="false">Add one outlier</button>
+    <button type="button" class="chip" data-opt="group" aria-pressed="false">Scale per group of 32</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="qpg-hint" style="margin:4px 0 0"></p>
+</section>
+
+<h2>The outlier problem</h2>
+<p>Weights are mostly well behaved. <strong>Activations</strong>, the numbers flowing between layers, are not. Dettmers et al. (2022, "LLM.int8()") found that in transformers from about 6.7B parameters up, a handful of hidden dimensions carry values up to around 20 times larger than the rest, in almost every layer and token. Quantize those activations to int8 with a shared scale and the ordinary values collapse to a few codes; quality falls apart.</p>
+<p>Their fix, <strong>LLM.int8()</strong>, splits each matrix multiplication in two. The few feature dimensions that contain outliers (magnitude above a threshold of 6) are multiplied in fp16; everything else uses int8 with a separate scale per row and column. More than 99.9% of the values still go through int8, and quality matched the 16-bit model up to 175B parameters. A related trick, <strong>SmoothQuant</strong> (Xiao et al., 2023), divides the troublesome activation channels by a per-channel factor and multiplies the matching weights by the same factor. The product is unchanged, but the outliers move into the weights, which tolerate them better. That makes 8-bit weights <em>and</em> activations (W8A8) practical.</p>
+
+<h2>Weight-only post-training quantization: GPTQ and AWQ</h2>
+<p><strong>Post-training quantization</strong> (PTQ) compresses a finished model with no further training, using at most a small <strong>calibration set</strong> of a few hundred text samples. The simplest PTQ is <strong>round-to-nearest</strong> (RTN), exactly what the animation did. RTN works well at 8 bits but loses noticeably at 4 bits and below. Two widely used methods do better while keeping the "W4A16" setup: 4-bit weights, 16-bit activations, and weights unpacked to 16-bit inside the matmul kernel.</p>
+<ul>
+  <li><strong>GPTQ</strong> (Frantar et al., 2023) quantizes a layer one column at a time. After rounding each column, it adjusts the weights not yet quantized so the layer's output on the calibration data, $\lVert WX - \hat{W}X \rVert^2$, changes as little as possible. It uses second-order information (the matrix $XX^\top$) to decide how. The authors quantized 175B-parameter models to 3–4 bits in about four GPU hours, with small accuracy loss.</li>
+  <li><strong>AWQ</strong> (Lin et al., 2024, "Activation-aware Weight Quantization") starts from the observation that a small fraction of weights, roughly 1%, matter far more than the rest, and that you find them by looking at the <em>activations</em> they multiply, not the weights themselves. Instead of keeping those in 16-bit, AWQ scales up the important input channels before quantizing (and scales the activations down to match), so their relative rounding error shrinks. There's no backpropagation and no weight reconstruction, so it's fast and generalizes well.</li>
+</ul>
+<p>In practice you'll meet these as file formats and flags: GPTQ and AWQ checkpoints in serving engines such as vLLM, FP8 checkpoints on H100-class GPUs, and llama.cpp's GGUF "k-quants" (Q4_K_M and friends) on laptops.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> quantization is usually the first optimization anyone applies to a deployed LLM. A 4-bit 70B model fits on one 80 GB GPU instead of two, an 8B model runs on a laptop, and single-user generation speeds up roughly in proportion to the bytes saved. QLoRA (<a href="m3-7.html">M3.7</a>) uses the same idea for fine-tuning: a frozen 4-bit NF4 base plus small 16-bit adapters.</div>
+
+<h2>Quantization-aware training</h2>
+<p>PTQ asks a model trained in high precision to cope with rounding it never saw. <strong>Quantization-aware training</strong> (QAT) lets the model adapt: during training (or a short fine-tune), the forward pass rounds the weights to the target grid ("fake quantization"), so the loss reflects the quantized model.</p>
+<p>There's a catch. $\mathrm{round}(\cdot)$ is a staircase: its derivative is zero almost everywhere, so backpropagation would get no signal. The standard fix is the <strong>straight-through estimator</strong> (STE): in the backward pass, pretend the rounding was the identity and let the gradient pass through unchanged. QAT costs extra training compute, but it gives the best quality at very low bit-widths. Google, for example, released QAT-trained int4 versions of Gemma 3 in 2025.</p>
+
+<h2>Quantizing the KV cache</h2>
+<p>Weights aren't the only big tensor. The KV cache (<a href="m1-5.html">M1.5</a>) stores a key and a value vector per token, per layer. For a 7B model with 32 layers and 4,096-dimensional keys and values in fp16, that's $2 \times 32 \times 4096 \times 2$ bytes $= 0.5$ MiB per token, or 2 GiB for a single 4,096-token conversation. Long contexts and big batches multiply that, so the cache often limits how many users fit on a GPU.</p>
+<p>Storing the cache in FP8 or int8 halves it; 4-bit or even 2-bit caches have been shown to work with careful grouping. Keys tend to have outlier <em>channels</em>, so methods such as KIVI (Liu et al., 2024) quantize keys per channel and values per token. Paged attention (<a href="m5-4.html">M5.4</a>) manages the same cache from the allocation side.</p>
+
+<h2>Measuring the quality loss</h2>
+<p>Never assume a quantized model is "the same model". Check it:</p>
+<ol class="steps">
+  <li><strong>Perplexity</strong> on held-out text (<a href="m4-1.html">M4.1</a>): cheap, and a good first alarm. But a small rise can hide large damage on specific skills.</li>
+  <li><strong>KL divergence</strong> between the original and quantized model's next-token distributions on the same text: it measures directly how much the predictions moved (llama.cpp's tools report it).</li>
+  <li><strong>Task benchmarks</strong> (<a href="m4-2.html">M4.2</a>), including the hard ones: math, code, long-context retrieval and non-English text are often reported to degrade first.</li>
+  <li><strong>Your own evals</strong> on your own prompts, since that's the traffic that matters.</li>
+</ol>
+<p>Rough rules of thumb, which vary by model and method: 8-bit weights (int8 or FP8) are usually close to lossless; good 4-bit weight-only methods typically cost a little; 3 bits and below degrade clearly, and smaller models suffer more than large ones.</p>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">With W4A16, the GPU unpacks 4-bit weights back to 16-bit before multiplying. So why does single-user generation still get faster?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Generating one token for one user needs very little arithmetic per weight, so the GPU is limited by how fast it can read weights from memory, not by the math. 4-bit weights are a quarter of the bytes of bf16, so each token needs a quarter of the memory traffic; unpacking happens in fast on-chip registers and costs comparatively little.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You quantize a weight matrix to symmetric int8 with one scale for the whole tensor. One weight is 40× larger than every other weight. What happens?</p>
+    <ol class="q-src">
+      <li>Nothing much: int8 has 255 levels, plenty for everyone</li>
+      <li>The scale grows about 40×, so the ordinary weights are squeezed into a few codes near zero and lose most of their precision</li>
+      <li>The outlier is clipped to the largest code, and everything else is exact</li>
+      <li>The quantizer automatically switches that weight to fp16</li>
+    </ol>
+    <div class="q-explain">The scale is set by $\max|w|$, so the big weight stretches the grid for everyone. The ordinary weights then span only about 3 of the 127 positive codes. Per-channel or group-wise scales, or keeping outliers in 16-bit (LLM.int8()), are the fixes. Nothing switches formats automatically.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model uses 4-bit weights with group size 128 and one fp16 scale per group (no zero-point). How many bits per weight does it really store?</p>
+    <ol class="q-src">
+      <li>4.0</li>
+      <li>4.125</li>
+      <li>4.5</li>
+      <li>5.0</li>
+    </ol>
+    <div class="q-explain">Each group of 128 weights carries one 16-bit scale: $16/128 = 0.125$ extra bits, so 4.125 bits per weight. Adding a 16-bit zero-point per group too would make it 4.25.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What is the key idea of AWQ?</p>
+    <ol class="q-src">
+      <li>Fine-tune the whole model with quantization in the loop</li>
+      <li>Keep the largest-magnitude <em>weights</em> in fp16</li>
+      <li>Quantize activations to 4 bits along with the weights</li>
+      <li>Find the important weight channels from <em>activation</em> magnitudes and scale them up before quantizing, so their relative error shrinks</li>
+    </ol>
+    <div class="q-explain">AWQ is post-training and activation-aware: importance comes from the activations a weight multiplies, and protection comes from per-channel scaling rather than mixed precision. Fine-tuning with quantization in the loop is QAT.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In quantization-aware training the forward pass rounds the weights. Why can't plain backpropagation (<a href="p2-3.html">P2.3</a>) train through that rounding without help?</p>
+    <ol class="q-src">
+      <li>Rounding is a staircase whose derivative is 0 almost everywhere, so no gradient would reach the weights; the straight-through estimator treats it as the identity in the backward pass</li>
+      <li>Rounding is too expensive to compute on GPUs</li>
+      <li>Integers cannot be stored in a computation graph</li>
+      <li>The learning rate would have to be exactly zero</li>
+    </ol>
+    <div class="q-explain">Gradient descent needs a useful slope. A step function is flat between jumps, so the chain rule multiplies by zero. The STE passes the incoming gradient straight through, which works well in practice.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Bytes per parameter: fp32 4, bf16 2, int8/fp8 1, int4 0.5. A 70B model is 140 GB in bf16 and about 35 GB in int4.</li>
+    <li>Single-stream decoding is <strong>bandwidth-bound</strong>, so fewer bytes per weight means faster generation, not just less memory.</li>
+    <li>Quantize: $q = \mathrm{round}(x/s) + z$. Dequantize: $\hat{x} = s(q - z)$. The error is at most $s/2$.</li>
+    <li><strong>Outliers</strong> stretch the scale. Finer granularity (per-channel, group-wise), mixed precision (LLM.int8()) and smarter PTQ (GPTQ, AWQ) fight them; QAT lets the model adapt.</li>
+    <li>Always measure: perplexity, KL to the original, hard benchmarks and your own evals.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Python</div>
+    <p>Write symmetric and asymmetric int8/int4 quantizers in NumPy, compare per-tensor, per-channel and group-wise error, watch one outlier wreck a scale, and measure how a quantized matrix changes a matmul's output. About 25 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m5-1-quantization.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m5-1-a","front":"Bytes per parameter for fp32, bf16, int8 and int4? Weight memory of a 70B model in bf16 and int4?","back":"4, 2, 1 and 0.5 bytes. 70B: 140 GB in bf16, about 35 GB in int4 (plus a little for scales)."},
+  {"id":"m5-1-b","front":"Write the affine quantize and dequantize formulas and name each symbol.","back":"$q = \\mathrm{clamp}(\\mathrm{round}(x/s) + z)$, $\\hat{x} = s(q - z)$. $s$ = scale (gap between levels), $z$ = zero-point (the code for 0.0), $q$ = stored integer code. Error ≤ $s/2$ inside the range."},
+  {"id":"m5-1-c","front":"Why does 4-bit quantization speed up single-user generation even when the math runs in 16-bit?","back":"Decoding one token at a time is memory-bandwidth-bound: every weight is read once per token. A quarter of the bytes means roughly a quarter of the memory traffic."},
+  {"id":"m5-1-d","front":"Per-tensor vs per-channel vs group-wise quantization?","back":"One scale for the whole matrix; one per output row; one per block of e.g. 32–128 weights. Finer granularity isolates outliers but stores more scales (fp16 scale per 128 weights adds 0.125 bits/weight)."},
+  {"id":"m5-1-e","front":"What problem does LLM.int8() solve, and how?","back":"Large models have a few activation feature dimensions with huge outliers that wreck int8. LLM.int8() (Dettmers et al., 2022) multiplies those dimensions in fp16 and everything else (over 99.9% of values) in int8."},
+  {"id":"m5-1-f","front":"GPTQ vs AWQ in one line each?","back":"GPTQ (Frantar et al., 2023): quantize column by column, updating the remaining weights with second-order information to keep the layer's output unchanged. AWQ (Lin et al., 2024): find salient channels from activation magnitudes and scale them up before quantizing."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m5-1-quantize.js"></script>
+<script src="../assets/js/anims/m5-1-playground.js"></script>
+</body>
+</html>

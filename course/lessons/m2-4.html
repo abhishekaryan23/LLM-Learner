@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m2-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scaling laws · LLMs, Animated</title>
+<meta name="description" content="Why LLM loss falls as a power law in parameters, data and compute; the Chinchilla rule of about 20 tokens per parameter; C ≈ 6ND; and why modern models train far past it.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Scaling laws</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Pretraining</span></div>
+<p class="lede">Before spending tens of millions of dollars on one training run, labs want to know what they'll get. Remarkably, they can predict it: the loss falls along smooth <strong>power laws</strong> in model size, data and compute. This lesson shows those laws, the <strong>Chinchilla</strong> rule for splitting a budget, and why today's models deliberately break it.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what a power law is and why it looks like a straight line on log-log axes.</li>
+    <li>Use $C \approx 6ND$ and the ~20 tokens-per-parameter rule to size a compute-optimal model.</li>
+    <li>Explain why modern models are trained on far more tokens than "compute-optimal".</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> the "loss" here is the average next-token cross-entropy from <a href="m2-2.html">M2.2</a>, and the tokens come from pipelines like the one in <a href="m2-1.html">M2.1</a>. Logarithms help: $\log_{10}$ of 1,000 is 3.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. The surprise is what makes it stick.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You get 10× more compute for your next model. According to the Chinchilla results, how should you spend it?</p>
+    <ol class="q-src">
+      <li>Make the model 10× bigger, same data</li>
+      <li>Make the model about 3× bigger and train on about 3× more tokens</li>
+      <li>Same model, 10× more tokens</li>
+      <li>It doesn't matter how you split it</li>
+    </ol>
+    <div class="q-explain">Hoffmann et al. (2022) found parameters and tokens should grow roughly equally, each about as $\sqrt{C}$, and $\sqrt{10} \approx 3.2$.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Llama 3 8B was trained on about 15 trillion tokens. Compared with Chinchilla's compute-optimal ratio for an 8B model, that's…</p>
+    <ol class="q-src">
+      <li>About right</li>
+      <li>About half as many tokens</li>
+      <li>Nearly 100× more tokens</li>
+      <li>Impossible; no dataset is that large</li>
+    </ol>
+    <div class="q-explain">Compute-optimal is about $20 \times 8\text{B} = 160\text{B}$ tokens; 15T is about 94× that. It's on purpose, as you'll see at the end.</div>
+  </div>
+</section>
+
+<h2>Loss is predictable</h2>
+<p>Kaplan et al. (2020, "Scaling Laws for Neural Language Models") trained many transformers of different sizes on different amounts of data and found that test loss follows simple <strong>power laws</strong>, across more than seven orders of magnitude. For model size $N$ (with enough data):</p>
+$$L(N) \approx \left(\frac{N_c}{N}\right)^{\alpha_N}, \qquad \alpha_N \approx 0.076$$
+<p>$L$ is the test loss (next-token cross-entropy), $N$ the number of parameters (they counted non-embedding parameters), $N_c$ a fitted constant and $\alpha_N$ the exponent. Similar laws hold for dataset size $D$ (exponent about 0.095) and for compute $C$ (about 0.05).</p>
+<p>Take logs of both sides: $\log L = \alpha_N \log N_c - \alpha_N \log N$. That's a <strong>straight line</strong> on log-log axes with slope $-\alpha_N$. A small exponent means slow but steady gains: doubling $N$ multiplies the loss by $2^{-0.076} \approx 0.95$, about 5% lower, every time you double.</p>
+
+<figure class="anim wide" data-anim="m2-4-scaling"></figure>
+
+<h2>Counting compute: C ≈ 6ND</h2>
+<p>Training FLOPs (floating-point operations) are well approximated by</p>
+$$C \approx 6\,N\,D$$
+<p>$N$ is the number of parameters and $D$ the number of training tokens. The forward pass costs about $2N$ FLOPs per token (each weight does one multiply and one add), and the backward pass about twice that, $4N$, so $6N$ per token in total. It ignores the attention-score term, which is small unless the context is very long compared with the model width.</p>
+
+<h2>Chinchilla: about 20 tokens per parameter</h2>
+<p>Kaplan's fits suggested putting most extra compute into a bigger model. Hoffmann et al. (2022, "Training Compute-Optimal Large Language Models") redid the analysis with three different methods, including the <strong>IsoFLOP</strong> curves in the animation, and found instead that $N$ and $D$ should grow <strong>in equal proportion</strong>:</p>
+$$N_{\text{opt}} \propto C^{0.5}, \qquad D_{\text{opt}} \propto C^{0.5}, \qquad D_{\text{opt}} \approx 20\,N_{\text{opt}}$$
+<p>To test it they trained <strong>Chinchilla</strong>, 70B parameters on 1.4T tokens, with the same compute as their earlier <strong>Gopher</strong> (280B parameters, 300B tokens). Chinchilla, 4× smaller, was better on almost every benchmark (for example about 67.5% vs 60% on MMLU). Many earlier models, GPT-3 included (175B parameters, 300B tokens, under 2 tokens per parameter), had been heavily undertrained. Later work attributes much of the gap between the two papers to how Kaplan's learning-rate schedules and parameter counts were set up.</p>
+<p class="math-note">Hoffmann et al. also fit $L(N, D) = E + \frac{A}{N^{\alpha}} + \frac{B}{D^{\beta}}$: an irreducible loss $E$ plus a term that shrinks with model size and one that shrinks with data. A 2024 replication (Besiroglu et al.) found problems with that particular fit's constants; the ~20 tokens-per-parameter conclusion from the other methods holds up as a rule of thumb.</p>
+
+<h3>Worked example: a compute-optimal 7B model</h3>
+<ol class="steps">
+  <li>Tokens: $D \approx 20 \times 7\times10^{9} = 1.4\times10^{11}$, i.e. 140B tokens.</li>
+  <li>Compute: $C \approx 6 \times 7\times10^{9} \times 1.4\times10^{11} = 5.88\times10^{21}$ FLOPs.</li>
+  <li>An H100 peaks near $10^{15}$ dense BF16 FLOP/s; real training typically achieves something like 30–50% of peak. At 40%, that's about $4\times10^{14}$ FLOP/s.</li>
+  <li>Time: $5.88\times10^{21} / (3.96\times10^{14}) \approx 1.5\times10^{7}$ GPU-seconds, about <strong>4,100 GPU-hours</strong>: under three days on 64 GPUs.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>You have $C = 1.2\times10^{24}$ FLOPs. With $D = 20N$, the budget is $C = 6N \cdot 20N = 120N^2$.</p>
+  <ol class="steps">
+    <li>Compute-optimal parameters, in billions ($N = \sqrt{C/120}$): <span class="blank" data-answer="100" data-tol="1" data-hint="C/120 = 10^22, and √(10^22) = 10^11 = 100 billion."></span></li>
+    <li>Compute-optimal tokens, in trillions: <span class="blank" data-answer="2" data-tol="0.02" data-hint="D = 20N = 20 × 10^11."></span></li>
+    <li>Check a real report: Llama 3 405B saw about 15.6T tokens. $6ND$ in units of $10^{25}$ FLOPs is <span class="blank" data-answer="3.79" data-tol="0.03" data-hint="6 × 405×10^9 × 15.6×10^12 = 6 × 405 × 15.6 × 10^21."></span> (Meta reports about $3.8\times10^{25}$.)</li>
+  </ol>
+</section>
+
+<div class="playground" id="scaling-playground">
+  <h3>Playground: split a compute budget</h3>
+  <p class="math-note" style="margin:0">Choose a budget and a model size; tokens follow from $D = C/6N$. The curve shows how much worse each size does than the best one for that budget (illustrative Chinchilla-style formula, so trust the shape, not the decimals).</p>
+  <div class="chips" role="group" aria-label="Real models" style="margin-top:12px">
+    <button type="button" class="chip" data-c="23.769" data-n="10.845" aria-pressed="false">Chinchilla 70B</button>
+    <button type="button" class="chip" data-c="23.498" data-n="11.243" aria-pressed="false">GPT-3 175B</button>
+    <button type="button" class="chip" data-c="23.857" data-n="9.903" aria-pressed="false">Llama 3 8B</button>
+  </div>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr">
+    <label><span>Compute budget C: <output for="sc-c"></output></span>
+      <input type="range" id="sc-c" min="19" max="26" step="0.001" value="21.769"></label>
+    <label><span>Model size N: <output for="sc-n"></output></span>
+      <input type="range" id="sc-n" min="8" max="12.5" step="0.001" value="9.3"></label>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-scaling-ovens.webp" alt="Bakers with ovens of growing size and matching amounts of flour; a giant oven with a tiny bowl of dough looks wasted." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Bakers have a fixed amount of money to spend on an <strong>oven</strong> (the model) and <strong>flour</strong> (the data). A giant oven with one tiny bowl of dough is a waste: most of the oven sits empty. A tiny oven with a mountain of flour can't bake it all.</p>
+      <p>The smart bakers grow both together: <strong>a bigger oven always comes with more flour</strong>. Chinchilla's recipe says roughly 20 scoops of flour for every unit of oven.</p>
+      <p>Where it breaks: a real bakery also pays for every loaf it <em>sells</em>. If you'll sell millions of loaves, a smaller oven that's cheaper to run can be worth it, even if you need extra flour to make it bake just as well. That's why modern LLMs are "overtrained".</p>
+    </div>
+  </div>
+</details>
+
+<h2>Why modern models train far past "optimal"</h2>
+<p>Chinchilla answers one question: the lowest loss for a fixed <em>training</em> budget. But a deployed model also costs compute every time it answers, roughly $2N$ FLOPs per generated token. If a model will serve trillions of tokens, a smaller model trained on more data can be cheaper overall, even though it took more training compute to reach the same loss (Sardana et al., 2023, "Beyond Chinchilla-Optimal").</p>
+<ul>
+  <li>Llama 2 7B: 2T tokens, about 290 tokens per parameter.</li>
+  <li>Llama 3 8B: about 15T tokens, about 1,900 tokens per parameter. Meta reported its 8B and 70B models were still improving log-linearly at 15T tokens.</li>
+</ul>
+<p>The catch is data: overtraining needs huge amounts of good text, which is one reason the filtering and synthetic-data work in M2.1 matters so much. And some caution: scaling laws predict <em>loss</em>, not specific abilities. Benchmark skills can appear to jump suddenly with scale ("emergent abilities", Wei et al., 2022), though some of those jumps reflect how the benchmarks are scored (Schaeffer et al., 2023). Since 2024, labs also scale <em>inference-time</em> compute, letting reasoning models think longer, as a second axis.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> scaling laws turn a huge bet into an engineering estimate. Labs train a ladder of small models, fit the curves, and extrapolate: OpenAI reported predicting GPT-4's final loss from runs using at most 1/10,000th of its compute. The same fits are used to pick learning rates, batch sizes and data mixtures before committing to the big run. Training compute $C$ then drives the hardware plan in <strong>M2.5</strong>.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What does "compute-optimal" mean in Chinchilla, and why do labs often choose not to be compute-optimal?</p>
+  <div class="model-answer"><strong>Model answer:</strong> For a fixed training budget $C \approx 6ND$, compute-optimal is the split between parameters and tokens that gives the lowest loss, roughly $D \approx 20N$, with both growing like $\sqrt{C}$. Labs often train smaller models on far more tokens because inference cost scales with model size: a smaller, overtrained model is cheaper to serve millions of times, at the price of some extra training compute.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Loss follows $L \propto N^{-0.076}$. What does this look like on a plot of $\log L$ against $\log N$?</p>
+    <ol class="q-src">
+      <li>An exponential curve</li>
+      <li>A U shape</li>
+      <li>A straight line with slope −0.076</li>
+      <li>A horizontal line</li>
+    </ol>
+    <div class="q-explain">$\log L = \text{const} - 0.076 \log N$: linear in $\log N$. That's why scaling-law plots use log-log axes.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Roughly how many FLOPs does it take to train a 1B-parameter model on 20B tokens?</p>
+    <ol class="q-src">
+      <li>$1.2\times10^{20}$</li>
+      <li>$2\times10^{19}$</li>
+      <li>$1.2\times10^{23}$</li>
+      <li>$6\times10^{9}$</li>
+    </ol>
+    <div class="q-explain">$6ND = 6 \times 10^9 \times 2\times10^{10} = 1.2\times10^{20}$. Option B forgets the factor 6; option D forgets the tokens.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why was Chinchilla (70B) able to beat Gopher (280B) with the same training compute?</p>
+    <ol class="q-src">
+      <li>It used a completely different architecture</li>
+      <li>It was fine-tuned on the benchmarks</li>
+      <li>Smaller models are always better</li>
+      <li>Gopher was undertrained: the same compute spent on a 4× smaller model trained on ~4.7× more tokens gave lower loss</li>
+    </ol>
+    <div class="q-explain">Gopher saw about 1 token per parameter; Chinchilla about 20. With the compute-optimal split, the same FLOPs buy a better model.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Linking back to M2.2: the "loss" that scaling laws predict is…</p>
+    <ol class="q-src">
+      <li>Accuracy on a benchmark like MMLU</li>
+      <li>The average next-token cross-entropy on held-out text</li>
+      <li>The number of training steps</li>
+      <li>The gradient norm</li>
+    </ol>
+    <div class="q-explain">It's the same pretraining loss, measured on text the model didn't train on. Benchmark scores relate to it, but less smoothly.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Loss falls as a <strong>power law</strong> in parameters, data and compute: straight lines on log-log axes (Kaplan et al., 2020).</li>
+    <li>Training compute $C \approx 6ND$ FLOPs.</li>
+    <li><strong>Chinchilla</strong> (Hoffmann et al., 2022): grow $N$ and $D$ together, each $\propto \sqrt{C}$, about <strong>20 tokens per parameter</strong>.</li>
+    <li>Deployed models are often trained far past that (Llama 3 8B: ~1,900 tokens/param) because <strong>inference cost</strong> favours smaller models.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Fit a power law to synthetic loss-versus-compute data in log-log space, extrapolate it, and build a Chinchilla calculator that sizes a model for any budget. About 20 minutes, NumPy only.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m2-4-scaling-laws.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m2-4-a","front":"What is a power law, and how does it look on log-log axes?","back":"$L = (N_c/N)^{\\alpha}$: loss falls by a constant factor each time $N$ is multiplied by a constant. On log-log axes it's a straight line with slope $-\\alpha$."},
+  {"id":"m2-4-b","front":"How many FLOPs does training take, approximately?","back":"$C \\approx 6ND$: about $2N$ per token forward and $4N$ backward, for $N$ parameters and $D$ training tokens."},
+  {"id":"m2-4-c","front":"What is the Chinchilla rule?","back":"For a fixed training budget, grow parameters and tokens together ($N_{opt}, D_{opt} \\propto C^{0.5}$), about 20 tokens per parameter (Hoffmann et al., 2022)."},
+  {"id":"m2-4-d","front":"Compute-optimal size and data for a 7B model?","back":"$D \\approx 20 \\times 7\\text{B} = 140\\text{B}$ tokens; $C \\approx 6 \\times 7\\times10^9 \\times 1.4\\times10^{11} \\approx 5.9\\times10^{21}$ FLOPs."},
+  {"id":"m2-4-e","front":"Why are modern LLMs trained far past Chinchilla-optimal?","back":"Inference costs ~2N FLOPs per token for the model's whole deployed life, so a smaller model trained on many more tokens (e.g. Llama 3 8B on ~15T) can be cheaper overall at similar quality."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m2-4-scaling.js"></script>
+<script src="../assets/js/anims/m2-4-chinchilla-playground.js"></script>
+</body>
+</html>

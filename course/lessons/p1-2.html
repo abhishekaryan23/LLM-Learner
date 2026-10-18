@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p1-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Matrices as transformations · LLMs, Animated</title>
+<meta name="description" content="A matrix is a machine that warps space: matrix-vector products as weighted sums of columns, matrix products as composition, shapes, and why a neural layer is y = Wx + b.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Matrices as transformations</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Math you actually need</span></div>
+<p class="lede">A matrix looks like a spreadsheet of numbers, but the useful way to think of it is as a <strong>machine that moves vectors</strong>: it stretches, rotates and shears space. Almost all the arithmetic inside an LLM is matrices moving vectors.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Multiply a matrix by a vector two ways: as a weighted sum of columns, and as row-by-row dot products.</li>
+    <li>Picture a 2×2 matrix as a warp of the plane, and a matrix product as one warp after another.</li>
+    <li>Check the shapes in a matrix product and explain why a neural-network layer is $y = Wx + b$.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-1.html">Vectors &amp; dot products (P1.1)</a>. You'll need vectors as lists or arrows and the dot product $a\cdot b = \sum_i a_i b_i$.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">$\begin{bmatrix} 2 &amp; 0 \\ 0 &amp; 3 \end{bmatrix}\begin{bmatrix} 1 \\ 1 \end{bmatrix} = \;?$</p>
+    <ol class="q-src">
+      <li>$(5, 0)$</li>
+      <li>$(2, 3)$</li>
+      <li>$(1, 1)$</li>
+      <li>$5$</li>
+    </ol>
+    <div class="q-explain">Row 1 dotted with $(1, 1)$ is $2 \cdot 1 + 0 \cdot 1 = 2$; row 2 gives $0 \cdot 1 + 3 \cdot 1 = 3$. This matrix stretches the x-direction by 2 and the y-direction by 3.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Can you multiply a 3×4 matrix by another 3×4 matrix (in that order)?</p>
+    <ol class="q-src">
+      <li>Yes, the result is 3×4</li>
+      <li>Yes, the result is 9×16</li>
+      <li>No, the inner sizes (4 and 3) don't match</li>
+      <li>Yes, but only if all entries are positive</li>
+    </ol>
+    <div class="q-explain">For $(n \times d)(d' \times k)$ you need $d = d'$: each row of the left matrix is dotted with each column of the right one, and those must have the same length.</div>
+  </div>
+</section>
+
+<h2>A matrix moves vectors</h2>
+<p>An $m \times n$ matrix has $m$ rows and $n$ columns. Multiply it by a vector with $n$ entries and you get a vector with $m$ entries. The rule for entry $i$ of the result:</p>
+$$(Mx)_i = \sum_{j=1}^{n} M_{ij}\, x_j$$
+<p>$M_{ij}$ is the number in row $i$, column $j$, and $x_j$ is the $j$-th entry of $x$. There are two equally true ways to read that sum, and the animation shows both:</p>
+<ul>
+  <li><strong>Rows:</strong> entry $i$ of $Mx$ is the dot product of row $i$ with $x$.</li>
+  <li><strong>Columns:</strong> $Mx$ is a <strong>weighted sum of the columns</strong> of $M$, with the entries of $x$ as the weights.</li>
+</ul>
+
+<figure class="anim wide" data-anim="p1-2-matrix-grid"></figure>
+
+<p>The column view gives you a superpower: <strong>to understand a matrix, look at where it sends the basis arrows.</strong> Column 1 is where $(1, 0)$ lands and column 2 is where $(0, 1)$ lands. Everything else follows, because every vector is a mix of those two.</p>
+<p class="math-note">The determinant $\det\begin{bmatrix} a &amp; b \\ c &amp; d\end{bmatrix} = ad - bc$ is how much the matrix scales areas. It's negative if the warp flips the plane over, and 0 if it squashes the plane onto a line. You won't need it much for LLMs, but it's the "area 3" in the last step.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Draw a grid of squares on a big rubber sheet and pin the middle to the table. Now pull the sheet's edges: stretch it, slant it, turn it. Every square becomes the same slanted shape, and every dot you drew moves along with the sheet.</p>
+    <p>A matrix is a <strong>recipe for one particular pull</strong>. Tell me where two arrows end up and I can tell you where <em>every</em> dot ends up.</p>
+    <p class="math-note">Where it breaks: a rubber sheet can bend into curves, but a matrix can't. Straight grid lines always stay straight and evenly spaced.</p>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>A matrix doesn't have to be square. Here a 3×2 matrix turns a 2-vector into a 3-vector:</p>
+$$\begin{bmatrix} 1 &amp; 2 \\ 0 &amp; 1 \\ 3 &amp; -1 \end{bmatrix}\begin{bmatrix} 2 \\ 1 \end{bmatrix}$$
+<ol class="steps">
+  <li>Columns view: $2 \times (1, 0, 3) + 1 \times (2, 1, -1) = (2, 0, 6) + (2, 1, -1) = (4, 1, 5)$</li>
+  <li>Rows view, as a check: $1\cdot 2 + 2\cdot 1 = 4$, then $0\cdot 2 + 1\cdot 1 = 1$, then $3\cdot 2 + (-1)\cdot 1 = 5$ ✓</li>
+  <li>Shapes: $(3 \times 2)$ times $(2 \times 1)$ gives $(3 \times 1)$, a vector with 3 entries</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<p>Compute $\begin{bmatrix} 3 &amp; 1 \\ -1 &amp; 2 \end{bmatrix}\begin{bmatrix} 2 \\ -1 \end{bmatrix}$.</p>
+<ol class="steps">
+  <li>First entry (row 1 · $x$): <span class="blank" data-answer="5" data-tol="0.001" data-hint="3·2 + 1·(−1)."></span></li>
+  <li>Second entry (row 2 · $x$): <span class="blank" data-answer="-4" data-tol="0.001" data-hint="(−1)·2 + 2·(−1)."></span></li>
+  <li>Check with columns: $2 \times (3, -1) + (-1) \times (1, 2)$. The second entry is $-2 - 2 =$ <span class="blank" data-answer="-4" data-tol="0.001" data-hint="It must match your row answer."></span></li>
+</ol>
+
+<h2>Multiplying matrices = one warp after another</h2>
+<p>If $B$ is one warp and $A$ is another, "do $B$, then do $A$" is itself a warp, and its matrix is the product $AB$:</p>
+$$(AB)\,x = A\,(Bx)$$
+<p>Read it right to left: <strong>the matrix nearest the vector acts first</strong>. To compute $AB$, apply $A$ to each column of $B$. Equivalently, entry $(i, k)$ of $AB$ is row $i$ of $A$ dotted with column $k$ of $B$: $(AB)_{ik} = \sum_j A_{ij} B_{jk}$.</p>
+<p>Order matters. Let $A = \begin{bmatrix} 2 &amp; 0 \\ 0 &amp; 1\end{bmatrix}$ stretch sideways by 2 and $B = \begin{bmatrix} 0 &amp; -1 \\ 1 &amp; 0\end{bmatrix}$ rotate a quarter-turn anticlockwise. Then</p>
+$$AB = \begin{bmatrix} 0 &amp; -2 \\ 1 &amp; 0\end{bmatrix} \qquad\text{but}\qquad BA = \begin{bmatrix} 0 &amp; -1 \\ 2 &amp; 0\end{bmatrix}$$
+<p>Follow $(1, 0)$: rotate-then-stretch sends it up to $(0, 1)$, but stretch-then-rotate sends it to $(0, 2)$. In general $AB \ne BA$.</p>
+
+<h2>Shapes: the inner sizes must match</h2>
+$$\underbrace{(n \times d)}_{A}\;\cdot\;\underbrace{(d \times k)}_{B} \;=\; \underbrace{(n \times k)}_{AB}$$
+<p>The inner sizes ($d$) must agree, because each row of $A$ (length $d$) is dotted with each column of $B$ (length $d$). The outer sizes give the result's shape. That's $n \times k$ dot products of length $d$, so about $n \cdot d \cdot k$ multiply-adds.</p>
+<p>A typical LLM-sized example: 2,048 tokens, each a 4,096-wide vector, stacked as a $2048 \times 4096$ matrix, multiplied by a $4096 \times 4096$ weight matrix. The result is $2048 \times 4096$, one new vector per token, and it costs $2048 \times 4096 \times 4096 \approx 34$ billion multiply-adds. For one weight matrix, in one layer.</p>
+<p>Quick check: how many numbers are in the result of $(32 \times 512)\cdot(512 \times 10)$? <span class="blank" data-answer="320" data-tol="0.5" data-hint="The result is 32 × 10."></span></p>
+
+<h2>A neural-network layer is $y = Wx + b$</h2>
+<p>The basic building block of a neural network, the <strong>linear</strong> (or dense, or fully connected) layer, is exactly this lesson:</p>
+$$y = Wx + b$$
+<ul>
+  <li>$x$ is the input vector, with $d_{\text{in}}$ entries.</li>
+  <li>$W$ is a $d_{\text{out}} \times d_{\text{in}}$ matrix of learned <strong>weights</strong>. Training adjusts these numbers.</li>
+  <li>$b$ is a learned <strong>bias</strong> vector with $d_{\text{out}}$ entries. It shifts the result, so the origin no longer stays put. (Strictly, that makes the layer <em>affine</em> rather than linear.)</li>
+</ul>
+<p>Then a non-linear <strong>activation</strong> function (such as ReLU or GELU) is applied to each entry. That step is essential. Without it, two layers in a row are $W_2(W_1 x) = (W_2 W_1)\,x$: by composition, just <em>one</em> matrix. Stacking 100 linear layers would buy you nothing. The activations are what let depth add power (<a href="p3-1.html">MLPs, P3.1</a>).</p>
+<p class="math-note">In code, inputs usually come as a batch of rows, so PyTorch's <code>nn.Linear(d_in, d_out)</code> stores <code>weight</code> with shape <code>(d_out, d_in)</code> and computes <code>x @ weight.T + bias</code> for <code>x</code> of shape <code>(batch, d_in)</code>. It's the same maths, with the bookkeeping transposed.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> in a transformer, the query, key and value projections, the attention output projection, the two or three matrices of every MLP block and the final layer that scores the vocabulary are all matrix multiplies. They account for the vast majority of the compute, which is why GPUs have dedicated matrix-multiply hardware (tensor cores), and why model sizes and speeds are quoted in terms of these shapes.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why does a neural network need a non-linear activation between its layers? Answer in terms of matrices.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Applying one matrix and then another is the same as applying their product, a single matrix: $W_2(W_1x) = (W_2W_1)x$. Without a non-linearity in between, any stack of linear layers collapses to one linear layer, so the extra depth adds nothing.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What shape is the product of an $8 \times 3$ matrix and a $3 \times 5$ matrix?</p>
+    <ol class="q-src">
+      <li>$3 \times 3$</li>
+      <li>$8 \times 3$</li>
+      <li>It's undefined</li>
+      <li>$8 \times 5$</li>
+    </ol>
+    <div class="q-explain">The inner 3s match and cancel; the outer sizes give $8 \times 5$.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">$M = \begin{bmatrix} 4 &amp; 7 \\ -2 &amp; 5 \end{bmatrix}$. Without multiplying anything out, what is $M\,(0, 1)$?</p>
+    <ol class="q-src">
+      <li>$(7, 5)$, the second column</li>
+      <li>$(-2, 5)$, the second row</li>
+      <li>$(4, -2)$, the first column</li>
+      <li>$12$</li>
+    </ol>
+    <div class="q-explain">$(0, 1)$ is "0 of column 1 plus 1 of column 2", so you get column 2. Columns are where the basis arrows land.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You want to apply matrix $B$ to $x$ first, then matrix $A$. Which do you compute?</p>
+    <ol class="q-src">
+      <li>$BAx$</li>
+      <li>$ABx$</li>
+      <li>$(A + B)x$</li>
+      <li>Either. Order doesn't matter for matrices.</li>
+    </ol>
+    <div class="q-explain">$ABx = A(Bx)$: the matrix nearest the vector acts first. And order does matter: the stretch-and-rotate example gave $AB \ne BA$.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">(From P1.1) Each entry of the vector $Wx$ is…</p>
+    <ol class="q-src">
+      <li>the length of a column of $W$</li>
+      <li>the cosine similarity between $W$ and $x$</li>
+      <li>the dot product of one row of $W$ with $x$</li>
+      <li>an entry of $x$ multiplied by the matching entry of $W$, with no adding</li>
+    </ol>
+    <div class="q-explain">Row $i$ of $W$ dotted with $x$ gives entry $i$. So a layer with 4,096 outputs computes 4,096 dot products, each measuring how well $x$ lines up with one learned row.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>$Mx$ is a <strong>weighted sum of $M$'s columns</strong>, or equivalently row-by-row dot products.</li>
+    <li>A matrix's columns are where the basis arrows land, and that determines the whole warp.</li>
+    <li>$AB$ means "do $B$, then $A$". Order matters.</li>
+    <li>Shapes: $(n\times d)(d\times k) = (n\times k)$, costing about $ndk$ multiply-adds.</li>
+    <li>A layer is $y = Wx + b$ plus a non-linearity. Without the non-linearity, stacked layers collapse into one matrix.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p1-2-a","front":"Give the two ways to read a matrix-vector product $Mx$.","back":"Rows: entry $i$ is (row $i$ of $M$) · $x$. Columns: $Mx = \\sum_j x_j \\cdot (\\text{column } j)$, a weighted sum of the columns."},
+  {"id":"p1-2-b","front":"What do the columns of a matrix tell you, geometrically?","back":"Where the basis vectors land: column $j$ is $M e_j$. Knowing those determines where every vector goes."},
+  {"id":"p1-2-c","front":"What does the product $AB$ do to a vector, and does order matter?","back":"$(AB)x = A(Bx)$: apply $B$ first, then $A$. Order matters; in general $AB \\ne BA$."},
+  {"id":"p1-2-d","front":"Shape rule for $(n \\times d)(d' \\times k)$?","back":"Needs $d = d'$ (inner sizes match). Result is $n \\times k$; about $n\\,d\\,k$ multiply-adds."},
+  {"id":"p1-2-e","front":"Write a neural-network linear layer and give the shape of $W$.","back":"$y = Wx + b$, with $W$ of shape $d_{out} \\times d_{in}$ and bias $b$ of length $d_{out}$, followed by a non-linear activation."},
+  {"id":"p1-2-f","front":"Why do stacked layers need non-linear activations?","back":"Without them $W_2(W_1x) = (W_2W_1)x$: any stack of linear layers collapses into a single matrix, so depth adds nothing."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p1-2-matrix-grid.js"></script>
+</body>
+</html>

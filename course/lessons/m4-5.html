@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m4-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Human eval, pairwise &amp; Elo · LLMs, Animated</title>
+<meta name="description" content="Why human judgement is still the gold standard for LLMs, why it's noisy, and how pairwise votes become Elo and Bradley–Terry ratings on Arena-style leaderboards.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Human eval, pairwise &amp; Elo</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Evaluation</span></div>
+<p class="lede">For an open-ended question there is no answer key. The final judge of "is this a good answer?" is a person. This lesson covers how to ask people well (compare two answers, don't score one), how noisy their answers are, and how thousands of "A beat B" votes become a leaderboard with <strong>Elo</strong> and <strong>Bradley–Terry</strong> ratings.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain why human preference is the gold standard for open-ended quality, why it is noisy, and how to measure that noise.</li>
+    <li>Compute an Elo update by hand, and say why leaderboards now fit Bradley–Terry instead.</li>
+    <li>Read an Arena-style leaderboard: what a rating gap means and when two models are effectively tied.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="m4-2.html">Benchmarks</a> (scores with an answer key) and <a href="m4-4.html">LLM-as-judge</a> (models grading models, checked against humans). The Bradley–Terry model here is the same one behind <a href="m3-2.html">reward models</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Model A's Elo rating is 100 points higher than model B's. How often should A's answer win a head-to-head vote?</p>
+    <ol class="q-src">
+      <li>About 50%: 100 points is nothing</li>
+      <li>About 64%</li>
+      <li>About 90%</li>
+      <li>Every time</li>
+    </ol>
+    <div class="q-explain">Elo maps a 100-point gap to an expected score of $1/(1+10^{-100/400}) \approx 0.64$. It takes about a 400-point gap to reach 10-to-1 odds (≈ 91%).</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Most human evals of chatbots ask "which of these two answers is better?" rather than "rate this answer from 1 to 10". Why?</p>
+    <ol class="q-src">
+      <li>Comparisons are cheaper to store</li>
+      <li>1–10 scores are illegal to collect</li>
+      <li>People are far more consistent at comparing two things than at placing one thing on an absolute scale</li>
+      <li>Pairwise votes need no statistics</li>
+    </ol>
+    <div class="q-explain">One rater's "7" is another's "5", and the same rater drifts over a long session. "Which is better?" removes most of that calibration problem.</div>
+  </div>
+</section>
+
+<h2>Why ask humans at all?</h2>
+<p>A benchmark with an answer key (<a href="m4-2.html">M4.2</a>) can check that $17 \times 23 = 391$. It cannot check whether an email draft sounds right, whether an explanation is pitched at the right level, or whether a refusal was reasonable. For these open-ended tasks the thing we actually care about is <strong>what people prefer</strong>. Every other judge, including the LLM judges of <a href="m4-4.html">M4.4</a>, is trusted only as far as it agrees with careful human ratings.</p>
+<p>But humans are a <strong>noisy, biased instrument</strong>:</p>
+<ul>
+  <li><strong>They disagree.</strong> Taste differs, and many comparisons are genuinely close.</li>
+  <li><strong>They are swayed by surface features.</strong> Longer, more confident, nicely formatted answers tend to win, even when they're not more correct.</li>
+  <li><strong>They can't always verify.</strong> A non-expert can't tell a correct proof or a subtle bug from a plausible-looking wrong one. Specialist domains need specialist raters.</li>
+  <li><strong>They are slow and expensive</strong>, and they get tired. Quality drifts over a long session.</li>
+</ul>
+
+<h2>Absolute ratings vs pairwise preference</h2>
+<p>There are two basic ways to ask. <strong>Absolute rating</strong>: show one answer and ask for a score, say 1–7. <strong>Pairwise preference</strong>: show two answers to the same prompt, side by side and anonymised, and ask which is better (with "tie" as an option).</p>
+<p>Absolute scales suffer from <strong>calibration</strong> problems: each rater uses the scale differently, scores bunch near the top, and drift over time. Pairwise judgements are easier and more consistent, because the other answer acts as the reference point. The price is that you only learn <em>relative</em> quality, and you need many pairs. This is the same reason preference data for RLHF is collected as pairs (<a href="m3-2.html">M3.2</a>).</p>
+
+<h3>How noisy? Measure agreement</h3>
+<p>Give the same pairs to two raters and count how often they agree. Raw agreement flatters you, because two coin-flippers agree 50% of the time on a two-way choice. <strong>Cohen's kappa</strong> (Cohen, 1960) corrects for chance:</p>
+$$\kappa = \frac{p_o - p_e}{1 - p_e}$$
+<p>$p_o$ is the observed agreement rate. $p_e$ is the agreement you'd expect by chance, given how often each rater picks each option. $\kappa = 1$ is perfect agreement and $\kappa = 0$ is no better than chance. If two raters agree on 80% of pairs ($p_o = 0.8$) and each picks A and B equally often ($p_e = 0.5$), then $\kappa = (0.8 - 0.5)/(1 - 0.5) = 0.6$. For more than two raters, Krippendorff's alpha plays the same role.</p>
+<p>Agreement on close calls is lower than people expect. In the MT-Bench study (Zheng et al., 2023), expert human raters agreed with each other on roughly 81% of pairs once ties were set aside, and GPT-4 as a judge agreed with them about as often. Exact figures vary with the task and the rater pool, but the lesson holds: <strong>human agreement is the ceiling</strong>. No judge, human or model, can be expected to "agree with humans" much more than humans agree with each other.</p>
+
+<h2>Elo: turn wins and losses into ratings</h2>
+<p>Pairwise votes give you a pile of "A beat B" results. To rank many models you need one number per model. Chess solved this in the 1960s with Arpad Elo's rating system. Its first step is to <strong>predict</strong> each game from the rating gap:</p>
+$$E_A = \frac{1}{1 + 10^{(R_B - R_A)/400}}$$
+<p>$R_A$ and $R_B$ are the two ratings. $E_A$ is A's <strong>expected score</strong>: its probability of winning, counting a tie as half a win. The constant 400 sets the scale, so a 400-point gap means 10-to-1 odds. After the game, the second step moves each rating by the <strong>surprise</strong>:</p>
+$$R_A \leftarrow R_A + K\,(S_A - E_A)$$
+<p>$S_A$ is A's actual score (1 for a win, ½ for a tie, 0 for a loss), and $K$ is the step size. B gets the mirror-image update, so the points A gains are exactly the points B loses.</p>
+
+<figure class="anim wide" data-anim="m4-5-elo"></figure>
+
+<p class="math-note">If $K$ looks like a learning rate, that's because it is one. Elo's update is one step of stochastic gradient ascent (<a href="p2-2.html">P2.2</a>) on the log-likelihood of a logistic model of who wins.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-elo-ladder.webp" alt="Children playing one-on-one chess while tokens on a wall ladder move up after wins and down after losses." width="1200" height="900" loading="lazy">
+    <div>
+      <p>The kids in a chess club each have a token on a <strong>ladder on the wall</strong>. After every game, the winner's token climbs and the loser's token slides down.</p>
+      <p>Here's the clever part: if a kid near the top beats a kid near the bottom, everyone expected that, so the tokens <strong>barely move</strong>. If the kid near the bottom wins, that's a surprise, so the tokens <strong>jump a lot</strong>.</p>
+      <p>After lots of games, the ladder shows who's strongest.</p>
+      <p><em>Where it breaks:</em> kids get better with practice, so the ladder must keep chasing them. An LLM is frozen once released, so we can use every game ever played at once (that's Bradley–Terry, below).</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>A is rated 1600, B is rated 1500, and $K = 32$.</p>
+<ol class="steps">
+  <li>Expected score: $E_A = 1/(1 + 10^{(1500-1600)/400}) = 1/(1 + 10^{-0.25}) = 1/(1 + 0.562) = 0.640$. So $E_B = 0.360$.</li>
+  <li>If A wins ($S_A = 1$): A gains $32 \times (1 - 0.640) = 11.5$ points, giving 1611.5. B drops to 1488.5.</li>
+  <li>If B wins instead ($S_A = 0$): A loses $32 \times 0.640 = 20.5$ points, giving 1579.5. B rises to 1520.5.</li>
+  <li>The upset moves ratings almost twice as much as the expected result, because there was more to learn from it.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A newcomer A is rated 1500 and plays B, rated 1700. This leaderboard uses $K = 16$. <strong>A wins.</strong></p>
+  <ol class="steps">
+    <li>Rating gap $R_B - R_A =$ <span class="blank" data-answer="200" data-tol="0.5" data-hint="Subtract A's rating from B's."></span></li>
+    <li>A's expected score $E_A$ (two decimals) $=$ <span class="blank" data-answer="0.24" data-tol="0.006" data-hint="1 / (1 + 10^(200/400)) = 1 / (1 + 10^0.5), and 10^0.5 ≈ 3.162."></span></li>
+    <li>Points A gains, $K(S_A - E_A) =$ <span class="blank" data-answer="12.16" data-tol="0.12" data-hint="16 × (1 − 0.24)."></span></li>
+    <li>B's new rating $=$ <span class="blank" data-answer="1687.84" data-tol="0.2" data-hint="B loses exactly what A gains: 1700 − 12.16."></span></li>
+  </ol>
+</section>
+
+<h2>From Elo to Bradley–Terry</h2>
+<p>Elo was built for chess players, whose skill changes over time. So it weights recent games more, and its answer depends on the <strong>order</strong> of the games and on the choice of $K$. A small $K$ reacts slowly. A large $K$ never settles: every vote jolts the ratings. A released model's weights are frozen, so there's no reason to let the 10,000th vote count more than the first.</p>
+<p>The <strong>Bradley–Terry</strong> model (Bradley &amp; Terry, 1952) makes the same prediction as Elo, but fits it once to <em>all</em> the votes. Each model $i$ gets a strength $\beta_i$, and</p>
+$$P(i \text{ beats } j) = \frac{e^{\beta_i}}{e^{\beta_i} + e^{\beta_j}} = \sigma(\beta_i - \beta_j)$$
+<p>$\sigma$ is the logistic sigmoid, $\sigma(z) = 1/(1+e^{-z})$. The strengths are chosen by <strong>maximum likelihood</strong>, making the observed votes as probable as possible. That's just logistic regression, so the result doesn't depend on vote order. To show it on the familiar scale, set $R_i = \tfrac{400}{\ln 10}\,\beta_i + \text{const} \approx 173.7\,\beta_i + \text{const}$. Then $\sigma(\beta_i - \beta_j)$ is exactly Elo's $E$ formula.</p>
+<p>You've met this model before. Training a reward model on pairs where answer $y_w$ was preferred to $y_l$ minimises $-\log \sigma\big(r(x, y_w) - r(x, y_l)\big)$ (<a href="m3-2.html">M3.2</a>). That is the Bradley–Terry loss. A reward model is a BT model whose "strength" is computed from the text of each answer.</p>
+
+<div class="playground" id="elo-playground">
+  <h3>Playground: online Elo vs Bradley–Terry</h3>
+  <p class="math-note" style="margin:0">Model A is truly 100 points stronger, so it wins each battle with probability 0.64. Both start level. Change $K$, draw new battles, or shuffle the same battles into a different order.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Elo step size K = <output>32</output></span>
+      <input type="range" min="4" max="64" step="4" value="32">
+    </label>
+    <div class="pg-buttons">
+      <button type="button" class="btn btn-primary" data-act="new">New battles</button>
+      <button type="button" class="btn" data-act="shuffle">Shuffle order</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0">Try K = 64, then K = 4: big steps never settle, tiny steps take hundreds of battles to arrive. Then press <em>Shuffle order</em> a few times. Elo's final gap jumps around, but the BT line doesn't move, because it only counts wins. BT is not exact either: with 400 votes its 95% confidence interval is roughly ±36 points, which is why leaderboards report intervals.</p>
+</div>
+
+<h2>Arena-style leaderboards</h2>
+<p><strong>Chatbot Arena</strong> (Chiang et al., 2024; now LMArena) turned this into a public leaderboard. A visitor types any prompt, two <strong>anonymous</strong> models answer side by side, and the visitor votes for A, B, a tie, or "both bad". Only after the vote are the model names revealed. The 2024 paper analysed about 240,000 votes, and the live site has collected millions since. The ratings come from a Bradley–Terry fit to all the votes. Arena moved from online Elo to BT in late 2023, for the reasons above.</p>
+<p>Every rating comes with a <strong>95% confidence interval</strong>. A common way to get one is the <strong>bootstrap</strong>: resample the votes with replacement, refit, repeat about a thousand times, and take the middle 95% of each model's ratings. (<a href="m4-6.html">M4.6</a> covers the bootstrap properly.) Ranks are then reported with uncertainty too. A model's rank can be "1 + the number of models that are clearly better", so several models can share rank 1.</p>
+<p>When reading a leaderboard, remember how small most gaps are. A 20-point lead means a 52.9% expected win rate. A 6-point lead means 50.9%, which is a coin flip. If two intervals overlap substantially, treat the models as tied <em>for this population of users and prompts</em>.</p>
+<p>Arena-style evals have real strengths: prompts are fresh and diverse, which makes them hard to memorise (compare <a href="m4-3.html">contamination</a>), and the scale is huge. They also have known weaknesses. Hedge any single number:</p>
+<ul>
+  <li><strong>Who votes and what they ask:</strong> visitors skew toward technical users and English prompts. That may not be your users.</li>
+  <li><strong>Style over substance:</strong> length and markdown formatting win votes. Arena added a "style control" option in 2024 that models these features as extra terms in the regression.</li>
+  <li><strong>Unverified answers:</strong> voters rarely check whether a long technical answer is actually correct.</li>
+  <li><strong>Gaming:</strong> critics argue that testing many private variants and publishing only the best one inflates scores (Singh et al., 2025, "The Leaderboard Illusion"). The organisers dispute parts of this analysis.</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> labs and product teams run their own <strong>side-by-side (SxS)</strong> human evals: a fixed set of prompts that matter to them, a new model against the current one, blind and randomised left/right order. They report a <strong>win rate</strong> with a confidence interval rather than a single number. They track rater agreement to know how much to trust the result. Then they use those human labels to <strong>calibrate an LLM judge</strong> (<a href="m4-4.html">M4.4</a>) that can run on every change, saving scarce human time for the cases where the judge and the humans disagree.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does an upset move Elo ratings more than an expected win? And why do modern leaderboards fit Bradley–Terry to all votes instead of running Elo game by game?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Elo moves ratings by $K(S - E)$, the gap between what happened and what was predicted. An upset is a big surprise, so it causes a big move; an expected win has $E$ near 1, so it barely moves anything. Online Elo depends on the order of games and on $K$, and it favours recent games, which makes sense for improving humans but not for frozen models. Bradley–Terry fits the same win-probability model to every vote at once by maximum likelihood, so the order doesn't matter, and bootstrapping the votes gives confidence intervals.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Two models are both rated 1500. With $K = 32$, model A wins. What is A's new rating?</p>
+    <ol class="q-src">
+      <li>1532</li>
+      <li>1516</li>
+      <li>1508</li>
+      <li>1500: equal ratings mean nothing changes</li>
+    </ol>
+    <div class="q-explain">Equal ratings give $E_A = 0.5$, so A gains $32 \times (1 - 0.5) = 16$. A full $K$ is only gained when the win was considered impossible ($E_A = 0$).</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why did Arena-style leaderboards switch from online Elo to a Bradley–Terry fit?</p>
+    <ol class="q-src">
+      <li>BT needs far fewer votes to rank a newly added model</li>
+      <li>Elo has no way to count tie votes</li>
+      <li>BT ratings use a different, more intuitive scale than Elo</li>
+      <li>Models are frozen, so every vote should count equally, whatever its order</li>
+    </ol>
+    <div class="q-explain">Elo's recency weighting suits players who improve; for static models the order of votes is just noise. The switch wasn't about ties (Elo scores them as ½), vote counts or the scale: BT ratings are shown on the same Elo-like scale.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A leaderboard shows model X at 1287 (95% CI ±7) and model Y at 1281 (95% CI ±8). What's the best reading?</p>
+    <ol class="q-src">
+      <li>They're statistically tied for these users; X's expected win rate over Y is only about 51%</li>
+      <li>X is clearly better, since its rating is higher</li>
+      <li>X wins about 60% of the time</li>
+      <li>Y is better, because its interval is wider</li>
+    </ol>
+    <div class="q-explain">A 6-point gap means $E \approx 0.509$, and the intervals overlap almost completely. The order could easily flip with more votes.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">The Bradley–Terry loss $-\log \sigma(s_w - s_l)$ also appears earlier in the course. Where?</p>
+    <ol class="q-src">
+      <li>The next-token cross-entropy loss used in pretraining</li>
+      <li>The attention softmax</li>
+      <li>Training a reward model on human preference pairs (chosen vs rejected answer)</li>
+      <li>The learning-rate schedule</li>
+    </ol>
+    <div class="q-explain">A reward model scores each answer, and the BT loss pushes the chosen answer's score above the rejected one's. It is exactly the model behind Arena ratings, with strengths computed from the text instead of one number per model.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Human preference is the <strong>gold standard</strong> for open-ended quality, but it's noisy and biased. Measure agreement (e.g. Cohen's $\kappa$), and treat it as the ceiling for any judge.</li>
+    <li>Ask <strong>pairwise</strong> ("which is better?") rather than absolute scores: it's more consistent.</li>
+    <li>Elo: $E_A = 1/(1+10^{(R_B-R_A)/400})$, then $R_A \leftarrow R_A + K(S_A - E_A)$. Ratings move by the surprise.</li>
+    <li><strong>Bradley–Terry</strong> fits the same model to all votes at once (logistic regression). It's what modern leaderboards and reward models use.</li>
+    <li>Always read ratings with their <strong>confidence intervals</strong>. Gaps of a few points are coin flips.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>In about 20 minutes: implement Elo, run it on simulated battles between four models, watch its result change when you shuffle the order, then fit Bradley–Terry by gradient ascent and bootstrap its confidence intervals. Runs free in your browser with numpy.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m4-5-elo-bradley-terry.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m4-5-a","front":"Why are pairwise comparisons preferred to absolute 1–10 ratings for human evals of LLMs?","back":"Raters use absolute scales inconsistently (calibration differs between people and drifts over time). Choosing the better of two answers is easier and more consistent. You get relative, not absolute, quality."},
+  {"id":"m4-5-b","front":"Write Elo's expected score and update rule.","back":"$E_A = 1/(1+10^{(R_B-R_A)/400})$, then $R_A \\leftarrow R_A + K(S_A - E_A)$, with $S_A$ = 1 (win), ½ (tie) or 0 (loss). B gets the mirror update."},
+  {"id":"m4-5-c","front":"A is rated 100 points above B. What is $E_A$, and how many points does A lose (K = 32) if B wins?","back":"$E_A = 1/(1+10^{-0.25}) \\approx 0.64$. A loses $32 \\times 0.64 \\approx 20.5$ points, and B gains the same."},
+  {"id":"m4-5-d","front":"What is the Bradley–Terry model, and why do leaderboards prefer it to online Elo for LLMs?","back":"$P(i \\text{ beats } j) = \\sigma(\\beta_i - \\beta_j)$, fitted to all votes at once by maximum likelihood (logistic regression). It's order-independent and suits frozen models; online Elo depends on vote order and K."},
+  {"id":"m4-5-e","front":"What does Cohen's kappa measure, and what is the formula?","back":"Agreement between two raters beyond chance: $\\kappa = (p_o - p_e)/(1 - p_e)$. E.g. 80% observed agreement with 50% chance agreement gives $\\kappa = 0.6$."},
+  {"id":"m4-5-f","front":"Name three caveats of Arena-style crowd leaderboards.","back":"The voter and prompt mix may not match your users; style effects (length, formatting) sway votes; voters can't verify hard answers; gaps within the confidence intervals are ties; selective submission of private variants can inflate scores."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m4-5-elo.js"></script>
+<script src="../assets/js/anims/m4-5-elo-playground.js"></script>
+</body>
+</html>

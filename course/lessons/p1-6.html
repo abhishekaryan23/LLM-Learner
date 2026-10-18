@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p1-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Entropy, cross-entropy &amp; KL · LLMs, Animated</title>
+<meta name="description" content="Surprise, entropy, cross-entropy (the loss every LLM is trained on) and KL divergence: why it's never negative, why it isn't symmetric, and where it reappears in RLHF and distillation.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Entropy, cross-entropy &amp; KL</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of Math you actually need</span></div>
+<p class="lede">Every LLM is pretrained by minimising one number: <strong>cross-entropy</strong>. This lesson builds it from a single intuitive idea, <em>surprise</em>, and then meets its sibling, the <strong>KL divergence</strong>, which comes back later to keep RLHF on a leash and to teach small models from big ones.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute surprise and entropy, and explain entropy as average surprise.</li>
+    <li>Compute cross-entropy, and explain why it is the LLM training loss.</li>
+    <li>Explain KL divergence as $H(p, q) - H(p)$, why it's never negative and not symmetric, and where it appears in RLHF and distillation.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-5.html">Probability &amp; expectation (P1.5)</a>: distributions, expectation as a weighted average, and log-probabilities. The log rules $\log(ab) = \log a + \log b$ and $\log(1/a) = -\log a$ do most of the work.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which is more <em>surprising</em>: a fair coin landing heads, or a fair die landing on 6?</p>
+    <ol class="q-src">
+      <li>The coin landing heads</li>
+      <li>The die landing on 6</li>
+      <li>They're equally surprising</li>
+      <li>Surprise can't be measured</li>
+    </ol>
+    <div class="q-explain">The die's 6 has probability $\frac16$, less than the coin's $\frac12$, so it's more surprising. Information theory makes this exact: 2.58 bits versus 1 bit.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A model gives the correct next token probability 1. What is its training loss on that token?</p>
+    <ol class="q-src">
+      <li>0</li>
+      <li>1</li>
+      <li>Infinite</li>
+      <li>−1</li>
+    </ol>
+    <div class="q-explain">The loss is $-\log q(\text{correct})$, and $-\log 1 = 0$. As $q(\text{correct})$ falls towards 0, the loss climbs without limit.</div>
+  </div>
+</section>
+
+<h2>Surprise: $-\log p$</h2>
+<p>How surprised should you be when something with probability $p$ happens? Information theory (Shannon, 1948) answers:</p>
+$$\text{surprise}(x) = -\log p(x) = \log \frac{1}{p(x)}$$
+<p>This formula has exactly the properties you'd want:</p>
+<ul>
+  <li>A certain event ($p = 1$) carries zero surprise, and rarer events are more surprising.</li>
+  <li>For independent events, probabilities multiply, so surprises <strong>add</strong>: $-\log(p_1 p_2) = -\log p_1 - \log p_2$. Two coin flips are twice as surprising as one.</li>
+</ul>
+<p>With $\log_2$ the unit is the <strong>bit</strong>: a fair coin flip is 1 bit, a fair die roll $\log_2 6 \approx 2.58$ bits, and a 1-in-100 event $6.64$ bits. With the natural log $\ln$ (what ML code uses) the unit is the <strong>nat</strong>, and 1 nat $\approx 1.44$ bits.</p>
+
+<h2>Entropy: average surprise</h2>
+<p>The <strong>entropy</strong> of a distribution is its expected surprise, the average over outcomes weighted by how often each happens:</p>
+$$H(p) = \sum_x p(x)\,\big(-\log p(x)\big) = \mathbb{E}_{x\sim p}\big[-\log p(x)\big]$$
+<p>It measures unpredictability. A fair coin has 1 bit. A 90/10 coin has only $0.47$ bits, since you're rarely surprised. A uniform choice among $n$ outcomes has the maximum, $\log_2 n$ bits: about 15.6 bits for 50,000 equally likely tokens. Shannon showed it's also the fewest bits per symbol any lossless code can average, which is why compression and language modelling are two sides of one coin.</p>
+
+<figure class="anim wide" data-anim="p1-6-cross-entropy"></figure>
+
+<h2>Cross-entropy: surprise under the wrong beliefs</h2>
+<p>Now suppose outcomes really follow $p$, but you <em>believe</em> $q$ and get surprised accordingly. Your average surprise is the <strong>cross-entropy</strong>:</p>
+$$H(p, q) = \sum_x p(x)\,\big(-\log q(x)\big)$$
+<p>The weights $p(x)$ come from reality (how often each outcome actually happens); the surprise $-\log q(x)$ comes from your model. A key fact, known as Gibbs' inequality: $H(p, q) \ge H(p)$, with equality only when $q = p$. You can't beat the truth at predicting the truth.</p>
+
+<h3>Cross-entropy is the LLM training loss</h3>
+<p>In training, the "truth" at each position is the token that actually came next. That's a <strong>one-hot</strong> $p$: probability 1 on the actual token, 0 elsewhere. Every term of the sum vanishes except one:</p>
+$$H(p, q) = -\log q(\text{actual next token})$$
+<p>Average that over every position in the batch and you have the <strong>pretraining loss</strong>: the mean negative log-likelihood from P1.5. In PyTorch it's <code>F.cross_entropy(logits, targets)</code>, which applies softmax and natural log internally, so the loss is in nats. Its exponential is the <strong>perplexity</strong>: a loss of 2.0 nats means $e^{2} \approx 7.4$, "as unsure as picking uniformly among about 7 tokens".</p>
+
+<h3>Worked example</h3>
+<p>From P1.5, a model gives "mat" probability 0.45 and "roof" 0.06 after "The cat sat on the".</p>
+<ol class="steps">
+  <li>The next token really is "mat": loss $= -\ln 0.45 \approx 0.80$ nats</li>
+  <li>The next token really is "roof": loss $= -\ln 0.06 \approx 2.81$ nats. An unlikely-but-true token costs much more</li>
+  <li>To push the loss down, the model must raise $q$ on whatever really occurs, across millions of examples</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<p>Over three positions, a model gives the actual next tokens probabilities $0.9$, $0.5$ and $0.1$.</p>
+<ol class="steps">
+  <li>Loss on the first token, $-\ln 0.9$: <span class="blank" data-answer="0.105" data-tol="0.003" data-hint="ln 0.9 ≈ −0.105."></span></li>
+  <li>Loss on the third token, $-\ln 0.1$: <span class="blank" data-answer="2.303" data-tol="0.005" data-hint="ln 10 ≈ 2.303."></span></li>
+  <li>Mean loss over all three (the second is $-\ln 0.5 \approx 0.693$): <span class="blank" data-answer="1.034" data-tol="0.005" data-hint="(0.105 + 0.693 + 2.303) / 3."></span></li>
+  <li>Perplexity, $e^{\text{mean loss}}$: <span class="blank" data-answer="2.81" data-tol="0.02" data-hint="e^1.034."></span></li>
+</ol>
+
+<h2>KL divergence: the extra cost of being wrong</h2>
+<p>The gap between cross-entropy and entropy is the <strong>Kullback–Leibler (KL) divergence</strong>:</p>
+$$D_{\mathrm{KL}}(p\,\|\,q) = H(p, q) - H(p) = \sum_x p(x)\,\log\frac{p(x)}{q(x)}$$
+<p>It's the average number of <em>extra</em> bits (or nats) you pay for using $q$ when the truth is $p$. Two properties to remember:</p>
+<ul>
+  <li><strong>Never negative:</strong> $D_{\mathrm{KL}}(p\,\|\,q) \ge 0$, and it's 0 only when $q = p$.</li>
+  <li><strong>Not symmetric:</strong> usually $D_{\mathrm{KL}}(p\,\|\,q) \ne D_{\mathrm{KL}}(q\,\|\,p)$, so it isn't a true distance. With $p = (0.9, 0.1)$ and $q = (0.5, 0.5)$: $D_{\mathrm{KL}}(p\,\|\,q) \approx 0.53$ bits, but $D_{\mathrm{KL}}(q\,\|\,p) \approx 0.74$ bits.</li>
+</ul>
+<p>This explains what training does. For fixed data, $H(p_{\text{data}})$ is a constant the model can't change, so <strong>minimising cross-entropy is the same as minimising</strong> $D_{\mathrm{KL}}(p_{\text{data}}\,\|\,q_{\text{model}})$: pulling the model's distribution towards the data's.</p>
+<p class="math-note">The asymmetry has a personality. $D_{\mathrm{KL}}(p\,\|\,q)$ punishes $q$ hard for giving low probability to anything $p$ does, so minimising it over $q$ tends to <em>cover</em> all of $p$. $D_{\mathrm{KL}}(q\,\|\,p)$ punishes $q$ for putting mass where $p$ has little, so it tends to <em>lock onto</em> one mode. Which direction you minimise is a real design choice, for example in distillation.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-kl-surprise.webp" alt="A child dressed for sun is shocked by rain while a child with an umbrella stays calm and dry." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Two kids head out on a day when it often rains. One is <strong>totally sure</strong> it'll be sunny and wears shorts and sunglasses. The other thinks "maybe rain" and brings an umbrella.</p>
+      <p>It rains. The sunny-sure kid gets a <strong>huge shock</strong>. The umbrella kid barely blinks: they expected it might happen.</p>
+      <p>Cross-entropy is <strong>how shocked you are on average</strong>. KL is the <strong>extra shock</strong> you get because your guess about the weather was wrong. Being sure about the wrong thing costs the most.</p>
+      <p class="math-note">Where it breaks: here only the kid's guess matters. In the maths, how often it really rains matters too, because each shock is weighted by how often that weather actually happens.</p>
+    </div>
+  </div>
+</details>
+
+<div class="playground" id="ce-playground">
+  <h3>Playground: reality versus forecast</h3>
+  <p class="math-note" style="margin:0">Two outcomes, rain or sun. Set how often it really rains ($p$) and what the forecast says ($q$). The blue curve is cross-entropy for every possible forecast; its lowest point is at $q = p$.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Reality: P(rain) = <output data-o="p">0.30</output></span>
+      <input type="range" data-k="p" min="0.01" max="0.99" step="0.01" value="0.3">
+    </label>
+  </div>
+  <div class="pg-controls">
+    <label><span>Forecast: q(rain) = <output data-o="q">0.50</output></span>
+      <input type="range" data-k="q" min="0.01" max="0.99" step="0.01" value="0.5">
+    </label>
+  </div>
+  <div class="chips" role="group" aria-label="Presets" style="margin-top:12px">
+    <button type="button" class="chip" data-p="0.3" data-q="0.3" aria-pressed="false">Perfect forecast</button>
+    <button type="button" class="chip" data-p="0.3" data-q="0.5" aria-pressed="false">Umbrella kid · q = 0.5</button>
+    <button type="button" class="chip" data-p="0.3" data-q="0.01" aria-pressed="false">Sure of sun · q = 0.01</button>
+    <button type="button" class="chip" data-p="0.9" data-q="0.5" aria-pressed="false">Asymmetry · p = 0.9, q = 0.5</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+<p>With rain 30% of the time, the umbrella kid's forecast ($q = 0.5$) costs only 0.12 extra bits on average, while the sure-of-sun forecast ($q = 0.01$) costs 1.12, because each rainy day hits with $-\log_2 0.01 \approx 6.6$ bits of surprise.</p>
+
+<h2>Where KL comes back</h2>
+<ul>
+  <li><strong>RLHF (<a href="m3-3.html">M3.3</a>):</strong> when fine-tuning a model to maximise a learned reward, a penalty $\beta \cdot D_{\mathrm{KL}}(\pi_\theta\,\|\,\pi_{\text{ref}})$ keeps the new policy $\pi_\theta$ close to the reference model $\pi_{\text{ref}}$. Without it, the policy can drift towards odd text that games the reward model instead of genuinely improving. This was used by Ziegler et al. (2019) and InstructGPT (Ouyang et al., 2022). In practice it's estimated per token from $\log \pi_\theta - \log \pi_{\text{ref}}$ on sampled text.</li>
+  <li><strong>Distillation (<a href="m5-2.html">M5.2</a>):</strong> a small "student" model is trained to match a large "teacher's" whole output distribution, not just the one-hot label, by minimising cross-entropy or KL between them (Hinton, Vinyals &amp; Dean, 2015). The teacher's soft probabilities carry far more information per token than a single correct answer.</li>
+</ul>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> the pretraining loss curve every lab plots is cross-entropy in nats per token, and perplexity is its exponential. Because the data's own entropy $H(p)$ is unknown but fixed, the loss can never reach 0 on natural text: there is a floor set by how unpredictable language really is. Scaling-law fits model this floor explicitly as an irreducible term (Hoffmann et al., 2022). The same few formulas then reappear as the KL leash in RLHF and the matching objective in distillation.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why is minimising cross-entropy on training data the same as minimising the KL divergence from the data to the model?</p>
+  <div class="model-answer"><strong>Model answer:</strong> $H(p, q) = H(p) + D_{\mathrm{KL}}(p\,\|\,q)$, and $H(p)$ depends only on the data, not on the model. So anything that lowers the cross-entropy lowers the KL by exactly the same amount.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What is the entropy of a fair four-sided die, in bits?</p>
+    <ol class="q-src">
+      <li>$0.25$</li>
+      <li>$4$</li>
+      <li>$2$</li>
+      <li>$1$</li>
+    </ol>
+    <div class="q-explain">Each outcome has probability $\frac14$ and surprise $\log_2 4 = 2$ bits, so the average is 2 bits. For $n$ equally likely outcomes, $H = \log_2 n$.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">The model gives the actual next token probability 0.25. What is the cross-entropy loss for that position, in nats?</p>
+    <ol class="q-src">
+      <li>$0.25$</li>
+      <li>$\ln 4 \approx 1.39$</li>
+      <li>$2$</li>
+      <li>$0.75$</li>
+    </ol>
+    <div class="q-explain">With a one-hot target, cross-entropy is $-\ln q(\text{actual}) = -\ln 0.25 = \ln 4 \approx 1.39$ nats. (2 is the same loss measured in bits.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which statement about $D_{\mathrm{KL}}(p\,\|\,q)$ is true?</p>
+    <ol class="q-src">
+      <li>It can be negative when $q$ is a better model than $p$</li>
+      <li>It always equals $D_{\mathrm{KL}}(q\,\|\,p)$</li>
+      <li>It equals $H(p) - H(p, q)$</li>
+      <li>It's $\ge 0$, it's 0 only if $q = p$, and in general it differs from $D_{\mathrm{KL}}(q\,\|\,p)$</li>
+    </ol>
+    <div class="q-explain">KL is $H(p, q) - H(p)$ (not the other way round), never negative, zero only at $q = p$, and asymmetric. With $p = (0.9, 0.1)$ and $q = (0.5, 0.5)$, the two directions give 0.53 and 0.74 bits.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">(From P1.5) A training batch has 4 million tokens. Why is the loss an <em>average of $-\log q$</em> over the tokens rather than the product of the $q$'s?</p>
+    <ol class="q-src">
+      <li>The product would underflow to 0; logs turn it into a sum, and averaging makes batches of any size comparable</li>
+      <li>Products of probabilities aren't defined for tokens</li>
+      <li>Averaging makes the loss symmetric</li>
+      <li>The log makes the loss positive, and that's its only purpose</li>
+    </ol>
+    <div class="q-explain">The sequence probability is a product, and logs turn it into a numerically safe sum (P1.5). Dividing by the number of tokens gives a per-token loss you can compare across batches, runs and models.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Surprise</strong> $= -\log p$: 0 for certain events, larger for rare ones, additive for independent ones. Bits use $\log_2$; nats use $\ln$.</li>
+    <li><strong>Entropy</strong> $H(p)$ is average surprise: the floor on how predictable the source is.</li>
+    <li><strong>Cross-entropy</strong> $H(p, q) = \sum_x p(x)(-\log q(x))$. With one-hot targets it's $-\log q(\text{actual token})$: <em>the</em> LLM training loss.</li>
+    <li><strong>KL</strong> $= H(p, q) - H(p) \ge 0$: zero only at $q = p$, and asymmetric.</li>
+    <li>KL reappears as the penalty in RLHF and the matching loss in distillation.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 20 minutes in NumPy: code surprise, entropy, cross-entropy and KL, check that KL is never negative and isn't symmetric on thousands of random distributions, and compute the loss of a toy next-token predictor. Runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p1-6-entropy-kl.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p1-6-a","front":"Define the surprise of an outcome, and its units.","back":"$-\\log p(x)$. With $\\log_2$ it's in bits, with $\\ln$ in nats (1 nat ≈ 1.44 bits). A certain event has surprise 0; for independent events, surprises add."},
+  {"id":"p1-6-b","front":"What is entropy $H(p)$?","back":"Average surprise: $H(p) = \\sum_x p(x)(-\\log p(x))$. Fair coin: 1 bit; uniform over $n$ outcomes: $\\log_2 n$ (the maximum)."},
+  {"id":"p1-6-c","front":"Define cross-entropy $H(p, q)$ and say why it's the LLM loss.","back":"$\\sum_x p(x)(-\\log q(x))$: true frequencies $p$, surprise from the model $q$. With a one-hot target it's $-\\log q(\\text{actual next token})$, averaged over tokens."},
+  {"id":"p1-6-d","front":"Define KL divergence and give its two key properties.","back":"$D_{KL}(p\\|q) = H(p,q) - H(p) = \\sum_x p\\log\\frac{p}{q}$. Always $\\ge 0$ (0 iff $q = p$), and not symmetric."},
+  {"id":"p1-6-e","front":"How are loss and perplexity related?","back":"Perplexity $= e^{\\text{loss}}$ when the loss is mean cross-entropy in nats. Loss 2.0 gives perplexity ≈ 7.4."},
+  {"id":"p1-6-f","front":"Where does KL divergence appear in LLM post-training and compression?","back":"RLHF: a penalty $\\beta\\,D_{KL}(\\pi_\\theta\\|\\pi_{ref})$ keeps the policy near the reference model. Distillation: the student minimises cross-entropy/KL to the teacher's soft distribution (Hinton et al., 2015)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p1-6-cross-entropy.js"></script>
+<script src="../assets/js/anims/p1-6-ce-playground.js"></script>
+</body>
+</html>

@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p1-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gradients · LLMs, Animated</title>
+<meta name="description" content="Partial derivatives, the gradient vector, and why it points straight uphill at right angles to contour lines: the direction gradient descent steps against.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Gradients</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Math you actually need</span></div>
+<p class="lede">A model has millions or billions of adjustable numbers, not one. The <strong>gradient</strong> packs "how does the loss change if I nudge each number?" into a single vector, and that vector has a beautiful property: it points <strong>straight uphill</strong>.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute partial derivatives by holding the other inputs fixed.</li>
+    <li>Assemble the gradient, and explain why it points in the steepest uphill direction, perpendicular to contour lines.</li>
+    <li>Connect the gradient to the gradient-descent update $\theta \leftarrow \theta - \eta\,\nabla L$.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-3.html">Derivatives &amp; the chain rule (P1.3)</a> for slopes, and <a href="p1-1.html">Vectors &amp; dot products (P1.1)</a> for $a\cdot b = \lVert a\rVert\,\lVert b\rVert\cos\theta$, which explains <em>why</em> the gradient is the steepest direction.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">On a hiking map, contour lines join points of equal height. From where you stand, the steepest way uphill is…</p>
+    <ol class="q-src">
+      <li>along the contour line</li>
+      <li>always straight towards the summit</li>
+      <li>at right angles to the contour line</li>
+      <li>at 45° to the contour line</li>
+    </ol>
+    <div class="q-explain">Along a contour you don't climb at all. The steepest climb is at right angles to it, and that's exactly the gradient's direction. (It need not point at the summit; in the last step of the animation, you'll see why that matters.)</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A model has 1 billion parameters. How many numbers are in the gradient of its loss?</p>
+    <ol class="q-src">
+      <li>1 billion, one per parameter</li>
+      <li>1, the total slope</li>
+      <li>2, a direction and a length</li>
+      <li>1 billion squared</li>
+    </ol>
+    <div class="q-explain">The gradient has one entry per input: "how much does the loss change if I nudge <em>this</em> parameter?" (The billion-squared object exists too: it's the Hessian of second derivatives, which is far too big to compute for an LLM.)</div>
+  </div>
+</section>
+
+<h2>Functions of many inputs</h2>
+<p>A model's loss depends on all its parameters at once: $L(\theta_1, \theta_2, \dots, \theta_n)$. We'll build intuition with two inputs, where we can still draw a picture:</p>
+$$f(x, y) = x^2 + 3y^2$$
+<p>Think of $f$ as the height of a landscape above the point $(x, y)$. This one is a bowl with its bottom at $(0, 0)$, steeper in the $y$ direction (because of the 3). We draw it from above like a hiking map: <strong>contour lines</strong> connect points of equal height.</p>
+
+<h2>Partial derivatives: one knob at a time</h2>
+<p>To ask "how does $f$ change with $x$?", freeze every other input and take an ordinary derivative. That's a <strong>partial derivative</strong>, written with a curly $\partial$:</p>
+$$\frac{\partial f}{\partial x} = 2x \qquad \frac{\partial f}{\partial y} = 6y$$
+<p>For $\frac{\partial f}{\partial x}$ the $3y^2$ term is a constant, so its derivative is 0. For $\frac{\partial f}{\partial y}$ the $x^2$ term is the constant. Another example, where the inputs are mixed: for $g(x, y) = x^2 y + y$, we get $\frac{\partial g}{\partial x} = 2xy$ ($y$ is just a constant multiplier) and $\frac{\partial g}{\partial y} = x^2 + 1$.</p>
+
+<h2>The gradient: all the partials in one vector</h2>
+$$\nabla f = \left(\frac{\partial f}{\partial x_1},\ \frac{\partial f}{\partial x_2},\ \dots,\ \frac{\partial f}{\partial x_n}\right)$$
+<p>$\nabla$ is read "nabla" or "grad". It's a vector with one entry per input, and it lives at a point: the gradient changes as you move. Watch it get built at one point:</p>
+
+<figure class="anim wide" data-anim="p1-4-gradient"></figure>
+
+<h3>Why steepest, and why perpendicular?</h3>
+<p>Take a tiny step of length $\varepsilon$ in some direction $u$, a unit vector. Each coordinate moves by $\varepsilon u_i$ and contributes about $\frac{\partial f}{\partial x_i}\,\varepsilon u_i$ to the change in $f$. Adding these up is a dot product:</p>
+$$\Delta f \approx \varepsilon\,(\nabla f \cdot u) = \varepsilon\,\lVert\nabla f\rVert\cos\theta$$
+<p>where $\theta$ is the angle between $u$ and $\nabla f$. The slope in direction $u$, called the <strong>directional derivative</strong>, is $\nabla f \cdot u$. From <a href="p1-1.html">P1.1</a>:</p>
+<ul>
+  <li>It's largest when $u$ points along $\nabla f$ ($\cos\theta = 1$): the gradient is the <strong>steepest ascent</strong> direction, with slope $\lVert\nabla f\rVert$.</li>
+  <li>It's zero when $u \perp \nabla f$: those directions keep $f$ constant, so they run <strong>along the contour</strong>. That's why the gradient is perpendicular to contours.</li>
+  <li>It's most negative for $u$ opposite to $\nabla f$: $-\nabla f$ is <strong>steepest descent</strong>.</li>
+</ul>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>You're standing on a hill in the fog with a magic compass. Instead of pointing north, its needle always points the way that goes <strong>uphill fastest</strong>. And the needle is longer when the hill is steeper.</p>
+    <p>If you walk sideways to the needle, you stay at the same height, like walking around the hill on a flat path. Want to get down fast? Walk the way the needle's tail points.</p>
+    <p class="math-note">Where it breaks: a real compass works anywhere on the map, but this needle only tells the truth right where you're standing. Take a step and you have to look again.</p>
+  </div>
+</details>
+
+<div class="playground" id="grad-playground">
+  <h3>Playground: move the point</h3>
+  <p class="math-note" style="margin:0">Same bowl, $f(x, y) = x^2 + 3y^2$. Drag the sliders or tap the map. The orange arrow is $\nabla f$ (shortened to fit); the solid ellipse is the contour through your point.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>x = <output data-o="x">2</output></span>
+      <input type="range" data-k="x" min="-3" max="3" step="0.1" value="2">
+    </label>
+  </div>
+  <div class="pg-controls">
+    <label><span>y = <output data-o="y">1</output></span>
+      <input type="range" data-k="y" min="-1.6" max="1.6" step="0.1" value="1">
+    </label>
+  </div>
+  <div class="pg-buttons" style="margin-top:12px">
+    <button type="button" class="btn btn-primary" data-act="step">Descent step (η = 0.1)</button>
+    <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+<p>Try several descent steps from $(2, 1)$. The path curves: the steep $y$ direction gets fixed quickly, while $x$ creeps in. Steepest descent heads straight downhill <em>from where you are</em>, not straight at the minimum.</p>
+
+<h3>Worked example</h3>
+<p>At $P = (1, 1)$ on $f = x^2 + 3y^2$, so $\nabla f = (2, 6)$. Compare the slope in three unit directions:</p>
+<ol class="steps">
+  <li>Due east, $u = (1, 0)$: slope $= 2 \cdot 1 + 6 \cdot 0 = 2$</li>
+  <li>$u = (0.6, 0.8)$: slope $= 2 \cdot 0.6 + 6 \cdot 0.8 = 6.0$</li>
+  <li>Along the gradient, $u = (2, 6)/\sqrt{40}$: slope $= \lVert\nabla f\rVert = \sqrt{40} \approx 6.32$, the maximum ✓</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<p>$f(x, y) = 3x^2 + xy$ at the point $(1, 2)$.</p>
+<ol class="steps">
+  <li>$\frac{\partial f}{\partial x} = 6x + y =$ <span class="blank" data-answer="8" data-tol="0.001" data-hint="6·1 + 2."></span></li>
+  <li>$\frac{\partial f}{\partial y} =$ <span class="blank" data-answer="1" data-tol="0.001" data-hint="Hold x fixed: the derivative of x·y with respect to y is x."></span></li>
+  <li>Steepest slope $\lVert\nabla f\rVert$: <span class="blank" data-answer="8.062" data-tol="0.01" data-hint="√(8² + 1²) = √65."></span></li>
+  <li>One gradient-descent step with $\eta = 0.1$. New $x$: <span class="blank" data-answer="0.2" data-tol="0.001" data-hint="x − η · ∂f/∂x = 1 − 0.1 × 8."></span></li>
+</ol>
+
+<h2>From gradient to gradient descent</h2>
+<p>If $\nabla L$ points uphill on the loss landscape, then a small step along $-\nabla L$ lowers the loss as fast as any step of that size can. That's the whole of gradient descent, applied to every parameter at once:</p>
+$$\theta \leftarrow \theta - \eta\,\nabla L(\theta)$$
+<p>$\theta$ holds all the parameters, $\eta$ is the learning rate, and $\nabla L(\theta)$ is the gradient at the current parameters. Lesson <a href="p2-2.html">Gradient descent (P2.2)</a> explores the learning rate and the zig-zag you saw in the playground. The gradient itself, for a network, comes from the chain rule run backwards: <a href="p2-3.html">Backpropagation (P2.3)</a>.</p>
+<p>Keep in mind that the gradient is <strong>local</strong>. It describes the landscape only in a small neighbourhood of the current point. That's why we take small steps and recompute.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> every training step computes a gradient with exactly as many entries as the model has parameters, billions of them, then nudges each parameter against its entry. Gradients are big enough to matter for memory: with the AdamW optimizer you store, per parameter, the weight, its gradient and two running averages. And one number summarises the whole vector: the <strong>gradient norm</strong> $\lVert\nabla L\rVert$. Training runs log it, and many <strong>clip</strong> it (rescale the gradient when its norm exceeds a threshold such as 1.0) to stop a single bad batch from causing a huge step.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why must the gradient be perpendicular to the contour line through a point?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The slope in a direction $u$ is $\nabla f\cdot u$. Along a contour, $f$ doesn't change, so that slope is 0, and a zero dot product means the contour direction is at right angles to $\nabla f$.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">For $f(x, y) = x^2 y$, what is $\frac{\partial f}{\partial x}$?</p>
+    <ol class="q-src">
+      <li>$2x$</li>
+      <li>$2xy$</li>
+      <li>$x^2$</li>
+      <li>$2xy + x^2$</li>
+    </ol>
+    <div class="q-explain">Treat $y$ as a constant multiplier: $\frac{\partial}{\partial x}(x^2 y) = 2x \cdot y$. ($x^2$ is $\frac{\partial f}{\partial y}$, and option D adds the two partials, which isn't a thing.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">At some point, $\nabla f = (3, -4)$. How steep is the steepest uphill direction there?</p>
+    <ol class="q-src">
+      <li>$3$</li>
+      <li>$-1$</li>
+      <li>$7$</li>
+      <li>$5$</li>
+    </ol>
+    <div class="q-explain">The steepest slope is the gradient's length, $\sqrt{3^2 + 4^2} = 5$, in the direction $(3, -4)/5$. The steepest way down is the opposite direction, $(-3, 4)/5$.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">You walk along a contour line of $f$. The directional derivative in your walking direction is…</p>
+    <ol class="q-src">
+      <li>0</li>
+      <li>$\lVert\nabla f\rVert$</li>
+      <li>$-\lVert\nabla f\rVert$</li>
+      <li>it depends on how fast you walk</li>
+    </ol>
+    <div class="q-explain">On a contour, $f$ stays the same, so the rate of change along it is 0. Equivalently, your direction is perpendicular to $\nabla f$, so $\nabla f \cdot u = 0$.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">(Uses P1.1) At $P$, $\nabla f = (2, 6)$. You step a little in the unit direction $u = (-0.6, -0.8)$. What happens to $f$?</p>
+    <ol class="q-src">
+      <li>It goes up, because the gradient is positive</li>
+      <li>Nothing, because you're on a contour</li>
+      <li>It goes down: $\nabla f \cdot u = -1.2 - 4.8 = -6 &lt; 0$</li>
+      <li>You can't tell without $f$'s formula</li>
+    </ol>
+    <div class="q-explain">The sign of the dot product says whether $u$ points with or against the gradient. Here the angle is over 90°, so it's downhill, and nearly as steep as $-\nabla f$ itself ($-6$ vs $-6.32$).</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A <strong>partial derivative</strong> $\frac{\partial f}{\partial x_i}$ is the slope in one input with all the others held fixed.</li>
+    <li>The <strong>gradient</strong> $\nabla f$ stacks them: one entry per input (per parameter, for a model).</li>
+    <li>The slope in direction $u$ is $\nabla f \cdot u$, so $\nabla f$ is the steepest ascent, with steepness $\lVert\nabla f\rVert$.</li>
+    <li>$\nabla f$ is perpendicular to contour lines; $-\nabla f$ is steepest descent.</li>
+    <li>Gradient descent: $\theta \leftarrow \theta - \eta\,\nabla L$, recomputing the (local) gradient each step.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p1-4-a","front":"What is a partial derivative $\\frac{\\partial f}{\\partial x}$?","back":"The derivative of $f$ with respect to $x$ while every other input is held constant. E.g. for $x^2 + 3y^2$ it's $2x$."},
+  {"id":"p1-4-b","front":"What is the gradient $\\nabla f$?","back":"The vector of all partial derivatives $(\\partial f/\\partial x_1, \\dots, \\partial f/\\partial x_n)$: one entry per input, evaluated at a point."},
+  {"id":"p1-4-c","front":"Why does $\\nabla f$ point in the steepest-ascent direction?","back":"The slope in a unit direction $u$ is $\\nabla f\\cdot u = \\lVert\\nabla f\\rVert\\cos\\theta$, which is largest when $u$ is aligned with $\\nabla f$. The steepness is $\\lVert\\nabla f\\rVert$."},
+  {"id":"p1-4-d","front":"How is the gradient related to contour lines?","back":"It's perpendicular to them: along a contour $f$ doesn't change, so $\\nabla f \\cdot u = 0$ there."},
+  {"id":"p1-4-e","front":"How does the gradient give the gradient-descent rule?","back":"$-\\nabla L$ is the steepest downhill direction, so update $\\theta \\leftarrow \\theta - \\eta\\,\\nabla L$ with a small learning rate $\\eta$, recomputing the gradient each step."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p1-4-gradient.js"></script>
+<script src="../assets/js/anims/p1-4-gradient-playground.js"></script>
+</body>
+</html>

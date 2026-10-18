@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m5-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Distillation &amp; pruning · LLMs, Animated</title>
+<meta name="description" content="Make smaller, cheaper models: knowledge distillation with soft targets and temperature, token-level vs sequence-level distillation for LLMs, and unstructured, 2:4 and structured pruning.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Distillation &amp; pruning</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Optimization</span></div>
+<p class="lede">Quantization keeps the model and shrinks its numbers. This lesson covers the other two classic ways to get a cheaper model: <strong>teach a small model to imitate a big one</strong> (distillation) and <strong>cut out the weights that barely matter</strong> (pruning).</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Write the distillation loss with a temperature, and explain what soft targets teach that hard labels can't.</li>
+    <li>Choose between token-level and sequence-level distillation for an LLM.</li>
+    <li>Compare unstructured, 2:4 and structured pruning by accuracy and by real speed-up on a GPU.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> KL divergence and cross-entropy from <a href="p1-6.html">P1.6 Entropy, cross-entropy &amp; KL</a>, the softmax from <a href="p3-2.html">P3.2 Softmax</a>, supervised fine-tuning from <a href="m3-1.html">M3.1 SFT &amp; instruction tuning</a>, and the memory-and-speed thinking from <a href="m5-1.html">M5.1 Quantization</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">For the next word after “The pet that purrs is a …”, a big model predicts <em>cat 0.90, kitten 0.09, car 0.01</em>. What does this tell a small model that the plain label “cat” doesn't?</p>
+    <ol class="q-src">
+      <li>Nothing useful: only the top answer matters</li>
+      <li>That the big model is unsure, so the example should be skipped</li>
+      <li>Which wrong answers are nearly right (kitten) and which are absurd (car)</li>
+      <li>The correct spelling of “cat”</li>
+    </ol>
+    <div class="q-explain">The full distribution encodes how the teacher <em>ranks</em> every option. Hinton et al. called it <strong>dark knowledge</strong>, and it's what distillation transfers.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You set 50% of a model's weights to zero, at scattered positions, and run it with the usual dense GPU matrix multiply. Roughly how much faster is it?</p>
+    <ol class="q-src">
+      <li>About 2× faster, since half the work is gone</li>
+      <li>About the same speed: a dense kernel multiplies the zeros too</li>
+      <li>About 4× faster</li>
+      <li>It won't run at all</li>
+    </ol>
+    <div class="q-explain">A dense kernel doesn't know which entries are zero, so it does the same work. Speed-ups need sparsity the hardware understands (like 2:4) or a smaller matrix (structured pruning).</div>
+  </div>
+</section>
+
+<h2>Knowledge distillation: learn from the teacher's probabilities</h2>
+<p>In <strong>knowledge distillation</strong> (Hinton, Vinyals &amp; Dean, 2015, “Distilling the Knowledge in a Neural Network”), a large trained <strong>teacher</strong> supervises a smaller <strong>student</strong>. Instead of training only on hard labels, the student learns to match the teacher's whole output distribution, its <strong>soft targets</strong>.</p>
+<p>A confident teacher puts nearly everything on one answer, which hides the interesting part. So both models' logits are first divided by a <strong>temperature</strong> $T$:</p>
+$$p_i^{(T)} = \frac{\exp(z_i / T)}{\sum_j \exp(z_j / T)}$$
+<p>$z_i$ is the logit for class (or token) $i$. $T = 1$ is the ordinary softmax; $T &gt; 1$ flattens the distribution so small probabilities become visible; very large $T$ makes it uniform and erases everything. The training loss mixes the usual label loss with a term that pulls the student toward the teacher:</p>
+$$\mathcal{L} = \alpha\,\mathrm{CE}\big(y,\ p_S^{(1)}\big) + (1-\alpha)\,T^2\,\mathrm{KL}\big(p_T^{(T)} \,\big\|\, p_S^{(T)}\big)$$
+<ul>
+  <li>$p_T$ and $p_S$ are the teacher's and the student's distributions; the superscript is the temperature used.</li>
+  <li>$\mathrm{CE}(y, \cdot)$ is the ordinary cross-entropy against the hard label $y$, and $\alpha$ (between 0 and 1) sets the mix.</li>
+  <li>$\mathrm{KL}(p_T \,\|\, p_S)$ is the KL divergence from <a href="p1-6.html">P1.6</a>: zero only when the student matches the teacher exactly.</li>
+  <li>$T^2$ compensates for the fact that the soft term's gradients shrink like $1/T^2$, so the two terms stay balanced when you change $T$.</li>
+</ul>
+
+<figure class="anim wide" data-anim="m5-2-distill"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-distillation-owls.webp" alt="A wise owl with a huge bookshelf hands a small notebook of key notes to a young owl." width="1200" height="900" loading="lazy">
+    <div>
+      <p>The wise old owl has read a whole wall of books. The young owl can't carry all those books around.</p>
+      <p>So the old owl writes a <strong>small notebook</strong>: not just the answers, but hints like “this one is <em>almost</em> right, that one is silly”. The young owl studies the notebook and ends up answering <strong>nearly as well</strong>, with a much smaller bag.</p>
+      <p>Where the analogy breaks: the teacher model doesn't write a summary. The student learns by matching the teacher's probabilities on many examples, one prediction at a time.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>Teacher logits for (cat, kitten, car) are $z = [4,\ 2,\ 0]$.</p>
+<ol class="steps">
+  <li><strong>$T = 1$:</strong> $e^4 \approx 54.6$, $e^2 \approx 7.39$, $e^0 = 1$, sum $\approx 63.0$, so $p = [0.867,\ 0.117,\ 0.016]$. Car is almost invisible.</li>
+  <li><strong>$T = 2$:</strong> $z/T = [2,\ 1,\ 0]$, so $e^2 \approx 7.39$, $e^1 \approx 2.72$, $e^0 = 1$, sum $\approx 11.1$ and $p = [0.665,\ 0.245,\ 0.090]$.</li>
+  <li>The ranking is unchanged, but the gaps shrink, so the student now gets a clear signal that kitten is a far better guess than car.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same logits $z = [4,\ 2,\ 0]$, now with $T = 4$.</p>
+  <ol class="steps">
+    <li>Scaled logit for kitten, $z_2 / T =$ <span class="blank" data-answer="0.5" data-tol="0.001" data-hint="2 divided by 4."></span></li>
+    <li>$p(\text{kitten}) =$ <span class="blank" data-answer="0.307" data-tol="0.005" data-hint="e^1 ≈ 2.718, e^0.5 ≈ 1.649, e^0 = 1. Divide 1.649 by their sum."></span></li>
+    <li>$p(\text{cat}) =$ <span class="blank" data-answer="0.506" data-tol="0.005" data-hint="2.718 divided by the same sum, about 5.367."></span></li>
+    <li>The factor in front of the KL term is $T^2 =$ <span class="blank" data-answer="16" data-tol="0.001" data-hint="4 squared."></span></li>
+  </ol>
+</section>
+
+<h2>Distilling LLMs: token-level or sequence-level</h2>
+<p>For a language model, every next-token prediction is a classification over the whole vocabulary, so there are two natural ways to distill:</p>
+<ul>
+  <li><strong>Token-level (logit) distillation:</strong> at every position, minimize the KL between the teacher's and the student's next-token distributions. It's the richest signal, but it needs the teacher's logits and the <em>same tokenizer</em>. Storing full logits for 100k+ tokens per position is huge, so pipelines often keep only the top few or compute them on the fly. Google trained Gemma 2's 2B and 9B models this way (Gemma Team, 2024), and Meta used logits from Llama 3.1 8B and 70B as targets for Llama 3.2 1B and 3B.</li>
+  <li><strong>Sequence-level distillation</strong> (Kim &amp; Rush, 2016): let the teacher <em>generate</em> outputs, then fine-tune the student on that text with ordinary SFT cross-entropy (<a href="m3-1.html">M3.1</a>). It needs only text, so it works across tokenizers and through an API. DeepSeek-R1 (DeepSeek-AI, 2025) fine-tuned smaller Qwen and Llama models on about 800k samples generated with R1, and the distilled 32B model clearly beat the same base model trained with large-scale RL on its own. Much “synthetic data” instruction tuning is sequence-level distillation under another name.</li>
+</ul>
+<p>A third variant, <strong>on-policy distillation</strong>, lets the student generate and has the teacher score each of the student's tokens (for example GKD, Agarwal et al., 2024). The student then learns from its own mistakes rather than only from the teacher's perfect text. Results vary by task. One practical warning: many model providers' terms forbid using their outputs to train competing models, so check before distilling from an API.</p>
+
+<h2>Pruning: remove what barely matters</h2>
+<p>Trained networks have many weights that contribute little. <strong>Pruning</strong> sets them to zero. The question is which ones, and in what pattern, because the pattern decides whether the hardware gets any faster.</p>
+<ul>
+  <li><strong>Unstructured, magnitude pruning</strong> (e.g. Han et al., 2015): zero the weights with the smallest $|w|$, wherever they are. It keeps accuracy best for a given sparsity, but the zeros are scattered, so GPUs get little or no speed-up without special sparse kernels.</li>
+  <li><strong>2:4 semi-structured sparsity:</strong> in every group of 4 consecutive weights, at most 2 are non-zero. NVIDIA GPUs since Ampere (A100) have Sparse Tensor Cores that skip the zeros, for up to 2× faster matrix multiplies. End-to-end gains are smaller, since attention, memory traffic and other work don't speed up.</li>
+  <li><strong>Structured pruning:</strong> remove whole units, such as attention heads, MLP neurons, channels or entire layers. The result is a smaller <em>dense</em> model that is faster everywhere, but each cut removes more, so accuracy drops more and is usually recovered with further training or distillation.</li>
+</ul>
+
+<figure class="anim wide" data-anim="m5-2-sparsity"></figure>
+
+<p>At LLM scale, retraining after pruning is expensive, so <strong>one-shot</strong> methods became popular. <strong>SparseGPT</strong> (Frantar &amp; Alistarh, 2023) pruned 175B-parameter models to 50–60% unstructured sparsity in a few hours, with only a small rise in perplexity and no retraining; like GPTQ, it updates the remaining weights to compensate. <strong>Wanda</strong> (Sun et al., 2024) is even simpler: score each weight by $|w|$ times the size of the input activation it multiplies, drop the lowest per output row, and don't update anything. It's reported to come close to SparseGPT at 50% sparsity. Both lose more at 2:4 or higher sparsity, on smaller models, and on harder tasks than perplexity alone suggests.</p>
+<p>Structured pruning works best <strong>combined with distillation</strong>. NVIDIA's Minitron (Muralidharan et al., 2024) pruned a 15B model's width and depth down to 8B and 4B and then distilled from the original, using up to 40× fewer training tokens than training those sizes from scratch. Llama 3.2 1B and 3B were also made by pruning a larger Llama and then distilling.</p>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · 2:4 storage</div>
+  <p>A $4096 \times 4096$ weight matrix in bf16 (16 bits per weight) takes 32 MiB. Work out its 2:4 size.</p>
+  <ol class="steps">
+    <li>Dense bits per group of 4 weights: <span class="blank" data-answer="64" data-tol="0.001" data-hint="4 weights × 16 bits."></span></li>
+    <li>2:4 bits per group: 2 kept values plus a 2-bit index for each $=$ <span class="blank" data-answer="36" data-tol="0.001" data-hint="2 × 16 + 2 × 2."></span></li>
+    <li>So the 2:4 matrix takes about <span class="blank" data-answer="18" data-tol="0.05" data-hint="32 MiB × 36/64."></span> MiB, not 16.</li>
+  </ol>
+</section>
+
+<h2>Trade-offs at a glance</h2>
+<ul>
+  <li><strong>Distillation</strong> gives a genuinely smaller dense model, but costs a real training run, and the student is capped by its own size and the teacher's quality.</li>
+  <li><strong>Unstructured pruning</strong>: best accuracy per zero, little real speed on GPUs.</li>
+  <li><strong>2:4 sparsity</strong>: a real but modest speed-up on supported GPUs; at LLM scale it usually costs noticeable accuracy unless you retrain.</li>
+  <li><strong>Structured pruning</strong>: real speed on any hardware, the largest accuracy hit, so pair it with distillation.</li>
+  <li>They stack: prune, distill, then quantize (<a href="m5-1.html">M5.1</a>).</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> many of the small open models you can download, from 1B to 9B parameters, were trained at least partly by distilling from a bigger sibling, and synthetic data generated by strong models is a standard ingredient of instruction tuning. Pruning is used less often in deployment than quantization, which is cheaper and more predictable, but pruning plus distillation is a proven way to create a family of model sizes without pretraining each one from scratch.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does distillation raise the temperature, and why is the soft loss multiplied by $T^2$?</p>
+  <div class="model-answer"><strong>Model answer:</strong> At $T = 1$ a confident teacher puts almost all its probability on one answer, so the student learns little beyond the label. Dividing logits by $T &gt; 1$ softens the distribution and exposes how the teacher ranks the other options, which is extra signal per example. Softening also scales the soft term's gradients down by about $1/T^2$, so multiplying by $T^2$ keeps it balanced against the hard-label loss.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What happens to the teacher's distribution as you keep increasing the temperature $T$?</p>
+    <ol class="q-src">
+      <li>It gets sharper, until it's one-hot</li>
+      <li>Its ranking of the tokens reverses</li>
+      <li>Nothing: temperature only affects the student</li>
+      <li>It gets flatter; moderate $T$ reveals the ranking of unlikely tokens, but very large $T$ makes it uniform and uninformative</li>
+    </ol>
+    <div class="q-explain">$z/T$ shrinks every gap between logits. The order never changes, but as $T \to \infty$ all probabilities approach $1/n$. Distillation uses a moderate $T$ (often between 1 and about 5).</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which pruning pattern speeds up inference on an ordinary GPU <em>without</em> special sparse hardware or kernels?</p>
+    <ol class="q-src">
+      <li>Unstructured 50% magnitude pruning</li>
+      <li>2:4 sparsity</li>
+      <li>Structured pruning of whole heads, neurons or layers</li>
+      <li>None of them</li>
+    </ol>
+    <div class="q-explain">Structured pruning leaves smaller dense matrices, which any dense kernel runs faster. 2:4 needs Sparse Tensor Cores; scattered zeros need sparse kernels and very high sparsity to pay off.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Training the student to minimize $\mathrm{KL}(p_T \,\|\, p_S)$ is equivalent to minimizing which quantity (see <a href="p1-6.html">P1.6</a>)?</p>
+    <ol class="q-src">
+      <li>The cross-entropy $H(p_T, p_S)$, because $\mathrm{KL} = H(p_T, p_S) - H(p_T)$ and the teacher's entropy doesn't depend on the student</li>
+      <li>The student's own entropy $H(p_S)$</li>
+      <li>The teacher's entropy $H(p_T)$</li>
+      <li>The squared difference of the two models' weights</li>
+    </ol>
+    <div class="q-explain">KL is cross-entropy minus the teacher's entropy, and that entropy is a constant from the student's point of view. So distillation is cross-entropy training with soft targets instead of one-hot labels.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You can only call a strong model through an API that returns text, not probabilities. How do you distill it into your small model?</p>
+    <ol class="q-src">
+      <li>Token-level KL on its logits</li>
+      <li>Sequence-level: generate responses with it, then fine-tune the student on them with ordinary SFT cross-entropy</li>
+      <li>Copy its weights into the student</li>
+      <li>Prune the API model first</li>
+    </ol>
+    <div class="q-explain">Without logits, the teacher's generated text is the only signal, so you do SFT on it (<a href="m3-1.html">M3.1</a>). Check the provider's terms first.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Distillation</strong> trains a small student to match a big teacher's softened distribution: $\alpha\,\mathrm{CE} + (1-\alpha)\,T^2\,\mathrm{KL}(p_T^{(T)} \| p_S^{(T)})$.</li>
+    <li>Soft targets carry <strong>dark knowledge</strong>: how the teacher ranks every wrong answer.</li>
+    <li>For LLMs: <strong>token-level</strong> (needs logits, same tokenizer) or <strong>sequence-level</strong> (SFT on teacher-generated text).</li>
+    <li>Pruning: <strong>unstructured</strong> keeps accuracy but rarely speeds up GPUs; <strong>2:4</strong> gives up to 2× on matmuls with Sparse Tensor Cores; <strong>structured</strong> is fast anywhere but needs recovery training.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m5-2-a","front":"Write the knowledge-distillation loss (Hinton et al., 2015) and name its parts.","back":"$\\alpha\\,\\mathrm{CE}(y, p_S^{(1)}) + (1-\\alpha)\\,T^2\\,\\mathrm{KL}(p_T^{(T)} \\| p_S^{(T)})$: hard-label cross-entropy plus the KL from the teacher's to the student's temperature-softened distributions."},
+  {"id":"m5-2-b","front":"What does the temperature $T$ do in distillation, and why the $T^2$ factor?","back":"Logits are divided by $T$ before the softmax; $T &gt; 1$ softens the distribution and exposes the ranking of unlikely answers (dark knowledge). The soft term's gradients scale like $1/T^2$, so $T^2$ rebalances it."},
+  {"id":"m5-2-c","front":"Token-level vs sequence-level distillation for LLMs?","back":"Token-level: match the teacher's next-token distribution at every position (needs logits and the same tokenizer). Sequence-level (Kim &amp; Rush, 2016): fine-tune on teacher-generated text with SFT; works through an API."},
+  {"id":"m5-2-d","front":"Unstructured vs 2:4 vs structured pruning: speed and accuracy?","back":"Unstructured: best accuracy, little GPU speed-up. 2:4: 2 of every 4 weights kept, up to 2× matmul on Sparse Tensor Cores. Structured: removes heads/neurons/layers, smaller dense model, fast anywhere, biggest accuracy hit."},
+  {"id":"m5-2-e","front":"What do SparseGPT and Wanda do?","back":"One-shot pruning of LLMs without retraining. SparseGPT (Frantar &amp; Alistarh, 2023) updates the remaining weights to compensate; Wanda (Sun et al., 2024) scores weights by |w| × input activation norm and updates nothing."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m5-2-distill.js"></script>
+<script src="../assets/js/anims/m5-2-sparsity.js"></script>
+</body>
+</html>

@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p3-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Softmax · LLMs, Animated</title>
+<meta name="description" content="How an LLM turns raw scores (logits) into next-token probabilities: exponentiate, normalise, subtract the max for stability, and tune the temperature. With a live playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Softmax</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Neural nets → language</span></div>
+<p class="lede">Every time an LLM picks its next token, its last step is a softmax. It turns a list of raw scores into probabilities that are positive and add up to exactly 1. Attention uses the same function to turn scores into weights. Two lines of math, and a few traps worth knowing.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute a softmax by hand, including the stable "subtract the max" version.</li>
+    <li>Explain why adding a constant to every logit changes nothing, and what temperature does.</li>
+    <li>Connect softmax to the cross-entropy training loss and its simple gradient, $p - y$.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p3-1.html">MLPs</a> (the network's last layer produces the scores), <a href="p1-5.html">Probability &amp; expectation</a> (what a distribution is) and <a href="p1-6.html">Entropy, cross-entropy &amp; KL</a> (the loss that softmax feeds). You also met softmax briefly in <a href="m1-1.html">Attention</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take a guess. You'll be able to check it in a minute.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Softmax turns scores $[2, 1]$ into probabilities of about $[0.73, 0.27]$. What does it give for $[102, 101]$?</p>
+    <ol class="q-src">
+      <li>About $[1.00, 0.00]$, because the numbers are huge</li>
+      <li>About $[0.50, 0.50]$, because 102 and 101 are nearly equal</li>
+      <li>Exactly the same, $[0.73, 0.27]$</li>
+      <li>It can't be computed</li>
+    </ol>
+    <div class="q-explain">Softmax only cares about the <em>differences</em> between scores. Both pairs differ by 1, so they give identical probabilities. (Computing $e^{102}$ naively is a problem in low precision, though; we'll fix that.)</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A chatbot's "temperature" setting is lowered from 1 to 0.2. Its answers become…</p>
+    <ol class="q-src">
+      <li>more predictable: it almost always picks its top choice</li>
+      <li>more random and creative</li>
+      <li>shorter</li>
+      <li>no different; temperature only affects speed</li>
+    </ol>
+    <div class="q-explain">Low temperature sharpens the distribution toward the highest-scoring token. High temperature flattens it, so less likely tokens get picked more often.</div>
+  </div>
+</section>
+
+<h2>Scores are not probabilities</h2>
+<p>An LLM's final layer outputs one number per entry in its vocabulary: 50,257 numbers for GPT-2, 128,256 for Llama 3. These are <strong>logits</strong>: raw, unbounded scores where higher means "more likely next". But they can be negative and don't add up to anything in particular, so we can't sample from them directly. We need a function that makes every value positive, makes them sum to 1, and keeps the order (a higher score should still mean a higher probability). Softmax does all three:</p>
+$$\mathrm{softmax}(z)_i = \frac{e^{z_i}}{\sum_{j=1}^{V} e^{z_j}}$$
+<p>$z$ is the vector of logits, $z_i$ the logit of token $i$, and $V$ the vocabulary size. The exponential $e^{z_i}$ makes each value positive (and turns differences in score into <em>ratios</em> of probability). Dividing by the sum over all $V$ tokens, the <strong>normaliser</strong>, makes them add up to 1.</p>
+
+<figure class="anim wide" data-anim="p3-2-softmax"></figure>
+
+<p>The name says what it is: a <strong>soft</strong> version of "arg<strong>max</strong>". A hard argmax would put probability 1 on the top token and 0 everywhere else. Softmax leans toward the top token, but keeps some probability for the rest, and it is smooth, so gradients can flow through it.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-softmax-pie.webp" alt="A pie shared among four children; the loudest cheerer gets the biggest slice and the whole pie is shared." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Four kids share one pie. Each one cheers for it, and the pie is cut according to how loud they cheer.</p>
+      <p>The loudest cheerer gets the biggest slice, and a little extra loudness wins a lot more pie. A quiet kid still gets a small slice, never a negative one. And however loud or quiet the whole group is, <strong>the whole pie gets shared out</strong>, no more and no less.</p>
+      <p><em>Where it breaks:</em> logits can be negative, which a cheer can't. Only how much louder one kid is than the others matters, not how loud they all are.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Only the differences matter</h2>
+<p>Add the same constant $c$ to every logit:</p>
+$$\frac{e^{z_i + c}}{\sum_j e^{z_j + c}} = \frac{e^{c}\,e^{z_i}}{e^{c}\sum_j e^{z_j}} = \frac{e^{z_i}}{\sum_j e^{z_j}}$$
+<p>The $e^c$ cancels, so the output is identical. Softmax only sees how far apart the logits are, never their absolute level.</p>
+<p>That property is a lifesaver in code. In 32-bit floats, $e^{z}$ overflows to infinity once $z$ passes about 88.7; in 16-bit floats (fp16), already at about 11.1. Logits of that size are routine. So every real implementation subtracts the largest logit first:</p>
+$$\mathrm{softmax}(z) = \mathrm{softmax}(z - \max_j z_j)$$
+<p>Now the biggest exponent is $e^0 = 1$ and nothing can overflow. The same trick, called <strong>log-sum-exp</strong>, computes $\log \mathrm{softmax}$ stably, which is why frameworks such as PyTorch take raw logits in their cross-entropy loss instead of probabilities.</p>
+
+<h3>Worked example</h3>
+<p>Logits $z = [2,\ 1,\ 0]$.</p>
+<ol class="steps">
+  <li>Exponentiate: $e^2 \approx 7.389$, $e^1 \approx 2.718$, $e^0 = 1$</li>
+  <li>Sum: $7.389 + 2.718 + 1 = 11.107$</li>
+  <li>Divide: $[7.389,\ 2.718,\ 1] / 11.107 \approx [0.665,\ 0.245,\ 0.090]$, which sums to 1 ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Logits $z = [3,\ 1,\ 1]$. Use the stable recipe.</p>
+  <ol class="steps">
+    <li>Subtract the max. The shifted logit of token 2 is <span class="blank" data-answer="-2" data-tol="0.001" data-hint="1 − 3."></span></li>
+    <li>$e^{-2} \approx$ <span class="blank" data-answer="0.135" data-tol="0.002" data-hint="1 / e² = 1 / 7.389."></span></li>
+    <li>Probability of token 1, $1 / (1 + 2 \times 0.135) \approx$ <span class="blank" data-answer="0.787" data-tol="0.004" data-hint="The top token's shifted exponent is e⁰ = 1. Divide by 1.271."></span></li>
+    <li>If token 1 is the correct next token, the cross-entropy loss $-\ln p_1 \approx$ <span class="blank" data-answer="0.24" data-tol="0.006" data-hint="−ln(0.787). A loss near 0 means the model was confident and right."></span></li>
+  </ol>
+</section>
+
+<h2>Temperature: a preview</h2>
+<p>Divide the logits by a positive number $T$, the <strong>temperature</strong>, before the softmax:</p>
+$$p_i = \frac{e^{z_i / T}}{\sum_j e^{z_j / T}}$$
+<ul>
+  <li>$T = 1$: the model's own distribution.</li>
+  <li>$T &lt; 1$: gaps grow, the distribution gets <strong>sharper</strong>. As $T \to 0$ it approaches a one-hot on the top token (greedy decoding). For $z = [2, 1, 0]$, $T = 0.5$ gives $[0.87,\ 0.12,\ 0.02]$.</li>
+  <li>$T &gt; 1$: gaps shrink, the distribution gets <strong>flatter</strong>. As $T \to \infty$ it approaches uniform. $T = 2$ gives $[0.51,\ 0.31,\ 0.19]$.</li>
+</ul>
+<p>Temperature never changes the <em>order</em> of the tokens, only how strongly the top one is preferred. You'll use it, along with top-k and top-p, when we look at sampling in <a href="m1-5.html">KV cache &amp; sampling</a>.</p>
+
+<div class="playground" id="softmax-playground">
+  <h3>Playground: logits in, probabilities out</h3>
+  <p class="math-note" style="margin:0">Drag the logits and the temperature. Then press "Add 1 to every logit" and watch nothing happen.</p>
+</div>
+
+<h2>Softmax meets cross-entropy</h2>
+<p>During training, the correct next token is known. The loss is the <strong>cross-entropy</strong> from <a href="p1-6.html">P1.6</a>: minus the log of the probability the model gave to the right answer.</p>
+$$\mathcal{L} = -\log p_{\text{target}}$$
+<p>In the animation, if the true next word was "mat" ($p = 0.73$), the loss is $-\ln 0.73 \approx 0.32$. If it was "floor" ($p = 0.16$), the loss is about $1.82$: a bigger surprise costs more.</p>
+<p>Softmax and cross-entropy fit together beautifully. The gradient of the loss with respect to each logit is just</p>
+$$\frac{\partial \mathcal{L}}{\partial z_i} = p_i - y_i$$
+<p>where $y$ is the one-hot vector of the true token (1 for the target, 0 elsewhere). So with target "floor", the gradient is $[0.73,\ 0.16 - 1,\ 0.10,\ 0.01] = [0.73,\ -0.84,\ 0.10,\ 0.01]$. Gradient descent (<a href="p2-2.html">P2.2</a>) subtracts it, which pushes the "floor" logit <em>up</em> and every other logit <em>down</em>, each in proportion to how much probability it wrongly took.</p>
+<p class="math-note">A two-way softmax is the familiar sigmoid: $\mathrm{softmax}([z, 0])_1 = \frac{e^z}{e^z + 1} = \frac{1}{1 + e^{-z}} = \sigma(z)$.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> softmax shows up at every key point. It turns attention scores into weights in every head of every layer (<a href="m1-1.html">M1.1</a>), and turns the final logits into the next-token distribution that both the training loss and sampling use (M2.2, M1.5). Because $e^z$ is so sensitive to large values, softmax is usually computed in 32-bit precision even when the rest of the model runs in 16-bit (M2.5). And "soft" targets from a teacher's temperature-raised softmax are the core of <strong>distillation</strong> (Hinton et al., 2015; M5.2).</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a friend what softmax does, and why code subtracts the largest logit first.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Softmax exponentiates each score and divides by the sum, giving positive numbers that add to 1, with bigger scores getting exponentially more probability. Only differences between scores matter, so subtracting the max gives the same answer while keeping every exponent at most $e^0 = 1$, which prevents overflow.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which logit vector gives the same softmax output as $[1, 2, 3]$?</p>
+    <ol class="q-src">
+      <li>$[2, 4, 6]$</li>
+      <li>$[-2, -1, 0]$</li>
+      <li>$[3, 2, 1]$</li>
+      <li>$[0.1, 0.2, 0.3]$</li>
+    </ol>
+    <div class="q-explain">$[-2, -1, 0]$ is $[1, 2, 3]$ minus 3, so all differences are the same. Doubling (A) is like temperature 0.5 and sharpens the result; dividing by 10 (D) flattens it; (C) reverses the order.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why do implementations compute $\mathrm{softmax}(z - \max z)$?</p>
+    <ol class="q-src">
+      <li>It makes the probabilities sharper</li>
+      <li>It makes them sum to 1</li>
+      <li>It makes training converge faster</li>
+      <li>It gives the identical result while keeping $e^z \le 1$, so large logits can't overflow</li>
+    </ol>
+    <div class="q-explain">Shifting all logits by a constant cancels in the ratio. After the shift the largest exponent is $e^0 = 1$; without it, $e^{z}$ overflows fp32 above $z \approx 88.7$ and fp16 above $z \approx 11.1$.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">As the temperature $T$ goes toward 0, softmax$(z/T)$ approaches…</p>
+    <ol class="q-src">
+      <li>a one-hot vector on the largest logit</li>
+      <li>the uniform distribution</li>
+      <li>the raw logits</li>
+      <li>all zeros</li>
+    </ol>
+    <div class="q-explain">Dividing by a tiny $T$ blows up every gap, so the top token takes essentially all the probability. That's greedy decoding. Large $T$ goes the other way, toward uniform.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">With softmax followed by cross-entropy loss (P1.6), the gradient of the loss with respect to logit $z_i$ is…</p>
+    <ol class="q-src">
+      <li>$-\log p_i$</li>
+      <li>$p_i(1 - p_i)$</li>
+      <li>$p_i - y_i$, where $y$ is the one-hot target</li>
+      <li>always zero for the correct token</li>
+    </ol>
+    <div class="q-explain">The predicted probability minus the target. It's negative for the correct token (so gradient descent raises that logit) and positive for the others, and it vanishes only when the prediction exactly matches the target.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>$\mathrm{softmax}(z)_i = e^{z_i} / \sum_j e^{z_j}$: positive outputs that <strong>sum to 1</strong>, with the order kept.</li>
+    <li>Only <strong>differences</strong> between logits matter. Subtract the max before exponentiating to avoid overflow.</li>
+    <li><strong>Temperature</strong> divides the logits: $T &lt; 1$ sharpens, $T &gt; 1$ flattens, $T \to 0$ is greedy.</li>
+    <li>Training uses $-\log p_{\text{target}}$, whose gradient with respect to the logits is simply $p - y$.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p3-2-a","front":"Write the softmax formula and say what each part does.","back":"$\\mathrm{softmax}(z)_i = e^{z_i} / \\sum_j e^{z_j}$. The exponential makes every value positive; dividing by the sum (the normaliser) makes them add to 1."},
+  {"id":"p3-2-b","front":"What happens to softmax if you add the same constant to every logit? Why?","back":"Nothing: $e^{z_i+c} / \\sum_j e^{z_j+c}$, and the factor $e^c$ cancels. Only differences between logits matter."},
+  {"id":"p3-2-c","front":"How is softmax computed in a numerically stable way?","back":"Subtract the max logit first: $\\mathrm{softmax}(z - \\max z)$. Same result, but the largest exponent is $e^0 = 1$, so nothing overflows (fp32 overflows above $z \\approx 88.7$, fp16 above $\\approx 11.1$)."},
+  {"id":"p3-2-d","front":"What does temperature do to a softmax?","back":"$p = \\mathrm{softmax}(z/T)$. $T < 1$ sharpens (as $T \\to 0$, one-hot on the top token, i.e. greedy), $T > 1$ flattens (toward uniform). The order of tokens never changes."},
+  {"id":"p3-2-e","front":"Softmax + cross-entropy: what is the loss and its gradient with respect to the logits?","back":"Loss $= -\\log p_{\\text{target}}$. Gradient $\\partial \\mathcal{L}/\\partial z_i = p_i - y_i$, with $y$ the one-hot target."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p3-2-softmax.js"></script>
+<script src="../assets/js/anims/p3-2-softmax-playground.js"></script>
+</body>
+</html>

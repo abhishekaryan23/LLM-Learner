@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m1-5">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>KV cache &amp; sampling · LLMs, Animated</title>
+<meta name="description" content="How an LLM actually generates text: the autoregressive loop, why caching keys and values turns quadratic recomputation into linear work, what the cache costs in memory, and how greedy, temperature, top-k and top-p sampling pick the next token.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>KV cache &amp; sampling</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 5 of Transformers</span></div>
+<p class="lede">A trained transformer only ever predicts <em>one</em> next token. Writing a whole answer means running it in a loop. This lesson covers the two things that make that loop work in practice: the <strong>KV cache</strong>, which stops it redoing old work, and <strong>sampling</strong>, which decides which token to actually pick.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain why caching keys and values turns quadratic recomputation into linear work per token.</li>
+    <li>Compute a model's KV-cache memory from its config.</li>
+    <li>Predict what greedy decoding, temperature, top-k and top-p do to the next-token distribution.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> you'll need the generation loop from <a href="m1-4.html">The decoder-only transformer (M1.4)</a>, keys and values from <a href="m1-1.html">Attention (M1.1)</a>, KV heads and GQA from <a href="m1-2.html">Multi-head attention (M1.2)</a>, and <a href="p3-2.html">softmax</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first, then check as you read.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model generates 1,000 tokens one at a time and, at every step, reruns itself on everything so far. Roughly how many token-passes through the model is that?</p>
+    <ol class="q-src">
+      <li>About 1,000</li>
+      <li>About 500,000</li>
+      <li>About 1,000,000,000</li>
+      <li>Exactly 1</li>
+    </ol>
+    <div class="q-explain">Step $t$ processes $t$ tokens, so the total is $1 + 2 + \dots + 1000 \approx 1000^2/2 = 500{,}000$. With a KV cache it's about 1,000.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What happens to sampling as the temperature goes towards 0?</p>
+    <ol class="q-src">
+      <li>Every token becomes equally likely</li>
+      <li>The model stops generating</li>
+      <li>Rare tokens become more likely</li>
+      <li>It always picks the single most likely token (greedy)</li>
+    </ol>
+    <div class="q-explain">Dividing logits by a tiny $T$ blows up the gaps between them, so softmax puts essentially all probability on the top token.</div>
+  </div>
+</section>
+
+<h2>The generation loop</h2>
+<p>Generation is autoregressive: each new token is fed back in as input for the next one.</p>
+<ol class="steps">
+  <li>Run the model on the prompt. Take the logits at the <strong>last</strong> position.</li>
+  <li>Turn them into probabilities and <strong>choose</strong> a token (more on choosing below).</li>
+  <li><strong>Append</strong> it to the sequence. Stop if it's an end-of-sequence token or a length limit is hit; otherwise go back to step 1.</li>
+</ol>
+<p>Done naively, step 1 reprocesses the whole sequence every time. To produce token $t$ you push $t$ tokens through every layer, even though only the last position's output is used. Over $n$ generated tokens that's $1 + 2 + \dots + n \approx n^2/2$ token-passes.</p>
+
+<figure class="anim wide" data-anim="m1-5-kv-cache"></figure>
+
+<h2>The KV cache</h2>
+<p>Here's the key fact: in a causal model, token $i$'s hidden state in every layer depends only on tokens $1 \dots i$. Appending token $i+1$ changes nothing about earlier positions, so their <strong>keys and values in every layer stay exactly the same</strong>. So store them:</p>
+<ul>
+  <li><strong>Prefill:</strong> process the whole prompt in one parallel pass (like training) and save every layer's $K$ and $V$.</li>
+  <li><strong>Decode:</strong> each step feeds in only the newest token. In each layer it computes that token's $q$, $k$, $v$, appends $k$ and $v$ to the cache, and attends with $q$ over all cached keys.</li>
+</ul>
+<p>The MLPs and projections now process one token per step instead of $t$. Attention still reads all $t$ cached keys, so its per-step cost grows with length, but the giant recomputation is gone. Queries are never cached: only the newest token's query is ever needed.</p>
+<p class="math-note">The two phases behave differently on hardware. Prefill does lots of math on many tokens at once (compute-bound). Decode does little math per step but must read the weights and the whole cache from memory every step (memory-bandwidth-bound). Serving metrics like time-to-first-token vs time-per-token come from this split (<a href="m5-6.html">M5.6</a>).</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5: the KV cache</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-kv-cache-notes.webp" alt="A child writing a story glances at a small stack of summary notes on the desk instead of rereading a giant closed book." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You're writing a long story, one word at a time. Before each new word you could <strong>reread the whole giant book</strong> you've written so far. That gets slower with every page.</p>
+      <p>Instead, you keep a <strong>little stack of notes</strong>: one card per word, saying what it was about. For each new word you just glance at the cards, and add one new card.</p>
+      <p>Where it breaks: the stack isn't little. Real models keep one card per word <em>per layer and per KV head</em>, and that pile can outgrow the model itself.</p>
+    </div>
+  </div>
+</details>
+
+<h2>How big is the cache?</h2>
+<p>For every token, each layer stores one key and one value vector per KV head:</p>
+$$\text{KV bytes} = 2 \times L \times n_{\text{kv}} \times d_{\text{head}} \times n_{\text{tokens}} \times b$$
+<ul>
+  <li>$2$: one key and one value.</li>
+  <li>$L$: number of layers. $n_{\text{kv}}$: number of key/value heads (equal to the query heads for standard attention, fewer with GQA or MQA, <a href="m1-2.html">M1.2</a>).</li>
+  <li>$d_{\text{head}}$: size of each head. $n_{\text{tokens}}$: tokens in the sequence. $b$: bytes per number (2 for 16-bit).</li>
+</ul>
+<p>Multiply by the batch size when serving many sequences at once.</p>
+
+<h3>Worked example</h3>
+<p>Llama 2 7B: $L = 32$ layers, 32 KV heads (no GQA), $d_{\text{head}} = 128$, 16-bit numbers, a full 4,096-token context.</p>
+<ol class="steps">
+  <li><strong>Per token:</strong> $2 \times 32 \times 32 \times 128 \times 2 = 524{,}288$ bytes $= 512$ KiB.</li>
+  <li><strong>Per sequence:</strong> $524{,}288 \times 4{,}096 = 2{,}147{,}483{,}648$ bytes $= 2$ GiB.</li>
+  <li><strong>Batch of 16 sequences:</strong> 32 GiB of cache, more than double the ≈13.5 GB of weights. At serving time, memory for the cache, not for the weights, often limits how many users fit on a GPU.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>Llama 3.1 8B: $L = 32$, GQA with $n_{\text{kv}} = 8$ (and 32 query heads), $d_{\text{head}} = 128$, 16-bit.</p>
+  <ol class="steps">
+    <li>KV cache per token, in KiB: <span class="blank" data-answer="128" data-tol="0.5" data-hint="2 × 32 × 8 × 128 × 2 = 131,072 bytes; divide by 1,024."></span></li>
+    <li>For one 8,192-token sequence, in GiB: <span class="blank" data-answer="1" data-tol="0.01" data-hint="128 KiB × 8,192 = 1,048,576 KiB; divide by 1,024² to get GiB."></span></li>
+    <li>At its full 128K (131,072-token) context, in GiB: <span class="blank" data-answer="16" data-tol="0.05" data-hint="16 times as many tokens as 8,192."></span></li>
+    <li>How many times bigger would the cache be with all 32 heads as KV heads? <span class="blank" data-answer="4" data-tol="0.01" data-hint="The cache scales with n_kv: 32 / 8."></span></li>
+  </ol>
+</section>
+
+<p>Because the cache is so large, a lot of serving engineering targets it: <strong>GQA/MQA</strong> shrink $n_{\text{kv}}$, <strong>PagedAttention</strong> stores it in fixed-size blocks to avoid wasted memory (<a href="m5-4.html">M5.4</a>), and caches are often <strong>quantized</strong> to 8 bits or fewer (<a href="m5-1.html">M5.1</a>).</p>
+
+<h2>Choosing the next token</h2>
+<p>The model hands you logits $z_1, \dots, z_V$, one per vocabulary token. How you turn them into a choice, the <strong>decoding strategy</strong>, changes the text a lot.</p>
+<ul>
+  <li><strong>Greedy:</strong> always take the most likely token, $\arg\max_i z_i$. Deterministic and fine for short factual answers, but on open-ended text it tends to get bland and stuck in <strong>repetitive loops</strong>.</li>
+  <li><strong>Sampling:</strong> draw a token at random from the softmax distribution. More varied, but the long tail of individually unlikely tokens adds up, and one bad draw can derail the text.</li>
+</ul>
+<p>Three knobs reshape the distribution before sampling:</p>
+$$p_i = \frac{e^{z_i / T}}{\sum_j e^{z_j / T}}$$
+<ul>
+  <li><strong>Temperature $T$:</strong> divides every logit before the softmax. $T = 1$ leaves the model's distribution unchanged; $T &lt; 1$ sharpens it toward the top token ($T \to 0$ is greedy); $T &gt; 1$ flattens it toward uniform.</li>
+  <li><strong>Top-k</strong> (Fan et al., 2018): keep only the $k$ most likely tokens, set the rest to 0 and renormalize.</li>
+  <li><strong>Top-p, or nucleus sampling</strong> (Holtzman et al., 2020, “The Curious Case of Neural Text Degeneration”): keep the <em>smallest</em> set of top tokens whose probabilities add up to at least $p$, then renormalize. Unlike a fixed $k$, the set shrinks when the model is confident and grows when it isn't.</li>
+</ul>
+<p class="math-note">Common libraries apply them in that order: temperature, then top-k, then top-p. A newer variant, min-p sampling, keeps tokens whose probability is at least a fraction of the top token's.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5: temperature</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-temperature-wheels.webp" alt="Two prize wheels side by side: one under a snowflake with a single huge slice, one under a sun with many equal slices." width="1200" height="900" loading="lazy">
+    <div>
+      <p>The model spins a <strong>prize wheel</strong> to pick each word. Every word gets a slice; likely words get bigger slices.</p>
+      <p>Turn the temperature <strong>down</strong> (the snowflake) and the favourite's slice swells until it fills almost the whole wheel: you nearly always land on it. Turn it <strong>up</strong> (the sun) and the slices even out, so surprising words come up often.</p>
+      <p>Where it breaks: temperature never adds new words or changes their <em>order</em>; it only makes the existing slices more or less equal. Top-k and top-p are like cutting the smallest slices off the wheel.</p>
+    </div>
+  </div>
+</details>
+
+<section class="playground" data-sampling-playground aria-labelledby="pg">
+  <h3 id="pg">Try it: temperature, top-k and top-p</h3>
+  <p>Illustrative logits for the token after “I sat by the river”. Grey shows each token's probability after temperature but before cutting; coloured bars are what you actually sample from. Try a low temperature, then a high one, then high temperature with top-p 0.9.</p>
+</section>
+
+<h3>Worked example</h3>
+<p>Three candidates with logits bank $= 2$, side $= 1$, and $= 0$.</p>
+<ol class="steps">
+  <li><strong>$T = 1$:</strong> $e^2, e^1, e^0 \approx 7.39, 2.72, 1$; the sum is $11.11$, so $p \approx [0.665,\ 0.245,\ 0.090]$.</li>
+  <li><strong>$T = 0.5$:</strong> logits become $[4, 2, 0]$: $p \approx [0.867,\ 0.117,\ 0.016]$. Sharper.</li>
+  <li><strong>$T = 2$:</strong> logits become $[1, 0.5, 0]$: $p \approx [0.506,\ 0.307,\ 0.186]$. Flatter.</li>
+  <li><strong>Top-p $= 0.9$ at $T = 1$:</strong> $0.665 &lt; 0.9$, but $0.665 + 0.245 = 0.910 \ge 0.9$, so keep {bank, side} and renormalize: $[0.731,\ 0.269,\ 0]$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>Now the logits are $\ln 6, \ln 3, \ln 1$, so at $T = 1$ the probabilities are exactly $[0.6,\ 0.3,\ 0.1]$.</p>
+  <ol class="steps">
+    <li>With top-p $= 0.8$, how many tokens are kept? <span class="blank" data-answer="2" data-tol="0.01" data-hint="Add probabilities from the top until you reach at least 0.8."></span></li>
+    <li>After renormalizing, the top token's probability is <span class="blank" data-answer="0.667" data-tol="0.006" data-hint="0.6 / (0.6 + 0.3)."></span></li>
+    <li>Instead use $T = 0.5$ (no top-p). Dividing by 0.5 doubles each logit, which <em>squares</em> each $e^{z}$: $36, 9, 1$. Top token probability: <span class="blank" data-answer="0.783" data-tol="0.006" data-hint="36 / (36 + 9 + 1)."></span></li>
+    <li>$T = 0.5$ and then top-p $= 0.8$: the top token's final probability is <span class="blank" data-answer="0.8" data-tol="0.006" data-hint="0.783 alone is below 0.8, so two tokens are kept: 36 / (36 + 9)."></span></li>
+  </ol>
+</section>
+
+<h2>Repetition and other failure modes</h2>
+<p>Holtzman et al. (2020) showed that the most-likely continuations (greedy decoding, or beam search, which tracks several high-probability candidates) of open-ended text are often dull and repetitive: once a phrase repeats, repeating it again becomes even more likely, and the model gets stuck in a loop. Pure sampling avoids loops but wanders into incoherence through the low-probability tail. Truncating the tail with top-p was their fix.</p>
+<p>Other common patches work on the logits directly: a <strong>repetition penalty</strong> (introduced with CTRL, Keskar et al., 2019) down-weights tokens that already appeared, and API-style <strong>frequency and presence penalties</strong> subtract from the logits of tokens by how often, or whether, they've been used. These are blunt tools: penalize too hard and the model avoids words it legitimately needs, like “the” or a variable name in code.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> sampling settings are part of every evaluation and product. Chat apps commonly use a temperature somewhere around 0.7–1.0 with top-p around 0.9–0.95; code and math often use lower temperatures, and benchmarks that sample many answers (pass@k, <a href="m4-2.html">M4.2</a>) need $T &gt; 0$ to get diverse attempts. Even at temperature 0, outputs from served models aren't always bit-for-bit reproducible, because batched floating-point arithmetic on GPUs can change the logits slightly. Report your decoding settings with any eval result.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a friend why a KV cache works, what it costs, and what temperature and top-p each do.</p>
+  <div class="model-answer"><strong>Model answer:</strong> In a causal model, earlier tokens never see later ones, so their keys and values in every layer never change; caching them lets each generation step process only the newest token instead of the whole sequence. The cost is memory: $2 \times L \times n_{\text{kv}} \times d_{\text{head}} \times$ bytes per token, which reaches gigabytes for long contexts. Temperature divides the logits to sharpen ($T &lt; 1$) or flatten ($T &gt; 1$) the distribution, and top-p keeps only the smallest set of top tokens whose probability reaches $p$ before sampling.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why is it safe to reuse cached keys and values from earlier steps?</p>
+    <ol class="q-src">
+      <li>Keys and values are fixed parameters learned in training</li>
+      <li>The cache is recomputed in the background anyway</li>
+      <li>With a causal mask, earlier tokens never attend to later ones, so their keys and values in every layer can't change</li>
+      <li>Only the first layer has keys and values</li>
+    </ol>
+    <div class="q-explain">Token $i$'s hidden states depend only on tokens $1 \dots i$. New tokens can't affect them, so caching is exact, not an approximation. Keys and values are <em>computed</em> from inputs; only $W_K$, $W_V$ are parameters.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A model switches from 32 KV heads to GQA with 8 KV heads (M1.2), all else equal. Its KV cache…</p>
+    <ol class="q-src">
+      <li>shrinks to a quarter</li>
+      <li>stays the same, because the query heads didn't change</li>
+      <li>shrinks to a thirty-second</li>
+      <li>doubles</li>
+    </ol>
+    <div class="q-explain">The cache is proportional to $n_{\text{kv}}$: $8/32 = 1/4$. Query heads aren't cached at all.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Probabilities are [0.5, 0.3, 0.15, 0.05]. With top-p = 0.9, which tokens remain?</p>
+    <ol class="q-src">
+      <li>Only the first</li>
+      <li>The first three</li>
+      <li>The first two</li>
+      <li>All four</li>
+    </ol>
+    <div class="q-explain">Cumulative sums: 0.5, 0.8, 0.95. The first three reach 0.9, so they're the nucleus; the 0.05 tail is cut.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Raising the temperature from 1 to 2 does what to the next-token distribution?</p>
+    <ol class="q-src">
+      <li>Changes which token is most likely</li>
+      <li>Makes it more peaked on the top token</li>
+      <li>Removes low-probability tokens</li>
+      <li>Flattens it, so less likely tokens are sampled more often, while keeping the ranking</li>
+    </ol>
+    <div class="q-explain">Dividing logits by 2 halves the gaps between them, so probabilities move toward uniform. The order of tokens never changes; cutting tokens is what top-k/top-p do.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Generation is a loop: predict from the last position, choose a token, append, repeat.</li>
+    <li>Causality means old keys and values never change, so the <strong>KV cache</strong> makes each decode step process just one new token: ~$n$ instead of ~$n^2/2$ token-passes.</li>
+    <li>Cache size $= 2 \times L \times n_{\text{kv}} \times d_{\text{head}} \times n_{\text{tokens}} \times b$; Llama 2 7B needs 2 GiB per 4,096-token sequence.</li>
+    <li><strong>Temperature</strong> sharpens or flattens; <strong>top-k</strong> keeps $k$ tokens; <strong>top-p</strong> keeps the smallest set reaching probability $p$.</li>
+    <li>Greedy decoding tends to repeat; sampling with truncation and mild penalties is the usual fix.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Python</div>
+    <p>Build a tiny NumPy transformer, add a KV cache and prove it gives exactly the same tokens as recomputing, time the speed-up, compute real cache sizes, and implement temperature, top-k and top-p sampling. About 30 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m1-5-kv-cache-sampling.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m1-5-a","front":"What is the KV cache, and why is reusing it exact?","back":"Stored keys and values of all previous tokens, in every layer. With a causal mask earlier tokens never see later ones, so their K and V never change; each decode step only computes the newest token's q, k, v."},
+  {"id":"m1-5-b","front":"Work to generate $n$ tokens with and without a KV cache?","back":"Without: step $t$ reprocesses $t$ tokens, ≈ $n^2/2$ token-passes in total. With: one token per step, ≈ $n$ (attention still reads the $t$ cached keys each step)."},
+  {"id":"m1-5-c","front":"Formula for KV-cache memory?","back":"$2 \\times L \\times n_{\\text{kv}} \\times d_{\\text{head}} \\times n_{\\text{tokens}} \\times b$ bytes (×batch). Llama 2 7B, fp16: 512 KiB/token, 2 GiB at 4,096 tokens."},
+  {"id":"m1-5-d","front":"What does temperature do?","back":"$p_i \\propto e^{z_i/T}$: $T<1$ sharpens toward the top token ($T\\to0$ = greedy), $T>1$ flattens toward uniform. The ranking of tokens never changes."},
+  {"id":"m1-5-e","front":"Top-k vs top-p (nucleus) sampling?","back":"Top-k keeps a fixed number $k$ of most likely tokens. Top-p keeps the smallest set whose probabilities sum to ≥ $p$, so it adapts: few tokens when the model is confident, many when it isn't. Both renormalize."},
+  {"id":"m1-5-f","front":"Why does greedy decoding often produce repetitive text, and what helps?","back":"Repeating a phrase makes repeating it again more likely, so argmax gets stuck in loops (Holtzman et al., 2020). Sampling with top-p truncation, plus mild repetition/frequency penalties, helps."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m1-5-kv-cache.js"></script>
+<script src="../assets/js/anims/m1-5-sampling-playground.js"></script>
+</body>
+</html>

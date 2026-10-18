@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m3-7">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LoRA &amp; QLoRA · LLMs, Animated</title>
+<meta name="description" content="Fine-tune a big model by training a tiny low-rank update: how LoRA works, how many parameters it saves, merging adapters, and QLoRA's 4-bit base.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>LoRA &amp; QLoRA</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 7 of Post-training</span></div>
+<p class="lede">Fine-tuning every weight of a 7-billion-parameter model needs over 100 GB of GPU memory. <strong>LoRA</strong> freezes the model and trains a tiny low-rank "patch" instead, often well under 1% of the parameters. <strong>QLoRA</strong> goes further and stores the frozen model in 4 bits. Together they made fine-tuning possible on a single GPU.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain where full fine-tuning's memory goes, and what LoRA freezes and trains.</li>
+    <li>Count LoRA's trainable parameters for a layer, and explain the $B = 0$ initialisation and the $\alpha/r$ scale.</li>
+    <li>Describe QLoRA's NF4 base and choose between full fine-tuning, LoRA and QLoRA.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="m3-1.html">SFT &amp; instruction tuning</a> (what we're fine-tuning for), <a href="p1-2.html">Matrices as transformations</a> (shapes and rank) and <a href="m2-5.html">Distributed training &amp; mixed precision</a> (bytes per parameter). <a href="m5-1.html">Quantization</a> goes deeper on 4-bit formats.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. It's fine to be wrong.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Roughly how much GPU memory does full fine-tuning of a 7B-parameter model take with AdamW in mixed precision, <em>before</em> counting activations?</p>
+    <ol class="q-src">
+      <li>About 7 GB</li>
+      <li>About 14 GB</li>
+      <li>About 110 GB</li>
+      <li>About 1 TB</li>
+    </ol>
+    <div class="q-explain">About 16 bytes per parameter: bf16 weights (2) and gradients (2), plus an fp32 master copy (4) and Adam's two moment estimates (8). 7B × 16 bytes ≈ 112 GB, more than one 80 GB GPU holds.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A $4096 \times 4096$ matrix can be written as a product $B A$ of a $4096 \times 8$ and an $8 \times 4096$ matrix only if…</p>
+    <ol class="q-src">
+      <li>its rank is at most 8</li>
+      <li>it is symmetric</li>
+      <li>all its entries are small</li>
+      <li>any matrix can be written that way</li>
+    </ol>
+    <div class="q-explain">The product of a $d \times 8$ and an $8 \times d$ matrix has rank at most 8. LoRA bets that the <em>change</em> a fine-tune needs is close to such a low-rank matrix.</div>
+  </div>
+</section>
+
+<h2>Where full fine-tuning's memory goes</h2>
+<p>Training with AdamW in mixed precision keeps, for <strong>every</strong> parameter: the bf16 weight (2 bytes), its bf16 gradient (2), an fp32 master copy of the weight (4) and Adam's first and second moments (4 + 4). That's about <strong>16 bytes per parameter</strong> before activations. For a 7B model: $7 \times 10^9 \times 16 \approx 112$ GB.</p>
+<p>There's a storage cost too. Every fine-tuned variant is a full copy of the model: 14 GB in bf16 for each customer, language or task.</p>
+
+<h2>LoRA: learn a low-rank update</h2>
+<p><strong>LoRA</strong> (Low-Rank Adaptation; Hu et al., 2021) starts from an observation: the weight change $\Delta W$ a fine-tune needs seems to have low "intrinsic rank". So instead of learning a full $\Delta W$, it learns it as a product of two thin matrices:</p>
+$$h = W_0\,x + \frac{\alpha}{r}\,B A\,x, \qquad B \in \mathbb{R}^{d \times r},\quad A \in \mathbb{R}^{r \times k},\quad r \ll \min(d, k)$$
+<ul>
+  <li>$W_0$ ($d \times k$) is the pretrained weight. It is <strong>frozen</strong>: no gradients, no optimizer state.</li>
+  <li>$A$ projects the input down to $r$ numbers, and $B$ projects back up. Only $A$ and $B$ are trained.</li>
+  <li>$r$ is the <strong>rank</strong>, typically 8 to 64. $\alpha$ is a constant; dividing by $r$ means you can change $r$ without retuning the learning rate much. Common choices set $\alpha = r$ or $2r$.</li>
+  <li>Initialisation: $A$ random, $B = 0$. So $BA = 0$ and training starts from exactly the pretrained model.</li>
+</ul>
+
+<figure class="anim wide" data-anim="m3-7-lora"></figure>
+
+<p>The paper applied LoRA to the attention projections of GPT-3 175B and reported matching full fine-tuning on the tasks it tested, while cutting trainable parameters by about 10,000× and GPU memory by about 3×. Today it's common to put adapters on <em>every</em> linear layer (attention and MLP), which QLoRA found was needed to match full fine-tuning quality.</p>
+
+<h3>Worked example</h3>
+<p>One attention projection with $d = k = 4096$ and rank $r = 8$.</p>
+<ol class="steps">
+  <li><strong>Full matrix:</strong> $4096 \times 4096 = 16{,}777{,}216$ parameters</li>
+  <li><strong>A:</strong> $r \times k = 8 \times 4096 = 32{,}768$. <strong>B:</strong> $d \times r = 4096 \times 8 = 32{,}768$</li>
+  <li><strong>LoRA total:</strong> $r(d + k) = 8 \times 8192 = 65{,}536$</li>
+  <li><strong>Fraction:</strong> $65{,}536 / 16{,}777{,}216 \approx 0.39\%$, i.e. 256× fewer trainable numbers</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>An MLP up-projection in a Llama-3-8B-sized model maps $k = 4096$ inputs to $d = 14{,}336$ outputs. Use rank $r = 16$.</p>
+  <ol class="steps">
+    <li>Parameters in the full matrix $W$: <span class="blank" data-answer="58720256" data-tol="0.5" data-hint="d × k = 14,336 × 4,096. Type it without commas."></span></li>
+    <li>LoRA parameters $r(d + k)$: <span class="blank" data-answer="294912" data-tol="0.5" data-hint="16 × (14,336 + 4,096) = 16 × 18,432."></span></li>
+    <li>Trainable fraction, in %: <span class="blank" data-answer="0.50" data-tol="0.006" data-hint="294,912 / 58,720,256 × 100."></span></li>
+  </ol>
+  <p class="math-note">Across a whole 7B Llama-style model, $r = 16$ on every linear layer adds roughly 40M trainable parameters, about 0.6%. Saved in bf16, that adapter is about 80 MB instead of a ~14 GB full checkpoint.</p>
+</section>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-lora-sticky-notes.webp" alt="A giant textbook left untouched on a desk while a child adapts it with a few small sticky notes." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You have a <strong>giant textbook</strong> that's almost perfect for your class. Rewriting the whole book would take forever, and you might mess up the good parts.</p>
+      <p>So you <strong>don't touch the book</strong>. You stick a few small <strong>sticky notes</strong> on it: "in our class, say it like this". Reading the book plus the notes gives you exactly what you need.</p>
+      <p>A different class? Peel off your notes and stick on theirs. Same book.</p>
+    </div>
+  </div>
+</details>
+<p class="math-note">Where the analogy breaks: a sticky note changes one page, but LoRA's $BA$ is a small change spread across the <em>whole</em> layer, applied to every input that passes through it.</p>
+
+<h2>Merging and swapping adapters</h2>
+<p>Because the adapter is just a matrix of the same shape as $W_0$, you can fold it in after training: $W' = W_0 + \frac{\alpha}{r}BA$. The merged model is an ordinary model with <strong>no extra inference cost</strong>. Subtract the same term to unmerge.</p>
+<p>Or keep adapters separate: load one base model and many small adapters, one per task or customer, and pick the adapter per request. Serving systems such as S-LoRA (Sheng et al., 2023) and vLLM's multi-LoRA support batch requests that use different adapters on the same base.</p>
+
+<h2>QLoRA: a 4-bit base underneath</h2>
+<p>LoRA removes the gradients and optimizer state for the base, but the frozen bf16 weights still take 2 bytes per parameter: 130 GB for a 65B model. <strong>QLoRA</strong> (Dettmers et al., 2023) stores the frozen base in 4 bits and trains bf16 LoRA adapters on top:</p>
+<ul>
+  <li><strong>4-bit NormalFloat (NF4):</strong> 16 levels placed at the quantiles of a normal distribution, because pretrained weights are roughly normally distributed. Weights are quantized in blocks of 64, each block with its own scale (its absolute maximum).</li>
+  <li><strong>Double quantization:</strong> those per-block fp32 scales cost $32/64 = 0.5$ bits per parameter. Quantizing the scales themselves to 8 bits cuts that to about 0.127, saving about 0.37 bits per parameter (about 3 GB on a 65B model).</li>
+  <li><strong>Paged optimizers:</strong> optimizer state can spill into CPU memory during memory spikes instead of crashing the run.</li>
+</ul>
+<p>In the forward and backward pass each 4-bit block is <strong>dequantized to bf16 on the fly</strong> for the matrix multiply. Gradients flow <em>through</em> the frozen weights into the adapters; the 4-bit weights themselves never change. The paper fine-tuned a 65B model on a single 48 GB GPU and reported quality matching 16-bit fine-tuning on its benchmarks. The costs: steps are slower than plain LoRA (all that dequantizing), and merging into a 4-bit base means dequantizing, merging and either keeping 16-bit weights or re-quantizing (which adds a little error).</p>
+
+<div class="playground" id="lora-mem-playground">
+  <h3>Playground: will it fit?</h3>
+  <p class="math-note" style="margin:0">Rough memory to fine-tune, before activations. Assumes adapters ≈ 0.6% of the base and 16 bytes per trainable parameter.</p>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="pg-controls">
+    <label><span>Model size = <output>7B</output> parameters</span>
+      <input type="range" min="0" max="5" step="1" value="2" aria-label="Model size">
+    </label>
+    <div class="chips" role="group" aria-label="GPU memory">
+      <button type="button" class="chip" data-gpu="24" aria-pressed="false" style="min-height:44px">24 GB</button>
+      <button type="button" class="chip" data-gpu="48" aria-pressed="false" style="min-height:44px">48 GB</button>
+      <button type="button" class="chip" data-gpu="80" aria-pressed="true" style="min-height:44px">80 GB</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<h2>When to use which</h2>
+<ul>
+  <li><strong>Full fine-tuning:</strong> plenty of data and GPUs, and a big shift in what the model must know, such as continued pretraining on a large new domain or language. Biderman et al. (2024), "LoRA Learns Less and Forgets Less", found LoRA lags full fine-tuning in that regime, while preserving more of the base model's other skills.</li>
+  <li><strong>LoRA:</strong> the default for task, style and instruction tuning; many adapters sharing one base; fast experiments. Typical starting points (tune them for your task): adapters on all linear layers, $r$ = 16, a learning rate around $10^{-4}$ to $2 \times 10^{-4}$, which is higher than full fine-tuning usually uses.</li>
+  <li><strong>QLoRA:</strong> when GPU memory is the bottleneck: a big model on a small GPU. Accept slower steps and a quantized base.</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> LoRA-family adapters are how most teams outside the big labs fine-tune open-weight models, through libraries such as Hugging Face PEFT (with bitsandbytes for QLoRA). Many hosted fine-tuning services also train adapters rather than full copies. And because an adapter starts as an exact no-op ($B = 0$), your first evaluation after a few steps should look like the base model; if it doesn't, check your data pipeline before blaming the method.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a teammate why LoRA saves so much memory, and why $B$ starts at zero.</p>
+  <div class="model-answer"><strong>Model answer:</strong> LoRA freezes the pretrained weights, so they need no gradients or Adam state, and trains only two thin matrices $A$ ($r \times k$) and $B$ ($d \times r$) whose product is a rank-$r$ update; with $r \ll d$ that's a tiny fraction of the parameters. $B = 0$ makes $BA = 0$ at the start, so the adapted model begins exactly at the pretrained model and training only moves away from it as the data demands.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A $1024 \times 1024$ layer gets a LoRA adapter with $r = 4$. How many trainable parameters does the adapter add?</p>
+    <ol class="q-src">
+      <li>4,096</li>
+      <li>8,192</li>
+      <li>16,384</li>
+      <li>1,048,576</li>
+    </ol>
+    <div class="q-explain">$r(d + k) = 4 \times (1024 + 1024) = 8{,}192$: $A$ is $4 \times 1024$ and $B$ is $1024 \times 4$. 1,048,576 is the full matrix; 4,096 counts only one of the two.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why is $B$ initialised to zero (with $A$ random)?</p>
+    <ol class="q-src">
+      <li>So the adapter can be merged later</li>
+      <li>To make the adapter sparse and fast</li>
+      <li>So $BA = 0$ and fine-tuning starts exactly from the pretrained model</li>
+      <li>So that $A$ stays frozen</li>
+    </ol>
+    <div class="q-explain">With $B = 0$ the bypass outputs nothing at step 0. ($A$ is random so that $B$'s gradient isn't zero; if both were zero, neither could ever learn.) Merging works whatever the initialisation.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In QLoRA, which statement is true?</p>
+    <ol class="q-src">
+      <li>The frozen base is stored in 4-bit NF4 and dequantized to bf16 for each matmul; the LoRA adapters are trained in 16-bit</li>
+      <li>The adapters are stored and trained in 4 bits</li>
+      <li>The 4-bit base weights are updated by the optimizer</li>
+      <li>It only works for models under 7B parameters</li>
+    </ol>
+    <div class="q-explain">Only the adapters train, in 16-bit. The base stays frozen in 4 bits; gradients flow through it (after dequantization) to reach the adapters. The paper fine-tuned 65B models on one 48 GB GPU.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Connect to M2.5: with mixed-precision AdamW, about how many bytes per parameter does <em>full</em> fine-tuning need, before activations?</p>
+    <ol class="q-src">
+      <li>2</li>
+      <li>4</li>
+      <li>8</li>
+      <li>16</li>
+    </ol>
+    <div class="q-explain">bf16 weights (2) + bf16 gradients (2) + fp32 master weights (4) + Adam $m$ and $v$ (4 + 4) = 16. LoRA keeps only the 2-byte frozen weights for the base; QLoRA about half a byte.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Full fine-tuning with AdamW costs ~<strong>16 bytes per parameter</strong>; most of it is gradients and optimizer state.</li>
+    <li><strong>LoRA</strong> freezes $W_0$ and learns $\Delta W = \frac{\alpha}{r}BA$ with rank $r \ll d$: $r(d+k)$ parameters instead of $dk$.</li>
+    <li>$B = 0$ at init means training <strong>starts at the pretrained model</strong>; adapters can be <strong>merged</strong> for free inference or swapped per task.</li>
+    <li><strong>QLoRA</strong> keeps the frozen base in 4-bit <strong>NF4</strong> (with double quantization and paged optimizers) and trains 16-bit adapters on top.</li>
+    <li>Full FT for big knowledge shifts, LoRA by default, QLoRA when memory is the limit.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Build a LoRA linear layer in PyTorch, count its parameters, fine-tune a tiny frozen network on a new task with it, then merge the weights and check the outputs match. About 20 minutes on CPU.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m3-7-lora.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m3-7-a","front":"Where do the ~16 bytes per parameter of full fine-tuning (mixed-precision AdamW) go?","back":"bf16 weights 2 + bf16 gradients 2 + fp32 master weights 4 + Adam first and second moments 4 + 4. Activations come on top."},
+  {"id":"m3-7-b","front":"Write the LoRA forward pass and name the shapes.","back":"$h = W_0 x + \\frac{\\alpha}{r}BAx$ with frozen $W_0$ ($d \\times k$), trainable $B$ ($d \\times r$) and $A$ ($r \\times k$), $r \\ll \\min(d,k)$."},
+  {"id":"m3-7-c","front":"How many trainable parameters does LoRA add to a $d \\times k$ layer? Example $d=k=4096$, $r=8$?","back":"$r(d+k)$. For 4096 × 4096 with $r = 8$: 65,536, about 0.39% of the 16.8M in the full matrix."},
+  {"id":"m3-7-d","front":"Why is LoRA's $B$ initialised to 0 and $A$ randomly?","back":"$B = 0$ makes $BA = 0$, so training starts exactly at the pretrained model. $A$ is random so $B$ gets a non-zero gradient."},
+  {"id":"m3-7-e","front":"What does merging a LoRA adapter mean, and what does it buy you?","back":"$W' = W_0 + \\frac{\\alpha}{r}BA$: fold the adapter into the weight. Same shape as before, so no extra inference latency. Unmerge by subtracting."},
+  {"id":"m3-7-f","front":"What three tricks does QLoRA add on top of LoRA?","back":"A frozen 4-bit NF4 base (dequantized to bf16 per matmul), double quantization of the per-block scales, and paged optimizers. Adapters still train in 16-bit."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m3-7-lora.js"></script>
+<script src="../assets/js/anims/m3-7-memory-playground.js"></script>
+</body>
+</html>

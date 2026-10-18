@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m3-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DPO · LLMs, Animated</title>
+<meta name="description" content="Direct Preference Optimization: how the RLHF objective collapses into one supervised-style loss on preference pairs, with no reward model and no PPO. Worked example and a β playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>DPO</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Post-training</span></div>
+<p class="lede"><strong>Direct Preference Optimization</strong> gets much of RLHF's benefit with none of its machinery: no reward model to train, no sampling, no PPO. A little algebra turns preference pairs into one classification-style loss on the policy itself.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how DPO skips the explicit reward model, and what the implicit reward $\beta\log(\pi_\theta/\pi_\text{ref})$ is.</li>
+    <li>Compute the DPO loss for a preference pair by hand and say which way its gradient pushes.</li>
+    <li>Explain what $\beta$ does, and weigh DPO against PPO and its main variants.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> the Bradley–Terry loss from <a href="m3-2.html">Reward models</a> (M3.2), the KL-penalized objective from <a href="m3-3.html">RLHF with PPO</a> (M3.3), KL itself from <a href="p1-6.html">Entropy, cross-entropy &amp; KL</a> (P1.6), and response log-probs with prompt masking from <a href="m3-1.html">SFT &amp; instruction tuning</a> (M3.1).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What data does standard DPO train on?</p>
+    <ol class="q-src">
+      <li>Fresh responses sampled from the model at every step</li>
+      <li>Human-written ideal answers only</li>
+      <li>A fixed dataset of preference pairs: prompt, chosen response, rejected response</li>
+      <li>Scores from a reward model</li>
+    </ol>
+    <div class="q-explain">DPO is <em>offline</em>: it learns from a fixed set of comparisons, the same data you'd use to train a reward model. That's its biggest simplification, and, as you'll see, its biggest limitation.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Compared with PPO-based RLHF, what does DPO <em>not</em> need?</p>
+    <ol class="q-src">
+      <li>A separately trained reward model, and text generation during training</li>
+      <li>A reference model</li>
+      <li>Preference data</li>
+      <li>Gradient descent</li>
+    </ol>
+    <div class="q-explain">DPO still uses preference data, a frozen reference and plain gradient descent. It drops the reward model, the value model and the sampling loop.</div>
+  </div>
+</section>
+
+<h2>The trick: your policy is secretly a reward model</h2>
+<p>Recall the RLHF objective from M3.3: maximize reward while paying $\beta\,\mathrm{KL}(\pi_\theta \,\|\, \pi_\text{ref})$ for drifting from the reference. <strong>Rafailov et al., 2023</strong> (“Direct Preference Optimization: Your Language Model is Secretly a Reward Model”) noticed that for any reward $r$, this objective has a closed-form best policy:</p>
+$$\pi^*(y \mid x) = \frac{1}{Z(x)}\;\pi_\text{ref}(y \mid x)\,\exp\!\Big(\frac{r(x, y)}{\beta}\Big)$$
+<p>In words: take the reference model and up-weight each response by $e^{r/\beta}$. $Z(x)$ is the normalizer that makes the probabilities sum to 1. It sums over every possible response, so it can't be computed. Now solve for the reward:</p>
+$$r(x, y) = \beta \log \frac{\pi^*(y \mid x)}{\pi_\text{ref}(y \mid x)} + \beta \log Z(x)$$
+<p>Plug this into Bradley–Terry (M3.2), which only uses the <em>difference</em> $r(x, y_w) - r(x, y_l)$. Both responses answer the same prompt $x$, so <strong>$\beta\log Z(x)$ cancels</strong>. What's left involves only the policy and the reference. So instead of training a reward model and then running RL, we fit the policy directly, treating</p>
+$$\hat r_\theta(x, y) = \beta \log \frac{\pi_\theta(y \mid x)}{\pi_\text{ref}(y \mid x)}$$
+<p>as its <strong>implicit reward</strong>: how much more likely the policy makes a response than the reference does, scaled by $\beta$.</p>
+
+<h2>The DPO loss</h2>
+<p>Substitute the implicit reward into the reward-model loss from M3.2:</p>
+$$\mathcal{L}_\text{DPO}(\theta) = -\,\mathbb{E}_{(x,\,y_w,\,y_l)}\left[\log \sigma\!\left(\beta\left[\log\frac{\pi_\theta(y_w \mid x)}{\pi_\text{ref}(y_w \mid x)} - \log\frac{\pi_\theta(y_l \mid x)}{\pi_\text{ref}(y_l \mid x)}\right]\right)\right]$$
+<ul>
+  <li>$y_w$, $y_l$: the chosen (“winner”) and rejected (“loser”) responses.</li>
+  <li>$\log \pi(y \mid x)$: the log-probability of the <em>whole</em> response, the sum of its token log-probs, with the prompt masked exactly as in SFT (M3.1).</li>
+  <li>$\pi_\text{ref}$: the frozen SFT model. $\beta$: the same KL strength as in RLHF. $\sigma$: the sigmoid.</li>
+</ul>
+<p>That's it: four log-probabilities per pair (two from each model), one sigmoid, one log. It trains like supervised learning.</p>
+
+<figure class="anim wide" data-anim="m3-4-dpo"></figure>
+
+<h3>Which way does the gradient push?</h3>
+$$\nabla_\theta \mathcal{L}_\text{DPO} = -\beta\;\mathbb{E}\Big[\underbrace{\sigma\big(\hat r_\theta(x, y_l) - \hat r_\theta(x, y_w)\big)}_{\text{bigger when ranked wrong}}\;\big(\nabla_\theta \log\pi_\theta(y_w \mid x) - \nabla_\theta \log\pi_\theta(y_l \mid x)\big)\Big]$$
+<p>Gradient descent moves against this, so it raises the chosen response's log-probability and lowers the rejected one's. The weight in front is large when the implicit reward currently ranks the pair the wrong way round, and fades once it ranks them right by a comfortable margin. The DPO paper notes that dropping this weight (just “raise one, lower the other”) makes the model degenerate.</p>
+
+<h3>Worked example</h3>
+<p>The animation's pair, with $\beta = 0.1$. Chosen: $\log\pi_\theta = -12.0$, $\log\pi_\text{ref} = -14.0$. Rejected: $\log\pi_\theta = -15.0$, $\log\pi_\text{ref} = -13.0$.</p>
+<ol class="steps">
+  <li>Log-ratios: chosen $-12.0 - (-14.0) = +2.0$; rejected $-15.0 - (-13.0) = -2.0$.</li>
+  <li>Implicit rewards ($\times\beta$): $+0.2$ and $-0.2$. Margin: $0.4$.</li>
+  <li>$\sigma(0.4) = 1/(1 + e^{-0.4}) = 0.60$, so the loss is $-\log 0.60 = 0.51$.</li>
+  <li>Gradient weight $\sigma(-0.4) = 0.40$, so $\partial\mathcal{L}/\partial\log\pi_\theta(y_w) = -\beta \times 0.40 = -0.040$: descent raises the chosen log-prob, and lowers the rejected one by the same push.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Now $\beta = 0.5$. Chosen: $\log\pi_\theta = -20.0$, $\log\pi_\text{ref} = -21.0$. Rejected: $\log\pi_\theta = -18.0$, $\log\pi_\text{ref} = -17.5$.</p>
+  <ol class="steps">
+    <li>Chosen log-ratio: <span class="blank" data-answer="1" data-tol="0.001" data-hint="−20.0 − (−21.0)."></span></li>
+    <li>Rejected log-ratio: <span class="blank" data-answer="-0.5" data-tol="0.001" data-hint="−18.0 − (−17.5). The policy made it less likely than the reference did."></span></li>
+    <li>$\beta \times$ margin: <span class="blank" data-answer="0.75" data-tol="0.001" data-hint="0.5 × (1.0 − (−0.5))."></span></li>
+    <li>Loss $-\log\sigma(0.75)$: <span class="blank" data-answer="0.39" data-tol="0.011" data-hint="σ(0.75) = 1 / (1 + e^−0.75) ≈ 0.68."></span></li>
+    <li>Gradient weight $\sigma(-0.75)$: <span class="blank" data-answer="0.32" data-tol="0.011" data-hint="1 − σ(0.75)."></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">Notice the policy still finds the <em>rejected</em> answer more likely than the chosen one ($-18$ vs $-20$), yet the loss is fairly low. DPO only cares how each probability moved <em>relative to the reference</em>, not about absolute likelihoods.</p>
+</section>
+
+<h2>What β does</h2>
+<p>$\beta$ is the same knob as in RLHF: the strength of the pull toward the reference. In the loss it scales the margin, so the loss flattens once $\beta \times$ margin reaches about 2 to 3. With a <strong>large</strong> $\beta$ a small move away from the reference already satisfies a pair, so the policy stays close. With a <strong>small</strong> $\beta$ it keeps pushing the log-ratios further. The paper mostly used $\beta = 0.1$; values from about 0.01 to 0.5 are common.</p>
+
+<div class="playground" id="beta-playground">
+  <h3>Playground: β and the margin</h3>
+  <p class="math-note" style="margin:0">$m$ is the log-ratio margin: chosen log-ratio minus rejected log-ratio. Pick $\beta$, then slide $m$ to see the loss. Grey curves show the other $\beta$ values.</p>
+  <div class="pg-stage" style="margin-top:10px"></div>
+  <div class="pg-controls"><div style="display:grid;gap:12px">
+    <label><span>$\beta$ = <output data-o="beta">0.1</output></span>
+      <input type="range" data-k="beta" min="0" max="5" step="1" value="2" aria-label="beta">
+    </label>
+    <label><span>Log-ratio margin $m$ = <output data-o="m">4.0</output></span>
+      <input type="range" data-k="m" min="-20" max="20" step="0.5" value="4" aria-label="Log-ratio margin">
+    </label>
+  </div></div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+
+<p class="math-note">One caveat: on a finite dataset where every pair is labelled the same way, the DPO loss keeps falling as the margin grows, for any $\beta$ (Azar et al., 2023). In practice the leash also comes from training only briefly, typically 1 to 3 epochs.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-dpo-eye-test.webp" alt="A child at an eye test pointing to the clearer of two options, which gets a tick." width="1200" height="900" loading="lazy">
+    <div>
+      <p>At the eye doctor, nobody asks you to give a lens a <strong>score out of ten</strong>. They show you two and ask: “<strong>this one, or this one?</strong>” You point at the clearer one, it gets a tick, and the doctor turns the dial a little toward it.</p>
+      <p>DPO works the same way. There's no separate judge handing out scores. Each “this one!” directly turns the model's dials toward the picked answer and away from the other, but only a little at a time, so your glasses don't end up wildly different from where they started.</p>
+      <p><em>Where it breaks:</em> a real doctor shows you <em>new</em> pairs based on what you just said. Plain DPO only learns from a fixed list of old comparisons, which is why “online” versions that collect fresh pairs often do better.</p>
+    </div>
+  </div>
+</details>
+
+<h2>DPO vs PPO</h2>
+<p><strong>Why people like DPO:</strong></p>
+<ul>
+  <li><strong>Simple:</strong> a supervised-style loss, a few lines of code, and few hyperparameters ($\beta$ and a learning rate).</li>
+  <li><strong>Stable and cheap:</strong> two models instead of four. The reference's log-probs can be computed once in advance, so only the policy needs to be in memory while training. No generation in the loop.</li>
+</ul>
+<p><strong>Where it falls short:</strong></p>
+<ul>
+  <li><strong>Offline:</strong> it learns only from fixed pairs, often written by other models, and never explores its own outputs. <strong>Online / iterative DPO</strong> (sample new pairs from the current policy, label them with a reward model or judge, repeat) closes much of the gap.</li>
+  <li><strong>Not always as strong:</strong> careful comparisons (e.g. Xu et al., 2024) found that well-tuned PPO can beat DPO, especially on harder tasks such as code. Results depend heavily on data and tuning.</li>
+  <li><strong>Odd side effects:</strong> the chosen response's probability can <em>fall</em>, as long as the rejected one falls faster (Pal et al., 2024), and models can learn to get longer (Park et al., 2024).</li>
+</ul>
+
+<h2>Variants, briefly</h2>
+<p>Dozens of DPO variants exist. Four you'll meet often:</p>
+<ul>
+  <li><strong>IPO</strong> (Azar et al., 2023): swaps the log-sigmoid for a squared loss that pulls the margin toward a fixed target, so it can't run off to infinity.</li>
+  <li><strong>KTO</strong> (Ethayarajh et al., 2024): needs only thumbs-up / thumbs-down on single responses, not pairs. Its loss is inspired by Kahneman and Tversky's prospect theory.</li>
+  <li><strong>ORPO</strong> (Hong et al., 2024): no reference model. It adds an odds-ratio preference term to the SFT loss, so SFT and preference tuning happen in one stage.</li>
+  <li><strong>SimPO</strong> (Meng et al., 2024): also reference-free. It uses the length-normalized log-probability as the implicit reward, plus a target margin.</li>
+</ul>
+<p class="math-note">Reported gains vary by benchmark and tuning; no variant wins everywhere, and well-tuned plain DPO remains a strong baseline.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> DPO-style preference tuning is a standard post-training step for open models. Zephyr (Tunstall et al., 2023) popularized it, Llama 3 (Meta, 2024) used DPO after SFT, and Tülu 3 (Lambert et al., 2024) used a length-normalized DPO before an RL stage with verifiable rewards (M3.5). It's also the easiest preference method to run yourself: libraries such as Hugging Face TRL ship a DPO trainer, and it pairs naturally with LoRA (M3.7). Many pipelines now mix offline DPO rounds with online RL.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why doesn't DPO need a reward model? What plays the reward's role?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The KL-regularized RLHF objective has a closed-form optimum, which lets you write the reward as $\beta\log(\pi/\pi_\text{ref})$ plus a prompt-only term $\beta\log Z(x)$. In the Bradley–Terry difference between two responses to the same prompt that term cancels, so the preference loss can be written directly in terms of the policy. The implicit reward $\beta\log(\pi_\theta/\pi_\text{ref})$, how far the policy has moved toward a response, plays the reward's role.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">At the start of DPO training the policy is an exact copy of the reference. What is the loss on every pair?</p>
+    <ol class="q-src">
+      <li>0</li>
+      <li>$\log 2 \approx 0.69$, whatever $\beta$ is</li>
+      <li>It depends on $\beta$</li>
+      <li>Infinite</li>
+    </ol>
+    <div class="q-explain">Both log-ratios are 0, so the margin is 0 and the loss is $-\log\sigma(0) = \log 2$. $\beta$ only matters once the policy moves.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Connect to M3.2: the DPO loss has the same form as…</p>
+    <ol class="q-src">
+      <li>The SFT cross-entropy loss on the chosen response</li>
+      <li>PPO's clipped objective</li>
+      <li>The KL divergence between policy and reference</li>
+      <li>The Bradley–Terry reward-model loss, with the reward replaced by $\beta\log(\pi_\theta/\pi_\text{ref})$</li>
+    </ol>
+    <div class="q-explain">$-\log\sigma(r_w - r_l)$ with implicit rewards. That's why the paper's subtitle says your language model is secretly a reward model.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">You raise $\beta$ from 0.1 to 0.5 and keep everything else fixed. What tends to happen?</p>
+    <ol class="q-src">
+      <li>The policy stays closer to the reference: small log-ratio margins already make the loss small</li>
+      <li>The policy drifts further from the reference</li>
+      <li>Nothing; $\beta$ cancels out of the loss</li>
+      <li>DPO starts needing a reward model</li>
+    </ol>
+    <div class="q-explain">$\beta$ multiplies the margin, so with a larger $\beta$ the loss saturates sooner and there's less pressure to move. It is the KL strength from the RLHF objective in disguise.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What is the main structural weakness of standard DPO compared with PPO?</p>
+    <ol class="q-src">
+      <li>It needs four models in memory</li>
+      <li>It can't use preference data</li>
+      <li>It's offline: it learns only from fixed pairs and never explores or gets feedback on its own new outputs</li>
+      <li>It ignores the reference model</li>
+    </ol>
+    <div class="q-explain">PPO samples from the current policy and gets fresh feedback. Online and iterative DPO add that back by labelling new pairs from the current model.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>The KL-regularized RLHF objective has a closed-form optimum, so the reward can be written as $\beta\log(\pi/\pi_\text{ref})$ plus a term that <strong>cancels</strong> in comparisons.</li>
+    <li>DPO loss: $-\log\sigma\big(\beta[\text{log-ratio}(y_w) - \text{log-ratio}(y_l)]\big)$. It's Bradley–Terry with an <strong>implicit reward</strong>.</li>
+    <li>The gradient raises the chosen response and lowers the rejected one, weighted toward pairs the model still gets wrong.</li>
+    <li>$\beta$ is the leash: larger keeps the policy closer to the reference.</li>
+    <li>DPO is simple, stable and cheap (2 models, no sampling) but <strong>offline</strong>; online DPO, PPO and GRPO can do better when fresh feedback matters.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>In PyTorch on CPU: write the DPO loss from log-probs, check its gradient's direction with autograd, compute sequence log-probs with a prompt mask, and train a tiny policy over four candidate answers with DPO. About 25 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m3-4-dpo.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m3-4-a","front":"Write the DPO loss.","back":"$-\\log\\sigma\\Big(\\beta\\big[\\log\\frac{\\pi_\\theta(y_w)}{\\pi_\\text{ref}(y_w)} - \\log\\frac{\\pi_\\theta(y_l)}{\\pi_\\text{ref}(y_l)}\\big]\\Big)$, averaged over preference pairs (all conditioned on the prompt $x$)."},
+  {"id":"m3-4-b","front":"What is DPO's implicit reward?","back":"$\\hat r_\\theta(x,y) = \\beta\\log\\frac{\\pi_\\theta(y\\mid x)}{\\pi_\\text{ref}(y\\mid x)}$: how much more likely the policy makes a response than the reference does, scaled by $\\beta$."},
+  {"id":"m3-4-c","front":"Why does the partition function $Z(x)$ drop out of DPO?","back":"The reward is $\\beta\\log(\\pi^*/\\pi_\\text{ref}) + \\beta\\log Z(x)$. Bradley–Terry uses the difference of rewards for two responses to the same prompt, so $\\beta\\log Z(x)$ cancels."},
+  {"id":"m3-4-d","front":"What does $\\beta$ do in DPO?","back":"It's the KL strength from RLHF. It scales the log-ratio margin: a larger $\\beta$ makes the loss saturate after a smaller move, keeping the policy closer to the reference."},
+  {"id":"m3-4-e","front":"DPO vs PPO: two advantages and two drawbacks of DPO.","back":"Pros: simple supervised-style loss; cheap and stable (2 models, no reward model, no sampling). Cons: offline (no exploration of its own outputs); can lower the chosen response's likelihood too, and well-tuned PPO can beat it on hard tasks."},
+  {"id":"m3-4-f","front":"Name three DPO variants and what each changes.","back":"IPO: squared loss toward a target margin (no runaway). KTO: unpaired thumbs-up/down data, prospect-theory loss. ORPO: no reference, odds-ratio term added to the SFT loss (one stage). (SimPO: reference-free, length-normalized.)"}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m3-4-dpo.js"></script>
+<script src="../assets/js/anims/m3-4-beta-playground.js"></script>
+</body>
+</html>

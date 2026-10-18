@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m2-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Optimizers &amp; LR schedules · LLMs, Animated</title>
+<meta name="description" content="From SGD to momentum, Adam and AdamW, the hyperparameters LLMs actually use, warmup plus cosine and WSD schedules, and gradient clipping, with an interactive schedule playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Optimizers &amp; LR schedules</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Pretraining</span></div>
+<p class="lede">Plain gradient descent uses one step size for every parameter, forever. LLMs are trained with something smarter: <strong>AdamW</strong>, which adapts the step for each parameter, driven by a <strong>learning-rate schedule</strong> that warms up, cruises and cools down. This lesson builds that recipe one piece at a time.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what momentum, Adam's two moments and bias correction each fix.</li>
+    <li>Compute an Adam update by hand, and say how AdamW's weight decay differs from L2 regularization.</li>
+    <li>Sketch a warmup + cosine (or WSD) schedule, and explain warmup and gradient clipping.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> you need the gradient-descent update and the effect of the learning rate from <a href="p2-2.html">P2.2 Gradient descent</a>, and it helps to know what a training loop looks like (<a href="p4-2.html">P4.2 A training loop</a>).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; the lesson will settle it.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">One parameter's gradients are always around 100; another's are around 0.01. With plain SGD and one learning rate, what happens?</p>
+    <ol class="q-src">
+      <li>A rate small enough to be stable for the first makes the second crawl</li>
+      <li>Both learn at the same speed</li>
+      <li>SGD automatically rescales each parameter</li>
+      <li>The second parameter learns faster</li>
+    </ol>
+    <div class="q-explain">SGD's step is $\eta \times$ gradient, so step sizes differ by 10,000×. Adam fixes this by dividing each parameter's step by its own typical gradient size.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Most LLM training runs start with a tiny learning rate and raise it over the first few thousand steps. Why?</p>
+    <ol class="q-src">
+      <li>To save electricity at the start</li>
+      <li>Because the data at the start is harder</li>
+      <li>Early updates are unreliable (random weights, poor optimizer statistics), and big early steps can destabilize training</li>
+      <li>It's tradition with no real effect</li>
+    </ol>
+    <div class="q-explain">That ramp is called <strong>warmup</strong>. Skipping it is a classic cause of early loss spikes and divergence in large models.</div>
+  </div>
+</section>
+
+<h2>From SGD to momentum</h2>
+<p>Recall the plain update from P2.2, applied with a mini-batch gradient $g_t$ at step $t$:</p>
+$$\theta_{t} = \theta_{t-1} - \eta\, g_t$$
+<p>It has two weaknesses. Mini-batch gradients are <strong>noisy</strong>, and in a stretched valley the gradient points mostly <strong>across</strong> the valley, so the path zig-zags. <strong>Momentum</strong> (Polyak, 1964) keeps a running "velocity" $v$ that accumulates gradients:</p>
+$$v_t = \mu\, v_{t-1} + g_t, \qquad \theta_t = \theta_{t-1} - \eta\, v_t$$
+<p>$\mu$ (typically 0.9) is how much of the old velocity is kept. Components that keep flipping sign cancel out; components that point the same way every step add up. Here is the same bowl as in P2.2, $L = x^2 + 10y^2$:</p>
+
+<figure class="anim wide" data-anim="m2-3-optimizers"></figure>
+
+<h2>Adam: a step size for every parameter</h2>
+<p><strong>Adam</strong> (Kingma &amp; Ba, 2015) keeps two running averages per parameter, called the first and second <strong>moments</strong>:</p>
+$$m_t = \beta_1 m_{t-1} + (1-\beta_1)\, g_t, \qquad v_t = \beta_2 v_{t-1} + (1-\beta_2)\, g_t^2$$
+$$\hat m_t = \frac{m_t}{1-\beta_1^t}, \qquad \hat v_t = \frac{v_t}{1-\beta_2^t}, \qquad \theta_t = \theta_{t-1} - \eta\,\frac{\hat m_t}{\sqrt{\hat v_t} + \epsilon}$$
+<ul>
+  <li>$m_t$ is a smoothed gradient (momentum). $v_t$ is a smoothed <em>squared</em> gradient, so $\sqrt{v_t}$ is the parameter's typical gradient size. Everything is element-wise: each parameter has its own $m$ and $v$.</li>
+  <li>Dividing by $\sqrt{\hat v_t}$ makes the step roughly <strong>$\eta$ in size whatever the gradient's scale</strong>: steep and shallow parameters move at similar speeds.</li>
+  <li>$m$ and $v$ start at 0, so early on they're biased toward 0. Dividing by $1-\beta^t$ is the <strong>bias correction</strong>; it matters only in the first few hundred to few thousand steps, when $\beta^t$ is not yet near 0.</li>
+  <li>$\epsilon$ (e.g. $10^{-8}$) just prevents division by zero. The paper's defaults are $\beta_1 = 0.9$, $\beta_2 = 0.999$.</li>
+</ul>
+
+<h3>Worked example: Adam's first step</h3>
+<p>One parameter, $\eta = 0.01$, $\beta_1 = 0.9$, $\beta_2 = 0.95$. The first gradient is $g_1 = 2$.</p>
+<ol class="steps">
+  <li>$m_1 = 0.9 \times 0 + 0.1 \times 2 = 0.2$ and $v_1 = 0.95 \times 0 + 0.05 \times 2^2 = 0.2$.</li>
+  <li>Bias correction: $\hat m_1 = 0.2 / (1 - 0.9) = 2$ and $\hat v_1 = 0.2 / (1 - 0.95) = 4$. Without it, $m_1 = 0.2$ would be 10× too small.</li>
+  <li>Update: $\eta\,\hat m_1 / \sqrt{\hat v_1} = 0.01 \times 2 / 2 = 0.01$.</li>
+  <li>The first step is exactly $\eta$, and it would be for $g_1 = 2$ or $g_1 = 2{,}000$. Adam's steps are set by $\eta$, not by the gradient's size.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Continue: the second gradient is $g_2 = 1$ (same $\eta$, $\beta_1$, $\beta_2$; ignore $\epsilon$).</p>
+  <ol class="steps">
+    <li>$m_2 = 0.9 \times 0.2 + 0.1 \times 1 =$ <span class="blank" data-answer="0.28" data-tol="0.001" data-hint="0.18 + 0.1."></span></li>
+    <li>$v_2 = 0.95 \times 0.2 + 0.05 \times 1^2 =$ <span class="blank" data-answer="0.24" data-tol="0.001" data-hint="0.19 + 0.05."></span></li>
+    <li>$\hat m_2 = m_2 / (1 - 0.9^2) =$ <span class="blank" data-answer="1.47" data-tol="0.01" data-hint="1 − 0.81 = 0.19, so 0.28 / 0.19."></span> (and $\hat v_2 = 0.24 / 0.0975 \approx 2.46$)</li>
+    <li>Update $\eta\,\hat m_2/\sqrt{\hat v_2} =$ <span class="blank" data-answer="0.0094" data-tol="0.0002" data-hint="√2.46 ≈ 1.57, so 0.01 × 1.47 / 1.57."></span></li>
+  </ol>
+</section>
+
+<h2>AdamW: decoupled weight decay</h2>
+<p><strong>Weight decay</strong> pulls weights gently toward zero to regularize the model. The old way, <strong>L2 regularization</strong>, adds $\lambda\theta$ to the gradient. In Adam that term then gets divided by $\sqrt{\hat v}$, so parameters with large gradients are barely decayed at all. Loshchilov &amp; Hutter (2019, "Decoupled Weight Decay Regularization") applied the decay <em>separately</em>:</p>
+$$\theta_t = \theta_{t-1} - \eta\left(\frac{\hat m_t}{\sqrt{\hat v_t}+\epsilon} + \lambda\,\theta_{t-1}\right)$$
+<p>Now every weight shrinks by the same fraction $\eta\lambda$ per step, whatever its gradient history. That's <strong>AdamW</strong>, the default optimizer for LLM pretraining. Many codebases don't decay biases and normalization gains.</p>
+
+<h3>What LLMs typically use</h3>
+<ul>
+  <li>$\beta_1 = 0.9$, $\beta_2 = 0.95$ (GPT-3, Llama 2 and 3, and many others). A shorter memory for $v$ than the default 0.999 lets it react faster when gradient sizes shift, which is commonly reported to make large runs more stable.</li>
+  <li>Weight decay $\lambda = 0.1$; $\epsilon$ between $10^{-8}$ and $10^{-5}$; gradient clipping at norm 1.0.</li>
+  <li>Peak learning rates around $10^{-4}$ to $10^{-3}$, smaller for bigger models: GPT-3 used $6\times10^{-4}$ for its 125M model and $0.6\times10^{-4}$ for 175B (Brown et al., 2020).</li>
+</ul>
+<p>Adam stores two extra numbers ($m$, $v$) for every parameter, which matters a lot for memory (M2.5). Alternatives exist, such as Adafactor (less memory), Lion and Muon (used for Moonshot AI's Kimi K2 in 2025), but AdamW remains the default.</p>
+
+<h2>Learning-rate schedules</h2>
+<p>The learning rate isn't fixed. Almost every LLM run follows the same three-act shape:</p>
+<ol class="steps">
+  <li><strong>Warmup.</strong> Grow $\eta$ linearly from about 0 to its peak, typically over a few hundred to a few thousand steps (Llama 2 used 2,000). Early on the weights are random and Adam's $v$ estimates come from very few gradients, so full-size steps can cause loss spikes or divergence.</li>
+  <li><strong>Decay.</strong> Then lower $\eta$ so the model can settle into a good region. The classic choice is <strong>cosine decay</strong> to about 10% of the peak (GPT-3, Llama 2):
+  $$\eta_t = \eta_{\min} + \tfrac{1}{2}(\eta_{\max} - \eta_{\min})\left(1 + \cos\frac{\pi\,(t - T_w)}{T - T_w}\right)$$
+  where $T_w$ is the number of warmup steps, $T$ the total, and $\eta_{\max}$, $\eta_{\min}$ the peak and final rates.</li>
+  <li><strong>Or warmup-stable-decay (WSD).</strong> Hold the peak, then cool down quickly over the last 10–20% of training, a "trapezoid" (Hu et al., 2024, MiniCPM; Hägele et al., 2024). It matches cosine in many studies, and you can branch a cool-down from any checkpoint, so you don't have to fix the run length in advance.</li>
+</ol>
+
+<div class="playground" id="lr-playground">
+  <h3>Playground: shape a learning-rate schedule</h3>
+  <p class="math-note" style="margin:0">A 100,000-step run. Pick a schedule, then drag the sliders.</p>
+  <div class="chips" role="group" aria-label="Schedule type" style="margin-top:12px">
+    <button type="button" class="chip" data-kind="cosine" aria-pressed="true">Warmup + cosine</button>
+    <button type="button" class="chip" data-kind="wsd" aria-pressed="false">WSD</button>
+    <button type="button" class="chip" data-kind="constant" aria-pressed="false">Constant</button>
+  </div>
+  <div class="pg-stage" style="margin-top:12px"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr">
+    <label><span>Warmup: <output for="lr-warm"></output></span>
+      <input type="range" id="lr-warm" name="warm" min="0" max="20" step="0.5" value="2"></label>
+    <label><span>Peak learning rate: <output for="lr-peak"></output></span>
+      <input type="range" id="lr-peak" name="peak" min="1" max="10" step="0.5" value="3"></label>
+    <label><span>Final learning rate: <output for="lr-min"></output></span>
+      <input type="range" id="lr-min" name="min" min="0" max="100" step="5" value="10"></label>
+    <label><span>WSD cool-down length: <output for="lr-decay"></output></span>
+      <input type="range" id="lr-decay" name="decay" min="5" max="50" step="5" value="20"></label>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" style="margin:4px 0 0"></p>
+</div>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-lr-schedule-car.webp" alt="A toy car speeding up gently from the start, cruising in the middle, then slowing down to park." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Think of a <strong>toy car</strong> driving to a parking spot. If it zooms off at full speed straight away, it wobbles and crashes. So it <strong>speeds up gently</strong> at the start: that's warmup.</p>
+      <p>In the middle it <strong>cruises fast</strong> to cover lots of ground. Near the end it <strong>slows down</strong> so it can park exactly in the spot instead of shooting past it: that's the decay.</p>
+      <p>Where it breaks: the car can see its parking spot. The model can't; it only feels the slope where it is, and "parking" means settling into a low part of the loss landscape.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Gradient clipping</h2>
+<p>Every so often a batch produces a huge gradient, and one giant step can undo hours of training. <strong>Gradient clipping</strong> caps the size of the whole gradient vector before the optimizer sees it:</p>
+$$g \leftarrow g \cdot \min\!\left(1,\ \frac{c}{\lVert g \rVert}\right)$$
+<p>$\lVert g\rVert$ is the norm of the gradient over <em>all</em> parameters together (the "global norm") and $c$ is the threshold, usually 1.0. Small gradients pass untouched; large ones keep their direction but shrink to length $c$. Teams also watch the gradient norm as an early-warning signal for instability.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> optimizer settings are some of the most expensive bugs in LLM training. A peak learning rate that's too high, too short a warmup, or a missing clip can show up as a loss spike days into a run that costs millions. That's why reports list these numbers so carefully, and why teams tune them on small models first and transfer them (with methods such as μP) to the big one. The same AdamW appears again in fine-tuning (M3) with much smaller learning rates.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What do Adam's $m$ and $v$ do, and why does an LLM run use warmup followed by decay?</p>
+  <div class="model-answer"><strong>Model answer:</strong> $m$ is a running average of the gradient (momentum, smoothing noise) and $v$ a running average of the squared gradient; dividing by $\sqrt{\hat v}$ gives every parameter a step of roughly $\eta$ whatever its gradient scale. Warmup avoids huge, destabilizing steps while the weights and Adam's statistics are still unreliable; the decay at the end lets the model settle into a lower-loss region.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Why does Adam divide $m_t$ by $1-\beta_1^t$?</p>
+    <ol class="q-src">
+      <li>To make the learning rate decay over time</li>
+      <li>$m$ starts at 0, so early averages are biased toward 0; the division corrects that</li>
+      <li>To clip large gradients</li>
+      <li>To apply weight decay</li>
+    </ol>
+    <div class="q-explain">After one step, $m_1 = (1-\beta_1) g_1$, only 10% of the gradient with $\beta_1 = 0.9$. Dividing by $1 - 0.9 = 0.1$ restores it. As $t$ grows, $\beta_1^t \to 0$ and the correction fades away.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What is the key difference between AdamW and Adam with L2 regularization?</p>
+    <ol class="q-src">
+      <li>AdamW has no momentum</li>
+      <li>AdamW uses $\beta_2 = 0.95$</li>
+      <li>AdamW doesn't use a learning rate</li>
+      <li>AdamW applies weight decay directly to the weights, not through the gradient, so it isn't rescaled by $\sqrt{\hat v}$</li>
+    </ol>
+    <div class="q-explain">With L2, the decay term is divided by $\sqrt{\hat v}$, so heavily updated weights are barely regularized. Decoupling makes the shrinkage uniform (Loshchilov &amp; Hutter, 2019).</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A gradient has global norm 4 and the clipping threshold is $c = 1$. What does clipping do?</p>
+    <ol class="q-src">
+      <li>Sets every component larger than 1 to exactly 1</li>
+      <li>Skips the update entirely</li>
+      <li>Multiplies the whole gradient by 0.25, keeping its direction</li>
+      <li>Nothing, because clipping only applies to negative gradients</li>
+    </ol>
+    <div class="q-explain">Norm clipping rescales the whole vector by $c/\lVert g\rVert = 1/4$. Clipping each component separately (option A) is a different method, and it changes the direction.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Linking back to P2.2: on $L = x^2 + 10y^2$, plain gradient descent diverges for $\eta &gt; 0.1$. Which part of the problem sets that limit?</p>
+    <ol class="q-src">
+      <li>The steep $y$ direction: $y$ is multiplied by $(1 - 20\eta)$ each step</li>
+      <li>The gentle $x$ direction</li>
+      <li>The starting point</li>
+      <li>The number of steps</li>
+    </ol>
+    <div class="q-explain">The steepest direction caps the stable learning rate, which then makes the gentle direction crawl. Per-parameter step sizes (Adam) and momentum both address this.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Momentum</strong> averages gradients over time: oscillations cancel, consistent directions build up.</li>
+    <li><strong>Adam</strong> divides a momentum term by the running RMS gradient, so every parameter steps about $\eta$; <strong>bias correction</strong> fixes the zero start.</li>
+    <li><strong>AdamW</strong> decouples weight decay from the gradient. Typical LLM settings: $\beta_1 = 0.9$, $\beta_2 = 0.95$, $\lambda = 0.1$, clip at 1.0.</li>
+    <li>Schedules: <strong>linear warmup</strong>, then <strong>cosine decay</strong> (often to ~10% of peak) or <strong>WSD</strong> with a short final cool-down.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Implement SGD, momentum, Adam and AdamW in NumPy, race them on a toy problem with gradients of very different scales, and plot a warmup + cosine schedule. About 25 minutes, free, nothing to install.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m2-3-optimizers-schedules.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m2-3-a","front":"Write the momentum update and say what it fixes.","back":"$v_t = \\mu v_{t-1} + g_t$, $\\theta_t = \\theta_{t-1} - \\eta v_t$ (μ ≈ 0.9). It averages gradients over time: oscillating components cancel and consistent ones accumulate, reducing zig-zag and noise."},
+  {"id":"m2-3-b","front":"Write Adam's moment updates and parameter update.","back":"$m_t = \\beta_1 m_{t-1} + (1-\\beta_1) g_t$, $v_t = \\beta_2 v_{t-1} + (1-\\beta_2) g_t^2$, $\\hat m = m/(1-\\beta_1^t)$, $\\hat v = v/(1-\\beta_2^t)$, $\\theta \\leftarrow \\theta - \\eta\\,\\hat m/(\\sqrt{\\hat v}+\\epsilon)$."},
+  {"id":"m2-3-c","front":"Why does Adam need bias correction?","back":"$m$ and $v$ start at 0, so early averages are biased toward 0 (e.g. $m_1 = 0.1 g_1$). Dividing by $1-\\beta^t$ removes the bias; it fades as $\\beta^t \\to 0$."},
+  {"id":"m2-3-d","front":"What does AdamW change compared with Adam + L2?","back":"Weight decay is applied directly, $\\theta \\leftarrow \\theta - \\eta\\lambda\\theta$, instead of being added to the gradient (where it would be divided by $\\sqrt{\\hat v}$). Loshchilov & Hutter, 2019."},
+  {"id":"m2-3-e","front":"Typical LLM AdamW settings?","back":"β₁ = 0.9, β₂ = 0.95, weight decay 0.1, gradient clipping at global norm 1.0, peak LR ~1e-4 to 1e-3 (smaller for bigger models), with warmup then decay."},
+  {"id":"m2-3-f","front":"Describe warmup + cosine and WSD schedules.","back":"Warmup: linear ramp from ~0 to the peak over the first steps. Cosine: smooth decay to ~10% of peak by the end. WSD: warmup, hold the peak (stable), then a short decay over the last ~10–20%."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m2-3-optimizers.js"></script>
+<script src="../assets/js/anims/m2-3-schedule-playground.js"></script>
+</body>
+</html>

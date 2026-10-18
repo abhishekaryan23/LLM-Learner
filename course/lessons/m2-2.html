@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m2-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The next-token objective · LLMs, Animated</title>
+<meta name="description" content="How an LLM learns from raw text: shift-by-one targets, teacher forcing, the causal mask, and the average cross-entropy loss, with a worked example and a perplexity preview.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>The next-token objective</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Pretraining</span></div>
+<p class="lede">Pretraining has one job, repeated trillions of times: <strong>given the text so far, predict the next token</strong>. No labels, no human annotators. This lesson shows how a single sentence turns into many training examples, and how the loss you see in every training curve is computed.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Build inputs and shift-by-one targets from raw text, and explain teacher forcing.</li>
+    <li>Compute the average cross-entropy loss of a short sequence by hand.</li>
+    <li>Turn a loss into a perplexity, and sanity-check the loss at initialization.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> this lesson uses the <strong>causal mask</strong> from <a href="m1-1.html">M1.1 Attention</a>, <strong>cross-entropy</strong> from <a href="p1-6.html">P1.6 Entropy, cross-entropy &amp; KL</a> and <strong>softmax</strong> from <a href="p3-2.html">P3.2</a>. A quick skim of each is enough.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. Being wrong now is part of how it sticks.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Where do the "correct answers" (labels) come from when an LLM is pretrained?</p>
+    <ol class="q-src">
+      <li>Human annotators label each sentence</li>
+      <li>A smaller model labels the data first</li>
+      <li>The text itself: the label at each position is simply the next token</li>
+      <li>There are no correct answers; pretraining is unsupervised clustering</li>
+    </ol>
+    <div class="q-explain">This is <strong>self-supervised</strong> learning: the targets are cut from the same text as the inputs. That's why any text on the internet can be training data.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">From one 6-token sentence, how many next-token predictions can a model be trained on in a single forward pass?</p>
+    <ol class="q-src">
+      <li>1, the last token only</li>
+      <li>5, one for every position that has a next token</li>
+      <li>6</li>
+      <li>36, every pair of tokens</li>
+    </ol>
+    <div class="q-explain">Every position with a following token is a training example, and the causal mask lets all of them be computed at once.</div>
+  </div>
+</section>
+
+<h2>The text is its own label</h2>
+<p>A language model assigns a probability to the next token given all the previous ones: $p_\theta(x_{t+1} \mid x_1, \dots, x_t)$. To train it, we don't need anyone to write answers. Take any text, hide what comes next, and check the model's guess against what <em>actually</em> came next. That's <strong>self-supervised learning</strong>: supervised learning where the labels are carved out of the input.</p>
+
+<figure class="anim wide" data-anim="m2-2-next-token"></figure>
+
+<h2>Shift by one, train every position at once</h2>
+<p>In code, the targets are just the inputs shifted one place to the left. For a batch of token ids <code>tokens</code> with shape (batch, T + 1):</p>
+<pre><code>inputs  = tokens[:, :-1]          # everything but the last token
+targets = tokens[:, 1:]           # everything but the first
+logits  = model(inputs)           # (batch, T, vocab): one prediction per position
+loss = F.cross_entropy(logits.reshape(-1, vocab), targets.reshape(-1))</code></pre>
+<p>Two ideas make this efficient:</p>
+<ul>
+  <li><strong>The causal mask</strong> (M1.1). Position $t$ can only attend to positions $\le t$, so predicting token $t+1$ never peeks at it. That makes it legal to compute <em>all</em> $T$ predictions in one forward pass instead of $T$ separate ones.</li>
+  <li><strong>Teacher forcing.</strong> The inputs are always the <em>real</em> tokens, never the model's own guesses. Even if the model would have predicted "dog" after "the", position 2 still reads "cat". This keeps training parallel and stable. The flip side is a small mismatch with generation, where the model does read its own outputs (sometimes called <em>exposure bias</em>).</li>
+</ul>
+<p>Real pretraining doesn't use one sentence at a time. Documents are concatenated, separated by an end-of-text token, and cut into fixed-length windows (typically a few thousand tokens), so every window is full and every position contributes to the loss.</p>
+
+<h2>The loss: average cross-entropy</h2>
+<p>For a window of tokens $x_1, \dots, x_{T+1}$, the pretraining loss is</p>
+$$\mathcal{L}(\theta) = -\frac{1}{T}\sum_{t=1}^{T} \ln p_\theta\!\left(x_{t+1} \mid x_1, \dots, x_t\right)$$
+<p>In words: at each of the $T$ positions, take the probability $p_\theta$ that the model (with parameters $\theta$) gave to the token that really came next, take its natural log, flip the sign, and average. This is exactly the <strong>cross-entropy</strong> from P1.6 between the one-hot "true next token" distribution and the model's softmax output: with a one-hot target, $-\sum_k y_k \ln p_k$ keeps only the term for the correct token. In practice it is also averaged over every window in the batch.</p>
+<ul>
+  <li>Confident and right ($p = 0.9$): loss $-\ln 0.9 \approx 0.11$.</li>
+  <li>Unsure ($p = 0.1$): loss $\approx 2.30$.</li>
+  <li>Confident and wrong ($p = 0.001$): loss $\approx 6.91$. The log punishes confident mistakes hard.</li>
+</ul>
+<p class="math-note">With natural logs the loss is in <strong>nats</strong>. Divide by $\ln 2 \approx 0.693$ to get bits.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-next-word-game.webp" alt="Two friends playing a guess-what-comes-next game with picture cards, one guess glowing." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Two friends play a game with a story told on <strong>picture cards</strong>. One friend flips the cards over one at a time and the other has to <strong>guess what the next card shows</strong> before it's turned.</p>
+      <p>A good guess glows: "I was pretty sure it would be the cat!" A bad guess is a big surprise. After thousands of stories, the guesser gets really good, because to guess well you have to understand the story.</p>
+      <p>Where it breaks: the model doesn't make one guess. It spreads its bets over every possible card, and it's scored on how much it bet on the right one.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>A three-position window. The model gives the correct next tokens probabilities $0.2$, $0.5$ and $0.8$.</p>
+<ol class="steps">
+  <li>Per-position losses: $-\ln 0.2 \approx 1.609$, $-\ln 0.5 \approx 0.693$, $-\ln 0.8 \approx 0.223$.</li>
+  <li>Sum: $1.609 + 0.693 + 0.223 = 2.525$.</li>
+  <li>Average: $2.525 / 3 \approx 0.842$ nats. That's the loss.</li>
+  <li>Perplexity: $e^{0.842} \approx 2.32$.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Now the correct tokens get probabilities $0.5$, $0.25$ and $0.1$.</p>
+  <ol class="steps">
+    <li>Loss at the second position, $-\ln 0.25$: <span class="blank" data-answer="1.386" data-tol="0.01" data-hint="−ln 0.25 = ln 4 = 2 × ln 2 ≈ 2 × 0.693."></span></li>
+    <li>Loss at the third position, $-\ln 0.1$: <span class="blank" data-answer="2.303" data-tol="0.01" data-hint="−ln 0.1 = ln 10."></span></li>
+    <li>Average loss over the three positions: <span class="blank" data-answer="1.461" data-tol="0.01" data-hint="(0.693 + 1.386 + 2.303) ÷ 3."></span></li>
+    <li>Perplexity $e^{\text{loss}}$: <span class="blank" data-answer="4.31" data-tol="0.03" data-hint="e^1.461. Or: the cube root of (2 × 4 × 10) = 80."></span></li>
+  </ol>
+</section>
+
+<h2>Perplexity, and a sanity check at step 0</h2>
+<p><strong>Perplexity</strong> is $e^{\mathcal{L}}$. It reads as an "effective number of choices": a perplexity of 4.31 means the model is, on average, as unsure as if it were picking uniformly among about 4 tokens. Lesson <a href="m4-1.html">M4.1 Perplexity</a> covers its uses and pitfalls (it depends on the tokenizer, for one).</p>
+<p>A freshly initialized model spreads probability roughly evenly over its vocabulary of $V$ tokens, so every position costs about $-\ln(1/V) = \ln V$. For Llama 3's vocabulary of 128,256 tokens, that's $\ln 128{,}256 \approx 11.76$ nats. If your step-0 loss is far from $\ln V$, something is broken (initialization, masking or the target shift) before training has even begun.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> the falling curve in every pretraining report is this number, the average next-token cross-entropy, usually measured on held-out text. <strong>Scaling laws</strong> (M2.4) predict it, <strong>optimizers</strong> (M2.3) minimize it, and post-training (M3) reuses the same loss for supervised fine-tuning, only computed on the response tokens instead of everything.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">How does one window of raw text become a loss value during pretraining?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The window is split into inputs (all tokens but the last) and targets (the same tokens shifted one to the left). With a causal mask and teacher forcing, the model predicts a distribution at every position in one pass; each position's loss is −ln of the probability given to the true next token, and the loss is the average over all positions.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A training window holds 4,097 tokens. How many next-token predictions does it contribute to the loss?</p>
+    <ol class="q-src">
+      <li>1</li>
+      <li>4,096</li>
+      <li>4,097</li>
+      <li>4,096², one per pair of positions</li>
+    </ol>
+    <div class="q-explain">Every token except the last has a next token to predict: 4,097 − 1 = 4,096. That's why windows are often stored with one extra token.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What does <em>teacher forcing</em> mean?</p>
+    <ol class="q-src">
+      <li>A larger "teacher" model labels the training data</li>
+      <li>The learning rate is forced to stay constant</li>
+      <li>The model is trained on its own generated text</li>
+      <li>During training, each position reads the true previous tokens, not the model's own earlier predictions</li>
+    </ol>
+    <div class="q-explain">The real text is "forced" in as input at every position. That makes all positions independent given the data, so they can be trained in parallel.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Linking back to M1.1: someone forgets the causal mask during pretraining. What happens?</p>
+    <ol class="q-src">
+      <li>The training loss drops to nearly zero because each position can see its own target, and the model is useless for generation</li>
+      <li>Training is slower but the model ends up the same</li>
+      <li>The loss gets stuck at $\ln V$</li>
+      <li>Nothing; the mask only matters at inference</li>
+    </ol>
+    <div class="q-explain">Without the mask, position $t$ can attend to token $t+1$, which is its target. The model learns to copy, the loss looks wonderful, and at generation time (when there is no next token to copy) it falls apart.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A model has a vocabulary of 50,257 tokens (GPT-2's). Roughly what loss should you see at step 0 with a sensible random initialization?</p>
+    <ol class="q-src">
+      <li>About 0</li>
+      <li>About 1</li>
+      <li>About 10.8 nats</li>
+      <li>About 50,257</li>
+    </ol>
+    <div class="q-explain">Near-uniform predictions give $-\ln(1/V) = \ln 50{,}257 \approx 10.8$ nats per position, a perplexity of about $V$ itself.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Pretraining is <strong>self-supervised</strong>: the target at each position is the next token of the same text.</li>
+    <li>Targets are the inputs <strong>shifted by one</strong>; the <strong>causal mask</strong> and <strong>teacher forcing</strong> let every position train in parallel.</li>
+    <li>Loss $= -\frac{1}{T}\sum_t \ln p_\theta(x_{t+1}\mid x_{\le t})$, the average <strong>cross-entropy</strong> over all positions.</li>
+    <li><strong>Perplexity</strong> $= e^{\text{loss}}$; at initialization the loss should be about $\ln V$.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m2-2-a","front":"Why is LLM pretraining called self-supervised?","back":"The labels come from the data itself: the target at each position is simply the next token of the same text, so no human annotation is needed."},
+  {"id":"m2-2-b","front":"How are inputs and targets built from a window of tokens?","back":"Inputs = tokens[:-1], targets = tokens[1:]: the targets are the inputs shifted one position left. A window of T+1 tokens gives T predictions."},
+  {"id":"m2-2-c","front":"Write the pretraining loss and say what each part means.","back":"$\\mathcal{L} = -\\frac{1}{T}\\sum_{t=1}^{T}\\ln p_\\theta(x_{t+1}\\mid x_{\\le t})$: the average, over positions, of minus the log-probability the model gave the true next token (cross-entropy with a one-hot target)."},
+  {"id":"m2-2-d","front":"What is teacher forcing, and what makes parallel training possible?","back":"Each position reads the true previous tokens (not the model's own guesses). Combined with the causal mask, all positions can be predicted in a single forward pass."},
+  {"id":"m2-2-e","front":"How do you turn a loss into perplexity, and what should the loss be at initialization?","back":"Perplexity $= e^{\\mathcal{L}}$ (with natural-log loss). At initialization, near-uniform predictions give $\\mathcal{L} \\approx \\ln V$, e.g. ≈ 11.76 for a 128,256-token vocabulary."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m2-2-next-token.js"></script>
+</body>
+</html>

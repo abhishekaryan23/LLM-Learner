@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m1-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Multi-head attention · LLMs, Animated</title>
+<meta name="description" content="Why transformers run several attention heads side by side: split d_model into heads, attend separately, concatenate, project with W_O. Plus what heads learn, and how GQA and MQA share keys and values.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Multi-head attention</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Transformers</span></div>
+<p class="lede">One attention head gives each token one set of weights, so it can only take <em>one</em> blended look at the sentence. Real transformers run many smaller heads side by side, each free to look for something different. Surprisingly, this costs no extra parameters.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Walk through multi-head attention: split into heads, attend, concatenate, project with $W_O$.</li>
+    <li>Work out every shape, and show the parameter count is the same as one big head.</li>
+    <li>Explain what grouped-query and multi-query attention share, and why that matters for generation.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> this lesson builds directly on <a href="m1-1.html">Attention (M1.1)</a>: queries, keys, values, the $\sqrt{d_k}$ scaling and the causal mask. Shapes of matrix products come from <a href="p1-2.html">Matrices as transformations (P1.2)</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model has vectors of size $d_{\text{model}} = 512$ and 8 attention heads. How long is each head's query vector, typically?</p>
+    <ol class="q-src">
+      <li>512, the same as the model</li>
+      <li>64</li>
+      <li>8</li>
+      <li>4,096</li>
+    </ol>
+    <div class="q-explain">The model's width is <em>split</em> across heads: $512 / 8 = 64$. That's exactly the setup in the original transformer paper.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Going from 1 attention head to 8 heads, with the same $d_{\text{model}}$, multiplies the attention layer's parameter count by about…</p>
+    <ol class="q-src">
+      <li>8</li>
+      <li>64</li>
+      <li>1, so no change</li>
+      <li>1/8</li>
+    </ol>
+    <div class="q-explain">Each of the 8 heads is 8 times narrower, so the total is the same. You'll see the 8 heads' matrices are just slices of the one big matrix.</div>
+  </div>
+</section>
+
+<h2>One head, one blend</h2>
+<p>In <a href="m1-1.html">M1.1</a>, “bank” in “I sat by the river bank” put 0.60 of its attention on <em>river</em>. That's one softmax, so the weights must sum to 1, and the output is one weighted average of the values.</p>
+<p>But a word usually needs several kinds of context at once. For “bank” it helps to know the <strong>topic</strong> (river), the <strong>preposition</strong> that governs it (by) and the <strong>verb</strong> of the sentence (sat). With one head these relations compete for the same 100% of weight, and whatever gets averaged together is blurred. The original paper puts it as: with a single head, “averaging inhibits” attending to different kinds of information at different positions.</p>
+<p>The fix is to run several attentions in parallel, each with its own learned $W_Q$, $W_K$, $W_V$, so each can learn its own notion of “relevant”.</p>
+
+<h2>Split, attend, concatenate, mix</h2>
+<p>With $h$ heads, each head works in a smaller space of size $d_k = d_{\text{model}} / h$:</p>
+$$\mathrm{head}_i = \mathrm{Attention}\!\left(XW_Q^{(i)},\; XW_K^{(i)},\; XW_V^{(i)}\right),\quad i = 1,\dots,h$$
+$$\mathrm{MultiHead}(X) = \mathrm{Concat}(\mathrm{head}_1, \dots, \mathrm{head}_h)\,W_O$$
+<p class="math-note">Vaswani et al., 2017, “Attention Is All You Need”. They used $d_{\text{model}} = 512$, $h = 8$, $d_k = 64$.</p>
+<ul>
+  <li>$X$ is the $n \times d_{\text{model}}$ matrix of token vectors, one row per token.</li>
+  <li>$W_Q^{(i)}, W_K^{(i)}, W_V^{(i)}$ are head $i$'s own learned matrices, each $d_{\text{model}} \times d_k$.</li>
+  <li>$\mathrm{Attention}$ is exactly M1.1's $\mathrm{softmax}(QK^\top/\sqrt{d_k} + M)V$, run separately per head. Each head outputs $n \times d_k$.</li>
+  <li>$\mathrm{Concat}$ glues the $h$ outputs side by side: back to $n \times d_{\text{model}}$.</li>
+  <li>$W_O$ is a learned $d_{\text{model}} \times d_{\text{model}}$ <strong>output projection</strong> that mixes the heads' results.</li>
+</ul>
+
+<figure class="anim wide" data-anim="m1-2-multihead"></figure>
+
+<p>In code nobody loops over heads. You compute $Q = XW_Q$ with one big $d_{\text{model}} \times d_{\text{model}}$ matrix, then <strong>reshape</strong> $Q$ from $(n, d_{\text{model}})$ to $(n, h, d_k)$ and move the head axis first, giving $(h, n, d_k)$. One batched matrix multiply then computes all $h$ score matrices, each $n \times n$, at once. Head $i$'s $W_Q^{(i)}$ is simply columns $i \cdot d_k$ to $(i+1) \cdot d_k - 1$ of the big $W_Q$.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-multihead-detectives.webp" alt="Four little detectives searching the same scene, each for a different kind of clue, then pinning their findings together on one shared board." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Four little detectives walk into the <strong>same room</strong>. One only looks for footprints, one for fingerprints, one for dropped notes, one just takes in the whole scene.</p>
+      <p>Each detective writes down what <em>they</em> found. Then they pin all their notes on <strong>one big board</strong>, and the chief reads the board to understand the whole story.</p>
+      <p>The detectives are the heads; the board is the concatenation and $W_O$. Where it breaks: nobody tells real heads what to look for. Their jobs emerge during training and are often messy and overlapping.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Same parameters, same compute</h2>
+<p>Count the weights. Each head has three $d_{\text{model}} \times d_k$ matrices, and there are $h$ heads, so the queries, keys and values use $3 \cdot h \cdot d_{\text{model}} \cdot d_k = 3\,d_{\text{model}}^2$ numbers. Add $W_O$:</p>
+$$\text{attention parameters per layer} = 4\,d_{\text{model}}^2 \quad (\text{ignoring biases})$$
+<p>That does not depend on $h$. The score computation is also the same size: $h$ heads each do $n^2 \cdot d_k$ multiply-adds, which totals $n^2 \cdot d_{\text{model}}$, just like one wide head. What you <em>gain</em> is $h$ separate attention patterns. What you give up is width per head: each head compares queries and keys in only $d_k$ dimensions. In practice $d_k$ is usually 64 or 128.</p>
+
+<h3>Worked example</h3>
+<p>The original transformer: $d_{\text{model}} = 512$, $h = 8$, and a sequence of $n = 10$ tokens.</p>
+<ol class="steps">
+  <li><strong>Head size:</strong> $d_k = 512 / 8 = 64$.</li>
+  <li><strong>Queries:</strong> $Q = XW_Q$ is $(10 \times 512)(512 \times 512) = 10 \times 512$, reshaped to $8$ heads of $10 \times 64$. Same for $K$ and $V$.</li>
+  <li><strong>Scores:</strong> per head $(10 \times 64)(64 \times 10) = 10 \times 10$, divided by $\sqrt{64} = 8$. Eight of these.</li>
+  <li><strong>Outputs:</strong> each head gives $10 \times 64$; concatenated, $10 \times 512$; times $W_O$ $(512 \times 512)$, still $10 \times 512$.</li>
+  <li><strong>Parameters:</strong> $4 \times 512^2 = 1{,}048{,}576$, the same as a single 512-wide head.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>An attention layer shaped like Llama 2 7B's: $d_{\text{model}} = 4096$ with $h = 32$ heads.</p>
+  <ol class="steps">
+    <li>Head size $d_k =$ <span class="blank" data-answer="128" data-tol="0.001" data-hint="Divide d_model by the number of heads: 4096 / 32."></span></li>
+    <li>Each head's scores are divided by $\sqrt{d_k} \approx$ <span class="blank" data-answer="11.31" data-tol="0.02" data-hint="The square root of the head size, √128, not √4096."></span></li>
+    <li>Attention parameters per layer, in millions: <span class="blank" data-answer="67.1" data-tol="0.15" data-hint="4 · 4096² = 4 × 16,777,216 ≈ 67.1 million."></span></li>
+    <li>Now use grouped-query attention with 8 K/V heads (as Llama 3 8B does). $W_K$ becomes $4096 \times (8 \cdot 128)$. Its parameters, in millions: <span class="blank" data-answer="4.19" data-tol="0.02" data-hint="8 × 128 = 1024 columns, and 4096 × 1024 = 4,194,304."></span></li>
+  </ol>
+</section>
+
+<h2>What do heads actually learn?</h2>
+<p>Nobody assigns roles. Each head's matrices start random and are shaped by gradient descent like every other weight. Researchers then <em>look</em> at trained models and find some recognisable patterns:</p>
+<ul>
+  <li><strong>Positional heads</strong> that mostly attend to the previous token, or a fixed offset.</li>
+  <li><strong>Syntactic heads</strong>: in BERT, some heads track relations such as a verb's direct object or a noun's determiner surprisingly well (Clark et al., 2019, “What Does BERT Look At?”).</li>
+  <li><strong>Induction heads</strong>: having seen “… A B … A”, they attend to the earlier B and help predict it again. They appear to drive much of in-context copying (Olsson et al., 2022).</li>
+</ul>
+<p>Treat these stories with care. Many heads can be pruned with little loss in quality (Michel et al., 2019, “Are Sixteen Heads Really Better than One?”; Voita et al., 2019), so heads are often redundant. Most heads don't have one clean job. And high attention weight is not a reliable explanation of <em>why</em> a model made a prediction (Jain &amp; Wallace, 2019, “Attention is not Explanation”).</p>
+
+<h2>Sharing keys and values: MQA and GQA</h2>
+<p>When a model generates text it keeps every past token's keys and values in memory, the <strong>KV cache</strong> (<a href="m1-5.html">M1.5</a>). With standard multi-head attention (MHA) that's one key and one value vector <em>per head</em> per token per layer, and reading it all back each step becomes the bottleneck.</p>
+<ul>
+  <li><strong>Multi-query attention (MQA)</strong> keeps many query heads but just <em>one</em> shared key/value head (Shazeer, 2019, “Fast Transformer Decoding: One Write-Head is All You Need”). The cache shrinks by a factor of $h$, at some cost in quality. PaLM used it.</li>
+  <li><strong>Grouped-query attention (GQA)</strong> is the middle ground: query heads are split into groups, and each group shares one K/V head (Ainslie et al., 2023). Llama 2 70B uses 64 query heads with 8 K/V heads; Llama 3 8B and Mistral 7B use 32 with 8. In the GQA paper's experiments, quality stayed close to full MHA.</li>
+</ul>
+<p>Only $W_K$ and $W_V$ shrink: they map to $n_{\text{kv}} \cdot d_k$ columns instead of $h \cdot d_k$. The queries, and therefore the number of different attention patterns, stay the same.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> head count is a design choice made with serving in mind. Since about 2023, most open-weight LLMs use GQA because the KV cache, not the weights, often limits how many users and how long a context a GPU can serve. Some newer models go further: DeepSeek-V2 (2024) compresses keys and values into a small shared latent vector (“multi-head latent attention”). You'll compute real cache sizes in <a href="m1-5.html">M1.5</a>.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a friend why a transformer uses several small heads instead of one big one, and why that doesn't add parameters.</p>
+  <div class="model-answer"><strong>Model answer:</strong> One head gives each token a single softmax, so all the relations it cares about have to share one weighted average. With $h$ heads, each has its own query, key and value projections of size $d_{\text{model}}/h$, so each can attend to something different; their outputs are concatenated and mixed by $W_O$. Because each head is $h$ times narrower, the per-head matrices are just slices of the big ones, so the total stays $4\,d_{\text{model}}^2$.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">GPT-2 small has $d_{\text{model}} = 768$ and 12 heads. What is $d_k$?</p>
+    <ol class="q-src">
+      <li>768</li>
+      <li>64</li>
+      <li>12</li>
+      <li>9,216</li>
+    </ol>
+    <div class="q-explain">$768 / 12 = 64$. Each head works in a 64-dimensional slice.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In a model with $d_{\text{model}} = 4096$ and 32 heads, what are each head's attention scores divided by? (Think back to M1.1.)</p>
+    <ol class="q-src">
+      <li>$\sqrt{4096} = 64$</li>
+      <li>32, the number of heads</li>
+      <li>$\sqrt{128} \approx 11.3$</li>
+      <li>Nothing; scaling is only for single-head attention</li>
+    </ol>
+    <div class="q-explain">The scaling fixes the variance of a dot product of length $d_k$, and each head's dot products have length $d_k = 4096/32 = 128$. So divide by $\sqrt{128}$.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What does the output projection $W_O$ do?</p>
+    <ol class="q-src">
+      <li>Mixes the concatenated head outputs, so information from every head can reach every dimension of the result</li>
+      <li>Averages the heads' attention weights into one pattern</li>
+      <li>Picks the single most useful head for each token</li>
+      <li>Applies the causal mask</li>
+    </ol>
+    <div class="q-explain">After concatenation each head's result sits in its own slice of dimensions. $W_O$ is a learned $d_{\text{model}} \times d_{\text{model}}$ matrix that combines them. The weights themselves are never averaged across heads.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In grouped-query attention, what is shared within a group of heads?</p>
+    <ol class="q-src">
+      <li>The queries</li>
+      <li>The attention weights</li>
+      <li>The output projection</li>
+      <li>The key and value projections, which shrinks the KV cache</li>
+    </ol>
+    <div class="q-explain">Each head keeps its own queries, so attention patterns still differ. Only K and V are shared within a group, so fewer K/V vectors need storing during generation.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>One head = one softmax = one blended view. <strong>Multiple heads</strong> let a token attend to several things at once.</li>
+    <li>Split $d_{\text{model}}$ into $h$ heads of $d_k = d_{\text{model}}/h$; attend per head; <strong>concatenate</strong>; mix with $W_O$.</li>
+    <li>Parameters ($4\,d_{\text{model}}^2$) and score compute are the <strong>same</strong> as one wide head.</li>
+    <li>Heads sometimes show interpretable roles (previous token, syntax, induction), but many are redundant and roles are rarely clean.</li>
+    <li><strong>GQA/MQA</strong> share keys and values across query heads to shrink the KV cache; GQA is now the common default.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Python</div>
+    <p>Build multi-head attention in NumPy: split and merge heads, check every shape, confirm the parameter count doesn't change with $h$, match PyTorch's <code>nn.MultiheadAttention</code>, and turn it into GQA. About 25 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m1-2-multihead.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m1-2-a","front":"Why use several attention heads instead of one?","back":"One head gives each token a single softmax, so all relations share one weighted average. Several heads, each with its own $W_Q, W_K, W_V$, can attend to different things (topic, syntax, position) at the same time."},
+  {"id":"m1-2-b","front":"Write multi-head attention as two formulas.","back":"$\\mathrm{head}_i = \\mathrm{Attention}(XW_Q^{(i)}, XW_K^{(i)}, XW_V^{(i)})$ and $\\mathrm{MultiHead}(X) = \\mathrm{Concat}(\\mathrm{head}_1,\\dots,\\mathrm{head}_h)\\,W_O$."},
+  {"id":"m1-2-c","front":"With $d_{\\text{model}}$ and $h$ heads, what is $d_k$, and what are scores divided by?","back":"$d_k = d_{\\text{model}}/h$, and each head's scores are divided by $\\sqrt{d_k}$ (e.g. 512 / 8 = 64, divide by 8)."},
+  {"id":"m1-2-d","front":"How many parameters does a multi-head attention layer have, and how does it depend on $h$?","back":"$4\\,d_{\\text{model}}^2$ (for $W_Q, W_K, W_V, W_O$, ignoring biases), independent of $h$: the per-head matrices are slices of the full ones."},
+  {"id":"m1-2-e","front":"What do MQA and GQA share, and why?","back":"Key and value projections: MQA has one K/V head for all query heads, GQA one per group. This shrinks the KV cache and the memory read per generated token, with queries still per head."},
+  {"id":"m1-2-f","front":"Name two kinds of heads researchers have observed, and one caveat.","back":"Previous-token/positional heads, syntactic heads (e.g. verb→object), induction heads (copy what followed an earlier match). Caveat: many heads are redundant and prunable, roles are rarely clean, and attention weights aren't a faithful explanation."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m1-2-multihead.js"></script>
+</body>
+</html>

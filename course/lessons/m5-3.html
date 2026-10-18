@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m5-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mixture of experts · LLMs, Animated</title>
+<meta name="description" content="How mixture-of-experts LLMs route each token to a few expert MLPs: top-k routers, total vs active parameters, load balancing, capacity, expert parallelism, Mixtral and the Switch Transformer.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Mixture of experts</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Optimization</span></div>
+<p class="lede">What if a model could hold 47 billion parameters but use only about 13 billion of them for each token? That's a <strong>mixture of experts</strong>: many specialist sub-networks, plus a router that picks a couple of them per token. Most of today's largest open models are built this way.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how a top-k router replaces the dense MLP, and compute a model's total and active parameters.</li>
+    <li>Explain why MoE training needs load balancing, and what expert capacity and dropped tokens are.</li>
+    <li>Say why MoE buys more capacity per FLOP but costs more memory and communication.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> the attention-plus-MLP block from <a href="m1-4.html">M1.4 The decoder-only transformer</a>, the softmax from <a href="p3-2.html">P3.2 Softmax</a>, and multi-GPU training from <a href="m2-5.html">M2.5 Distributed training &amp; mixed precision</a>. <a href="m5-1.html">M5.1 Quantization</a> helps with the memory side.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model has 8 expert MLPs per layer and sends each token through 2 of them. Compared with a dense model of the same <em>total</em> size, its compute per token is…</p>
+    <ol class="q-src">
+      <li>the same: every parameter still exists</li>
+      <li>much lower: only the chosen experts (plus the shared parts) do any work</li>
+      <li>higher, because of the router</li>
+      <li>exactly 1/8</li>
+    </ol>
+    <div class="q-explain">Compute follows the <strong>active</strong> parameters: attention, embeddings and 2 of the 8 experts. The router is tiny. It's not exactly 1/8 (or 2/8) because attention and embeddings are shared and always run.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">How much of that model must sit in GPU memory to serve it?</p>
+    <ol class="q-src">
+      <li>Only the 2 experts in use</li>
+      <li>About a quarter of it</li>
+      <li>All of it, because any token may pick any expert</li>
+      <li>None: experts load from disk on demand without slowing anything down</li>
+    </ol>
+    <div class="q-explain">The router decides per token, so every expert must be ready. MoE saves compute, not memory.</div>
+  </div>
+</section>
+
+<h2>From one MLP to many experts</h2>
+<p>Each transformer block (<a href="m1-4.html">M1.4</a>) has attention followed by an <strong>MLP</strong>, and in a typical dense LLM the MLPs hold around two-thirds of all the parameters. A <strong>mixture-of-experts</strong> (MoE) layer replaces that one MLP with $E$ separate MLPs, the <strong>experts</strong>, and adds a small <strong>router</strong> (or gating network) that chooses which experts each token uses:</p>
+$$p = \mathrm{softmax}(W_r\,x),\qquad y = \sum_{i \in \mathrm{TopK}(p)} g_i\,E_i(x),\qquad g_i = \frac{p_i}{\sum_{j \in \mathrm{TopK}(p)} p_j}$$
+<ul>
+  <li>$x$ is one token's hidden vector, and $W_r$ is the router's weight matrix, one row per expert. So $p$ holds one probability per expert.</li>
+  <li>$\mathrm{TopK}(p)$ is the set of the $k$ experts with the highest probability, typically $k = 1$ or $2$ (some recent models use 8 of 256 small experts).</li>
+  <li>$E_i(x)$ is expert $i$'s output, an ordinary MLP applied to $x$.</li>
+  <li>$g_i$ is the <strong>gate</strong>: the chosen experts' probabilities rescaled to sum to 1. (Some designs, like the Switch Transformer, use $p_i$ directly.)</li>
+</ul>
+<p>Every token can use different experts, in every layer. The idea goes back to Shazeer et al. (2017, “Outrageously Large Neural Networks”); GShard (Lepikhin et al., 2021) brought it to transformers, and the <strong>Switch Transformer</strong> (Fedus, Zoph &amp; Shazeer, 2022) simplified it to $k = 1$ and scaled it to 1.6 trillion parameters.</p>
+
+<figure class="anim wide" data-anim="m5-3-moe"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-moe-hospital.webp" alt="A robot receptionist sending each patient to one or two specialist doctors while the other doctors rest." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A hospital has a <strong>robot receptionist</strong> and a whole corridor of specialist doctors. Each patient who walks in is sent to just <strong>one or two</strong> doctors who suit them best. The other doctors rest until a patient who needs them arrives.</p>
+      <p>So the hospital knows a huge amount (lots of doctors), but each visit is quick (only a couple of doctors per patient). If the receptionist sends everyone to the same doctor, a long queue forms, so it has to <strong>spread patients out</strong>.</p>
+      <p>Where the analogy breaks: real experts don't specialize in neat topics like “hearts” or “bones”. They tend to pick up patterns in tokens and syntax that no one designed, and every layer has its own receptionist.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Total versus active parameters</h2>
+<p>MoE splits “model size” into two numbers. <strong>Total parameters</strong> is everything stored, which sets the memory bill. <strong>Active parameters</strong> is what one token actually uses, which sets the compute: a forward pass costs about $2 \times$ (active parameters) FLOPs per token.</p>
+
+<h3>Worked example: a Mixtral-like model</h3>
+<p>Mixtral 8x7B (Jiang et al., 2024) has 32 layers, hidden size 4096, and 8 experts per layer with top-2 routing. Each expert is a SwiGLU MLP with three weight matrices of size $4096 \times 14336$.</p>
+<ol class="steps">
+  <li><strong>One expert:</strong> $3 \times 4096 \times 14336 \approx 176.2$M parameters.</li>
+  <li><strong>All experts:</strong> $32 \text{ layers} \times 8 \times 176.2\text{M} \approx 45.1$B.</li>
+  <li><strong>Shared parts:</strong> attention ($\approx 41.9$M per layer with grouped-query attention, so $\approx 1.34$B) plus input and output embeddings ($2 \times 32000 \times 4096 \approx 0.26$B), about 1.6B in all.</li>
+  <li><strong>Total:</strong> $45.1 + 1.6 \approx 46.7$B. <strong>Active:</strong> $32 \times 2 \times 176.2\text{M} \approx 11.3$B in experts, plus the 1.6B shared $\approx 12.9$B.</li>
+</ol>
+<p>That matches Mixtral's reported figures of roughly 47B total and 13B active. Note it's not $8 \times 7 = 56$B: only the MLPs are copied 8 times, while attention and embeddings are shared. Each token costs about $2 \times 12.9 \approx 26$ GFLOPs, like a 13B dense model, but the weights need about 93 GB in bf16, like a 47B one.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A model has 24 layers, 2B shared parameters (attention, embeddings, norms), and 16 experts of 50M parameters per layer. It routes each token to the top 2.</p>
+  <ol class="steps">
+    <li>Total parameters, in billions: <span class="blank" data-answer="21.2" data-tol="0.05" data-hint="2B + 24 × 16 × 0.05B."></span></li>
+    <li>Active parameters per token, in billions: <span class="blank" data-answer="4.4" data-tol="0.05" data-hint="2B + 24 × 2 × 0.05B."></span></li>
+    <li>Forward FLOPs per token, in GFLOPs: <span class="blank" data-answer="8.8" data-tol="0.05" data-hint="About 2 FLOPs per active parameter."></span></li>
+    <li>Memory for the weights in bf16, in GB: <span class="blank" data-answer="42.4" data-tol="0.1" data-hint="Every parameter must be stored: total × 2 bytes."></span></li>
+  </ol>
+</section>
+
+<h2>Keeping the experts busy: load balancing</h2>
+<p>Left alone, routers collapse. A few experts get slightly better early on, so they get more tokens, so they get better still, while the rest starve and stop learning. That wastes parameters, and it also overloads the GPUs holding the popular experts.</p>
+<p>The Switch Transformer adds an <strong>auxiliary load-balancing loss</strong> to the training loss:</p>
+$$\mathcal{L}_{\text{aux}} = \alpha \cdot E \sum_{i=1}^{E} f_i\,P_i$$
+<ul>
+  <li>$f_i$ is the fraction of tokens in the batch actually routed to expert $i$.</li>
+  <li>$P_i$ is the router's average probability for expert $i$ over the same tokens.</li>
+  <li>$\alpha$ is a small weight (0.01 in the Switch paper), and $E$ the number of experts.</li>
+</ul>
+<p>With perfectly even routing, every $f_i = P_i = 1/E$, and the sum times $E$ equals 1, its minimum. Why both terms? The counts $f_i$ come from a hard top-k choice and have no gradient, while $P_i$ is a smooth softmax output, so the gradient flows through $P_i$ and pushes probability away from the over-used experts.</p>
+<p>Balancing has a hardware side too. Each expert gets a fixed <strong>capacity</strong>, a buffer for $C = \text{capacity factor} \times \text{tokens} / E$ tokens per batch. Tokens beyond it are <strong>dropped</strong>: they skip that expert layer and pass through on the residual connection. A capacity factor a little above 1 (such as 1.25) absorbs random fluctuation at the cost of some padding. Newer systems refine all this: a router <strong>z-loss</strong> keeps router logits small for stability (Zoph et al., 2022), “dropless” implementations avoid dropping tokens at all, and DeepSeek-V3 (DeepSeek-AI, 2024) balances with no auxiliary loss, by adding a per-expert bias to the routing scores and nudging it after each step.</p>
+
+<section class="playground" id="moe-playground" aria-labelledby="mpg">
+  <h3 id="mpg">Playground: route a batch</h3>
+  <p class="math-note" style="margin:0">64 tokens each pick 2 of 8 experts. The router starts with favourites. Change the capacity factor, then press Balance to run the bias update DeepSeek-V3 uses.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Capacity factor = <output>1.25</output></span>
+      <input type="range" min="0" max="3" step="1" value="1" aria-describedby="mpg-hint">
+    </label>
+    <div class="pg-buttons">
+      <button type="button" class="btn" data-act="batch">New batch</button>
+      <button type="button" class="btn btn-primary" data-act="balance">Balance ×10</button>
+      <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+    </div>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="mpg-hint" style="margin:4px 0 0"></p>
+</section>
+
+<h2>Expert parallelism and the memory bill</h2>
+<p>An MoE model's experts usually don't fit on one GPU, so they're spread out: GPU 1 holds some experts, GPU 2 others, and so on. This is <strong>expert parallelism</strong>. In every MoE layer, each GPU sends each token to whichever GPUs hold its chosen experts (an <strong>all-to-all</strong> exchange), the experts run, and a second all-to-all sends the results back. That communication is why MoE training and serving lean heavily on fast interconnects, and it combines with the data and tensor parallelism from <a href="m2-5.html">M2.5</a>.</p>
+<p>The trade-off, in one line: <strong>MoE gives more capacity per FLOP but needs more memory</strong>.</p>
+<ul>
+  <li><strong>Capacity per FLOP:</strong> a model's knowledge grows with its total parameters, but the cost per token grows only with the active ones. The Switch Transformer reported up to 7× faster pretraining than a dense T5-Base using the same compute per token.</li>
+  <li><strong>Memory:</strong> all experts must stay loaded. Mixtral computes like a 13B model but needs the memory of a 47B one, which is one reason quantization (<a href="m5-1.html">M5.1</a>) is so popular for MoE models.</li>
+  <li><strong>Bandwidth:</strong> for a single stream, each token reads only its active experts' weights, which makes MoE decoding fast. In a large batch, different tokens hit different experts, so nearly all expert weights get read every step, and the advantage shifts to compute (more on batching in <a href="m5-6.html">M5.6</a>).</li>
+  <li><strong>Practicalities:</strong> routing adds communication, uneven loads cause stragglers, and MoE models have a reputation for being trickier to train and fine-tune stably.</li>
+</ul>
+
+<div class="why"><strong>Why this matters in practice:</strong> many of the largest open-weight models of 2025–2026 are MoE. DeepSeek-V3 has 671B total and 37B active parameters (256 small routed experts, 8 per token, plus one shared expert that every token uses). Qwen3-235B-A22B puts the counts in its name: 235B total, 22B active. OpenAI's gpt-oss-120b has about 117B total and 5.1B active. When you read a model card, look for both numbers: total tells you the hardware you need, active tells you roughly how fast it runs.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why can Mixtral 8x7B compute each token about as cheaply as a 13B dense model, yet need the GPU memory of a 47B model?</p>
+  <div class="model-answer"><strong>Model answer:</strong> In every layer its router sends each token to only 2 of 8 expert MLPs, so a token touches about 13B parameters (the 2 experts plus the shared attention and embeddings) and the FLOPs scale with that. But different tokens choose different experts, so all 8 experts in every layer, about 47B parameters, must be loaded and ready.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">A model has 3B shared parameters and 32 MoE layers, each with 64 experts of 20M parameters, routing to the top 4. How many parameters are active per token?</p>
+    <ol class="q-src">
+      <li>About 5.6B</li>
+      <li>About 44B</li>
+      <li>About 2.6B</li>
+      <li>About 3.1B</li>
+    </ol>
+    <div class="q-explain">Active $= 3\text{B} + 32 \times 4 \times 0.02\text{B} = 3 + 2.56 \approx 5.6$B. About 44B is the total ($3 + 32 \times 64 \times 0.02$), and 2.56B forgets the shared parameters.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In the Switch load-balancing loss $\alpha E \sum_i f_i P_i$, why include the mean router probability $P_i$ and not just the token fractions $f_i$?</p>
+    <ol class="q-src">
+      <li>$P_i$ makes the loss larger, so it trains faster</li>
+      <li>The fractions $f_i$ always equal $1/E$</li>
+      <li>$f_i$ comes from a hard top-k choice and has no gradient; $P_i$ is differentiable, so the router can learn from it</li>
+      <li>$P_i$ counts dropped tokens</li>
+    </ol>
+    <div class="q-explain">Counting which experts won is a discrete operation. The product $f_i P_i$ is large when an expert is both popular and highly scored, and the gradient through $P_i$ pushes the router away from it.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In a Switch-style MoE with a fixed capacity, what happens to a token routed to an expert that is already full?</p>
+    <ol class="q-src">
+      <li>Training stops with an error</li>
+      <li>It's dropped from that layer's expert computation and passes through on the residual connection</li>
+      <li>It waits for the next batch</li>
+      <li>It's sent to every other expert instead</li>
+    </ol>
+    <div class="q-explain">Overflow tokens skip the expert, so their output for that layer is just the residual stream. A capacity factor above 1, or good balancing, keeps this rare; dropless designs avoid it entirely.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why is 4-bit weight quantization (<a href="m5-1.html">M5.1</a>) especially attractive for serving an MoE model?</p>
+    <ol class="q-src">
+      <li>It removes the need for a router</li>
+      <li>Quantization only works on experts</li>
+      <li>It reduces the number of active parameters</li>
+      <li>Memory is MoE's main cost, since all experts must be resident; quantization cuts that footprint roughly 4× versus bf16</li>
+    </ol>
+    <div class="q-explain">MoE already saves compute through sparse activation; what it doesn't save is memory. Quantizing the experts attacks exactly that. The active parameter count doesn't change, only their bytes.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>An MoE layer swaps one MLP for $E$ expert MLPs plus a router; each token uses only its <strong>top-k</strong> experts, weighted by gates.</li>
+    <li><strong>Total</strong> parameters set memory; <strong>active</strong> parameters set compute (about $2\times$ active FLOPs per token). Mixtral 8x7B: about 47B total, 13B active.</li>
+    <li>Routers collapse without <strong>load balancing</strong> (an auxiliary loss or a bias update); fixed <strong>capacity</strong> means overflow tokens get dropped.</li>
+    <li><strong>Expert parallelism</strong> spreads experts across GPUs, with all-to-all communication in every MoE layer.</li>
+    <li>MoE buys more capacity per FLOP, paid for in memory and communication.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Python</div>
+    <p>Build a top-k router with softmax gates in NumPy, run a tiny MoE layer, measure expert load and compute the Switch load-balancing loss, then watch a biased router's loss rise. About 20 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m5-3-moe-router.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m5-3-a","front":"What does an MoE layer replace, and with what?","back":"It replaces a block's dense MLP with $E$ expert MLPs plus a router; each token is processed by only its top-k experts, and their outputs are combined with gate weights."},
+  {"id":"m5-3-b","front":"Write the top-k MoE output with renormalized gates.","back":"$p = \\mathrm{softmax}(W_r x)$, $y = \\sum_{i \\in \\mathrm{TopK}(p)} g_i E_i(x)$, with $g_i = p_i / \\sum_{j \\in \\mathrm{TopK}} p_j$."},
+  {"id":"m5-3-c","front":"Total vs active parameters: what does each determine? Mixtral 8x7B's numbers?","back":"Total = everything stored, so memory. Active = what one token uses, so compute (≈ 2 × active FLOPs per token). Mixtral: ≈ 47B total, ≈ 13B active (not 56B: attention and embeddings are shared)."},
+  {"id":"m5-3-d","front":"What is the Switch Transformer load-balancing loss, and why is it needed?","back":"$\\alpha E \\sum_i f_i P_i$, with $f_i$ the fraction of tokens sent to expert $i$ and $P_i$ its mean router probability. Without it the router collapses onto a few experts; the minimum is at uniform routing."},
+  {"id":"m5-3-e","front":"What are expert capacity and dropped tokens?","back":"Each expert processes at most $C = $ capacity factor × tokens / $E$ tokens per batch. Overflow tokens skip the expert and pass through on the residual connection."},
+  {"id":"m5-3-f","front":"Why does MoE give more capacity per FLOP but cost more memory?","back":"Knowledge scales with total parameters while compute scales with active ones, but every expert must be resident (and spread across GPUs with all-to-all communication), because any token may choose any expert."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m5-3-moe.js"></script>
+<script src="../assets/js/anims/m5-3-playground.js"></script>
+</body>
+</html>

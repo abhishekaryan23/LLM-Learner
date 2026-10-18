@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m1-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Positional encodings · LLMs, Animated</title>
+<meta name="description" content="Attention can't see word order on its own. Learned and sinusoidal position vectors, rotary embeddings (RoPE) that make scores depend on relative distance, ALiBi, and how context windows get extended.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Positional encodings</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Transformers</span></div>
+<p class="lede">“Dog bites man” and “man bites dog” use the same three words. Attention, as you've built it so far, can't tell them apart. This lesson shows how transformers inject word order, from simple position vectors to the rotary embeddings used by most LLMs today.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain why self-attention by itself ignores word order.</li>
+    <li>Compare learned, sinusoidal and rotary (RoPE) position encodings, and say where ALiBi fits.</li>
+    <li>Show with a small calculation that RoPE scores depend only on the distance between two tokens.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> you'll need <a href="m1-1.html">Attention (M1.1)</a> and the head size $d_k$ from <a href="m1-2.html">Multi-head attention (M1.2)</a>. RoPE uses 2-D rotations, covered in <a href="p1-2.html">Matrices as transformations (P1.2)</a>, and dot products from <a href="p1-1.html">P1.1</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take a guess before reading on.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You shuffle the words of a sentence and feed it to self-attention with <em>no</em> position information. Each word's output vector…</p>
+    <ol class="q-src">
+      <li>changes completely</li>
+      <li>stays the same; it just appears in a different place in the list</li>
+      <li>becomes zero</li>
+      <li>becomes random</li>
+    </ol>
+    <div class="q-explain">Every score is a dot product of two token vectors, and the weighted sum doesn't care about order. Shuffle the inputs and the outputs are shuffled the same way, but otherwise identical.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">GPT-2 learned one position vector for each of positions 0 to 1023. What happens if you give it a 1,500-token text?</p>
+    <ol class="q-src">
+      <li>It reuses position 1023 for every later token, which works fine</li>
+      <li>It automatically learns new positions while reading</li>
+      <li>There is no vector for position 1500, so it can't process that length without changes</li>
+      <li>Nothing; position vectors don't limit length</li>
+    </ol>
+    <div class="q-explain">A learned table has exactly as many rows as positions seen in training. That hard limit is one reason later models moved to encodings defined by a formula.</div>
+  </div>
+</section>
+
+<h2>Attention is blind to order</h2>
+<p>Look again at the attention formula, $\mathrm{softmax}(QK^\top/\sqrt{d_k})V$. Every score compares the <em>contents</em> of two tokens. Nothing in it mentions <em>where</em> they are. If you permute the input rows of $X$, the rows of the output get permuted the same way and are otherwise unchanged. Mathematicians call this <strong>permutation equivariance</strong>. To the model, a sentence is a bag of words.</p>
+<p>So order has to be put in from outside. There are two broad approaches: <strong>add</strong> a position vector to each token at the input, or <strong>change the attention scores</strong> inside every layer so they depend on positions.</p>
+<p class="math-note">A detail: a causal mask (M1.1) already leaks a little order, since token 5 sees five tokens and token 2 sees two. Decoder models with no position encoding at all (“NoPE”) can learn some positional information this way (Haviv et al., 2022). Still, nearly every production LLM adds explicit positions.</p>
+
+<figure class="anim wide" data-anim="m1-3-rope"></figure>
+
+<h2>Option 1: add a position vector</h2>
+<p>Give every position $\text{pos}$ a vector $p_{\text{pos}}$ of length $d_{\text{model}}$ and feed the first layer $x_{\text{pos}} + p_{\text{pos}}$ instead of just the token embedding $x_{\text{pos}}$.</p>
+<ul>
+  <li><strong>Learned absolute positions</strong>: $p_{\text{pos}}$ is just another trained table, one row per position. BERT (512 positions) and GPT-2 (1,024) and GPT-3 (2,048) did this. Simple, but it can't go past the longest position seen in training.</li>
+  <li><strong>Sinusoidal positions</strong> (Vaswani et al., 2017) use a fixed formula instead, so any position has a vector:</li>
+</ul>
+$$p_{\text{pos},\,2i} = \sin\!\left(\frac{\text{pos}}{10000^{2i/d}}\right),\qquad p_{\text{pos},\,2i+1} = \cos\!\left(\frac{\text{pos}}{10000^{2i/d}}\right)$$
+<p>Here $d$ is the model width and $i = 0, 1, \dots, d/2 - 1$ numbers the pairs of dimensions. Pair $i$ is a sine/cosine wave with frequency $\omega_i = 10000^{-2i/d}$. Pair 0 turns fastest (one radian per token, a full cycle every $2\pi \approx 6.3$ tokens), and the slowest pairs take tens of thousands of tokens per cycle. Together they act like a clock with many hands: each position gets a unique pattern. For example, pair 0 at position 3 is $(\sin 3, \cos 3) \approx (0.14, -0.99)$.</p>
+<p>Either way, position is mixed into the token vector once, at the bottom. The model must then learn to untangle “what” from “where”, and nothing forces the score between two tokens to depend on their <em>distance</em> rather than their absolute places.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-position-seats.webp" alt="A row of theatre seats, each marked with its own pattern of dots and stripes, with children taking their seats in order." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine a theatre where the seats have no numbers, but each seat has its <strong>own pattern</strong> of dots and stripes. Children take their seats in order.</p>
+      <p>Now when you look at a child, you see the child <em>and</em> the pattern on their seat, so you know where they're sitting. Without the patterns, you'd only know who came, not in what order.</p>
+      <p>Where it breaks: that's the “add a position vector” idea. RoPE is more like each child turning to face a slightly different direction depending on their seat, so two children can tell how far apart they are just from how differently they're facing.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Option 2: rotate queries and keys (RoPE)</h2>
+<p><strong>Rotary position embedding</strong> (Su et al., 2021, “RoFormer: Enhanced Transformer with Rotary Position Embedding”) leaves the token embeddings alone. Inside every attention layer it splits each query and key into pairs of numbers, treats each pair as a 2-D arrow, and <strong>rotates</strong> it by an angle proportional to the token's position:</p>
+$$\tilde q_m = R(m\theta_i)\,q_m,\qquad \tilde k_n = R(n\theta_i)\,k_n,\qquad R(\phi) = \begin{pmatrix}\cos\phi & -\sin\phi\\ \sin\phi & \cos\phi\end{pmatrix}$$
+<ul>
+  <li>$m$ and $n$ are the positions of the query token and the key token.</li>
+  <li>$\theta_i = 10000^{-2i/d_k}$ is the speed of pair $i$, the same spread of frequencies as the sinusoids. $d_k$ is the head size, so a 128-wide head has 64 rotating pairs.</li>
+  <li>$R(\phi)$ rotates a 2-D vector by angle $\phi$. Values $v$ are <em>not</em> rotated.</li>
+</ul>
+<p>The payoff is one line. Rotating both and taking the dot product gives $\tilde q_m \cdot \tilde k_n = q_m^\top R(m\theta)^\top R(n\theta)\,k_n = q_m^\top R\big((n-m)\theta\big)\,k_n$, because rotating back by $m\theta$ and forward by $n\theta$ is one rotation by $(n-m)\theta$. So the score sees the <strong>contents</strong> $q$, $k$ and the <strong>relative distance</strong> $n - m$, never the absolute positions. Lengths are unchanged, since rotations don't stretch vectors.</p>
+<p>RoPE is the default in most open LLMs today: GPT-NeoX, PaLM, the Llama family, Mistral, Qwen, Gemma and DeepSeek all use it, sometimes with a larger base than 10,000 (Llama 3 uses 500,000) so the slowest pairs turn even more slowly.</p>
+
+<section class="playground" data-rope-playground aria-labelledby="pg">
+  <h3 id="pg">Try it: rotate a query and a key</h3>
+  <p>Move the two positions, then press “Shift both”. The score (orange dot) only moves when the <em>gap</em> $n - m$ changes. Switch speeds to see how fast pairs repeat quickly while slow pairs change gently.</p>
+</section>
+
+<h3>Worked example</h3>
+<p>One pair of dimensions, speed $\theta = 30°$ per position. Query $q = [1, 0]$ at position $m = 1$, key $k = [1, 0]$ at position $n = 3$.</p>
+<ol class="steps">
+  <li><strong>Rotate q</strong> by $1 \times 30° = 30°$: $\tilde q = [\cos 30°, \sin 30°] = [0.866,\ 0.5]$.</li>
+  <li><strong>Rotate k</strong> by $3 \times 30° = 90°$: $\tilde k = [\cos 90°, \sin 90°] = [0,\ 1]$.</li>
+  <li><strong>Score:</strong> $\tilde q\cdot\tilde k = 0.866 \times 0 + 0.5 \times 1 = 0.5$, which is $\cos 60°$: the arrows are $(3-1)\times 30° = 60°$ apart.</li>
+  <li><strong>Shift both</strong> by 3 ($m = 4$, $n = 6$): $\tilde q = [\cos 120°, \sin 120°] = [-0.5,\ 0.866]$ and $\tilde k = [\cos 180°, \sin 180°] = [-1,\ 0]$. Score $= 0.5 + 0 = 0.5$ again ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same speed, $\theta = 30°$. Now $q = [2, 0]$ at position $m = 2$ and $k = [1, 0]$ at position $n = 4$.</p>
+  <ol class="steps">
+    <li>$q$ turns by $60°$. Its second entry, $2\sin 60°$, is <span class="blank" data-answer="1.73" data-tol="0.011" data-hint="sin 60° ≈ 0.866, times the length 2."></span> (its first entry is $2\cos 60° = 1$)</li>
+    <li>$k$ turns by $120°$. Its first entry, $\cos 120°$, is <span class="blank" data-answer="-0.5" data-tol="0.011" data-hint="120° points up and to the left; cos 120° = −cos 60°."></span> (its second is $\sin 120° \approx 0.866$)</li>
+    <li>The score $\tilde q \cdot \tilde k =$ <span class="blank" data-answer="1" data-tol="0.011" data-hint="1 × (−0.5) + 1.732 × 0.866. Or: lengths 2 and 1, angle 60° apart, so 2 × cos 60°."></span></li>
+    <li>Move both tokens 5 places later. The new score is <span class="blank" data-answer="1" data-tol="0.011" data-hint="Only n − m matters, and it's still 2."></span></li>
+  </ol>
+</section>
+
+<h2>ALiBi: a distance penalty instead</h2>
+<p><strong>ALiBi</strong> (Press et al., 2022, “Train Short, Test Long”) adds no vectors at all. It subtracts a penalty proportional to distance straight from each score: $\text{score}_{ij} = q_i\cdot k_j/\sqrt{d_k} - s_h\,(i - j)$, where each head $h$ has its own fixed slope $s_h$ (for 8 heads: $\tfrac12, \tfrac14, \dots, \tfrac1{256}$). Far-away tokens get gently down-weighted, more steeply in some heads than others. It extrapolates to longer inputs better than sinusoidal or learned positions, and was used in BLOOM and MPT, but RoPE has become far more common.</p>
+
+<h2>Stretching the context window</h2>
+<p>A model trained on 4,096-token sequences has never seen RoPE angles beyond position 4,095. Feed it 32,000 tokens and the fast pairs are fine (they've already wrapped around many times), but the slow pairs reach angles never seen in training, and quality usually collapses. Several fixes rescale the angles so long inputs look familiar:</p>
+<ul>
+  <li><strong>Position interpolation</strong> (Chen et al., 2023): squeeze positions, e.g. use $m \times \tfrac{4096}{32768}$, so 32K tokens fit in the trained angle range. Then fine-tune briefly on long text.</li>
+  <li><strong>Raising the base</strong> from 10,000 to something much larger slows every pair down (Code Llama used 1,000,000).</li>
+  <li><strong>NTK-aware scaling and YaRN</strong> (Peng et al., 2023) stretch the slow pairs a lot and the fast pairs little or not at all, keeping local order sharp.</li>
+</ul>
+<p>In practice these are combined with a stage of training on long documents. That's roughly how 128K-token context windows are reached, as in Llama 3.1.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> the position scheme decides how far a model can read. When you see a model card advertise “trained at 8K, extended to 128K”, that's RoPE rescaling plus long-context training. And because RoPE is applied to $q$ and $k$ <em>before</em> they're stored, the KV cache (<a href="m1-5.html">M1.5</a>) holds already-rotated keys: nothing about a cached key needs recomputing when new tokens arrive.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a friend why transformers need positional encodings, and what RoPE does differently from adding a position vector.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Attention scores only compare token contents, so without extra information a shuffled sentence gives the same outputs, just shuffled. Adding a position vector to each embedding marks where each token is, but only once at the input. RoPE instead rotates each pair of query and key dimensions by an angle proportional to position, inside every layer, so a query–key score depends on their contents and their relative distance $n - m$.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why does a transformer need positional information at all?</p>
+    <ol class="q-src">
+      <li>Softmax only works on sorted inputs</li>
+      <li>Without it, the model can't compute the $\sqrt{d_k}$ scaling</li>
+      <li>Attention scores depend only on token contents, so permuting the input just permutes the output</li>
+      <li>To make the embedding table smaller</li>
+    </ol>
+    <div class="q-explain">Self-attention is permutation-equivariant. Order has to be injected, either into the inputs or into the scores.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">In RoPE, what gets rotated?</p>
+    <ol class="q-src">
+      <li>Each pair of dimensions of the queries and keys, by an angle proportional to position, in every layer</li>
+      <li>The token embedding, once, before the first layer</li>
+      <li>The values, so the output carries position</li>
+      <li>The attention weights after the softmax</li>
+    </ol>
+    <div class="q-explain">Queries and keys only. That's exactly what makes the score $\tilde q_m\cdot\tilde k_n$ depend on $n - m$. Values are left as they are.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">With RoPE, the same query and key contents appear once at positions (7, 3) and once at positions (107, 103). Their scores are…</p>
+    <ol class="q-src">
+      <li>larger at (107, 103), because later positions rotate more</li>
+      <li>smaller at (107, 103), because of distance decay</li>
+      <li>unrelated; RoPE scores are effectively random</li>
+      <li>identical, because the gap is 4 both times</li>
+    </ol>
+    <div class="q-explain">Both arrows rotate by an extra 100θ, so the angle between them doesn't change. Only $n - m$ enters the score.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model has $d_{\text{model}} = 4096$ and 32 heads (as in M1.2). RoPE works per head. How many 2-D rotating pairs does each head have?</p>
+    <ol class="q-src">
+      <li>2,048</li>
+      <li>64</li>
+      <li>32</li>
+      <li>128</li>
+    </ol>
+    <div class="q-explain">Each head's query and key have $d_k = 4096/32 = 128$ entries, which make $128/2 = 64$ pairs, each turning at its own speed $\theta_i$.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Self-attention is <strong>permutation-equivariant</strong>: without positions, word order is invisible.</li>
+    <li><strong>Learned</strong> and <strong>sinusoidal</strong> encodings add a position vector to each token once, at the input.</li>
+    <li><strong>RoPE</strong> rotates q and k pairs by $m\theta_i$ in every layer, so scores depend on <strong>relative distance</strong> $n - m$. It's today's default.</li>
+    <li><strong>ALiBi</strong> subtracts a per-head linear distance penalty from the scores.</li>
+    <li>Longer contexts come from <strong>rescaling RoPE</strong> (interpolation, bigger base, YaRN) plus long-context training.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m1-3-a","front":"Why does self-attention need positional encodings?","back":"Scores depend only on token contents, so attention is permutation-equivariant: shuffle the input and the outputs are just shuffled. Without positions, “dog bites man” = “man bites dog”."},
+  {"id":"m1-3-b","front":"Write the sinusoidal positional encoding.","back":"$p_{\\text{pos},2i} = \\sin(\\text{pos}/10000^{2i/d})$, $p_{\\text{pos},2i+1} = \\cos(\\text{pos}/10000^{2i/d})$: one sine/cosine pair per frequency, added to the token embedding."},
+  {"id":"m1-3-c","front":"What does RoPE do, mechanically?","back":"In every layer, it splits each query and key into 2-D pairs and rotates pair $i$ by angle $m\\theta_i$ (position $m$, speed $\\theta_i = 10000^{-2i/d_k}$). Values aren't rotated."},
+  {"id":"m1-3-d","front":"Why does RoPE make scores depend on relative position?","back":"$R(m\\theta)^\\top R(n\\theta) = R((n-m)\\theta)$, so $\\tilde q_m\\cdot\\tilde k_n = q^\\top R((n-m)\\theta)\\,k$: only the gap $n-m$ appears."},
+  {"id":"m1-3-e","front":"What is ALiBi?","back":"Attention with Linear Biases (Press et al., 2022): subtract $s_h (i-j)$ from each score, with a fixed slope per head. No position vectors; extrapolates to longer inputs. Used in BLOOM and MPT."},
+  {"id":"m1-3-f","front":"How are RoPE models extended to longer contexts?","back":"Rescale the rotation angles so long positions look like trained ones (position interpolation, a larger base, NTK-aware/YaRN scaling), then train briefly on long documents."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m1-3-rope.js"></script>
+<script src="../assets/js/anims/m1-3-rope-playground.js"></script>
+</body>
+</html>

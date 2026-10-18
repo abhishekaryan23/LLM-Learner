@@ -10,7 +10,9 @@
     document.getElementById("stats").innerHTML =
       "<span><b>" + all.length + "</b> lessons</span><span><b>" + mods + "</b> modules</span><span><b>" + ready.length + "</b> live now</span>" +
       (done.length ? "<span><b>" + done.length + "</b> completed by you</span>" : "");
-    document.getElementById("map-note").textContent = ready.length + " of " + all.length + " lessons are live; more are added module by module.";
+    document.getElementById("map-note").textContent = ready.length === all.length
+      ? "All " + all.length + " lessons are live. Start anywhere: prerequisites are linked from each lesson."
+      : ready.length + " of " + all.length + " lessons are live; more are added module by module.";
 
     // Resume where the learner left off: first ready lesson not yet done.
     var nextUp = ready.find(function (l) { return !LC.isDone(l.id); });

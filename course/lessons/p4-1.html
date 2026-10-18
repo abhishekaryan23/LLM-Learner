@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p4-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tensors &amp; autograd · LLMs, Animated</title>
+<meta name="description" content="PyTorch's two core ideas: tensors (shapes, dtypes, devices, broadcasting) and autograd, which records your computation and runs backpropagation for you.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Tensors &amp; autograd</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of PyTorch in an hour</span></div>
+<p class="lede">Almost every LLM is trained in PyTorch, and PyTorch rests on two ideas: <strong>tensors</strong>, arrays of numbers that know their shape, type and device, and <strong>autograd</strong>, which watches what you compute and runs backpropagation for you.</p>
+
+<div class="cover"><img src="../assets/img/cover-p4.webp" alt="Illustration: stacked translucent cubes and grids of small squares on a workbench, assembled by a friendly robot arm." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Create tensors and read their shape, dtype and device, and predict the shape of a broadcast result.</li>
+    <li>Explain what <code>requires_grad</code>, <code>grad_fn</code>, <code>.backward()</code> and <code>.grad</code> do.</li>
+    <li>Know when to use <code>torch.no_grad()</code>, and why gradients must be reset.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-2.html">P1.2 Matrices as transformations</a> (what a matrix multiply does) and <a href="p2-3.html">P2.3 Backpropagation</a>: autograd is backprop, automated. Basic Python is assumed; the code is PyTorch 2.x.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A batch of 8 sequences, each 1,024 tokens long, each token a 4,096-number vector. What shape is that tensor?</p>
+    <ol class="q-src">
+      <li>(4096,)</li>
+      <li>(8, 4096)</li>
+      <li>(8, 1024, 4096)</li>
+      <li>(1024, 1024)</li>
+    </ol>
+    <div class="q-explain">One dimension per "axis" of the data: batch × sequence position × feature. This (B, T, d) shape flows through every layer of a transformer.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You call <code>loss.backward()</code> twice in a row (re-running the forward pass in between) without resetting anything. What's in <code>w.grad</code>?</p>
+    <ol class="q-src">
+      <li>The gradient from the second call only</li>
+      <li>The sum of both gradients</li>
+      <li>Their average</li>
+      <li>An error: gradients can only be computed once</li>
+    </ol>
+    <div class="q-explain">PyTorch <strong>accumulates</strong> into <code>.grad</code> with <code>+=</code>. That's deliberate (it's how branches add up, P2.3) but it means you must zero gradients between training steps.</div>
+  </div>
+</section>
+
+<h2>Tensors: arrays that know their shape, type and device</h2>
+<p>A <strong>tensor</strong> is an n-dimensional array: a number (0-D), a vector (1-D), a matrix (2-D), or more. If you know NumPy, it's an <code>ndarray</code> that can also live on a GPU and track gradients.</p>
+<pre><code>import torch
+
+x = torch.tensor([[1., 2., 3.],
+                  [4., 5., 6.]])
+x.shape    # torch.Size([2, 3])
+x.dtype    # torch.float32
+x.device   # device(type='cpu')
+
+torch.zeros(2, 3)              # all zeros, shape (2, 3)
+torch.randn(4, 8)              # standard normal samples
+torch.arange(6).reshape(2, 3)  # [[0, 1, 2], [3, 4, 5]]</code></pre>
+<p>Three attributes matter all the time:</p>
+<ul>
+  <li><strong>shape</strong>: the size of each dimension. In an LLM, token ids have shape (B, T) (batch, sequence length) and hidden states (B, T, d), with d the model width.</li>
+  <li><strong>dtype</strong>: the number format. <code>float32</code> (4 bytes) is the default for floats, and <code>int64</code> (<code>torch.long</code>) for integers like token ids. LLM training mostly uses <code>bfloat16</code> (2 bytes) for speed and memory (M2.5): a 7-billion-parameter model's weights take about 14 GB in bf16 versus 28 GB in fp32.</li>
+  <li><strong>device</strong>: where the data lives, <code>"cpu"</code> or <code>"cuda"</code> (an NVIDIA GPU). An operation needs all its inputs on the same device; mixing them is one of the most common errors.</li>
+</ul>
+<pre><code>device = "cuda" if torch.cuda.is_available() else "cpu"
+x = x.to(device)               # returns a copy on that device</code></pre>
+
+<h2>Operations, reductions and broadcasting</h2>
+<p>Arithmetic works element by element (<code>x + y</code>, <code>x * y</code>, <code>torch.exp(x)</code>), <code>@</code> is matrix multiplication, and reductions take a <code>dim</code> argument saying which dimension to collapse:</p>
+<pre><code>W = torch.randn(3, 4)
+(x @ W).shape                       # (2, 3) @ (3, 4) -> (2, 4)
+x.sum()                             # tensor(21.)
+x.sum(dim=0)                        # tensor([5., 7., 9.])   down the rows
+x.mean(dim=1, keepdim=True).shape   # torch.Size([2, 1])</code></pre>
+<p>When two tensors have different shapes, PyTorch tries to <strong>broadcast</strong> them: compare the shapes from the right, and in each position the sizes must be equal or one of them must be 1 (a missing dimension counts as 1). Size-1 dimensions are stretched to match. This is how adding a bias of shape (d,) to hidden states of shape (B, T, d) just works.</p>
+
+<figure class="anim wide" data-anim="p4-1-broadcast"></figure>
+
+<h2>Autograd: backprop, automated</h2>
+<p>In P2.3 you ran backprop by hand. PyTorch does it for you. Mark a tensor with <code>requires_grad=True</code> and every operation that uses it is <strong>recorded</strong> in a graph as it runs. Each result carries a <code>grad_fn</code>, a node that knows how to compute its own local derivatives. Calling <code>.backward()</code> on a scalar walks that graph in reverse and stores $\frac{\partial\,\text{loss}}{\partial\,\text{leaf}}$ in each leaf's <code>.grad</code>.</p>
+<pre><code>x = torch.tensor(2., requires_grad=True)
+w = torch.tensor(3., requires_grad=True)
+y = w * x            # y.grad_fn: &lt;MulBackward0&gt;
+z = y + 1            # z.grad_fn: &lt;AddBackward0&gt;
+loss = z ** 2        # tensor(49., grad_fn=&lt;PowBackward0&gt;)
+
+loss.backward()
+x.grad, w.grad       # (tensor(42.), tensor(28.))</code></pre>
+
+<figure class="anim wide" data-anim="p4-1-autograd"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-autograd-breadcrumbs.webp" alt="A child dropping glowing breadcrumbs along a path through a forest, then walking back along the same trail in reverse." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A child walks into a forest and <strong>drops a glowing breadcrumb at every turn</strong>: "here I multiplied", "here I added". They don't need to plan anything; they just leave crumbs as they go.</p>
+      <p>When it's time to go home, they <strong>follow the crumbs backwards</strong>, one by one, all the way to the start. That's <code>.backward()</code>: the crumbs are the recorded operations, and walking back is backprop.</p>
+      <p>Where the analogy breaks: on the way back, each crumb also hands over a number (its local derivative), and the crumbs are swept away once you're home, so the next walk drops fresh ones.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>Check the code above by hand. $\text{loss} = (w x + 1)^2$ with $x = 2$, $w = 3$.</p>
+<ol class="steps">
+  <li>Forward: $z = 3 \times 2 + 1 = 7$, loss $= 49$.</li>
+  <li>$\frac{\partial\,\text{loss}}{\partial z} = 2z = 14$.</li>
+  <li><code>x.grad</code> $= 14 \times w = 42$ and <code>w.grad</code> $= 14 \times x = 28$. ✓ Matches PyTorch.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same code, but with <code>x = torch.tensor(1., requires_grad=True)</code> and <code>w = torch.tensor(-2., requires_grad=True)</code>.</p>
+  <ol class="steps">
+    <li><code>loss.item()</code>: <span class="blank" data-answer="1" data-tol="0.001" data-hint="z = w·x + 1 = −2 + 1 = −1, and loss = z²."></span></li>
+    <li><code>x.grad</code>: <span class="blank" data-answer="4" data-tol="0.001" data-hint="2z × w = 2 × (−1) × (−2)."></span></li>
+    <li><code>w.grad</code>: <span class="blank" data-answer="-2" data-tol="0.001" data-hint="2z × x = 2 × (−1) × 1."></span></li>
+    <li>If you run the forward pass and <code>loss.backward()</code> once more without resetting, <code>w.grad</code> becomes: <span class="blank" data-answer="-4" data-tol="0.001" data-hint="Gradients accumulate: the new −2 is added to the old −2."></span></li>
+  </ol>
+</section>
+
+<h2>Four rules that prevent most autograd bugs</h2>
+<ul>
+  <li><strong><code>.backward()</code> needs a scalar.</strong> A loss is a single number (P2.1). (For a non-scalar you'd have to pass a <code>gradient</code> argument, which you rarely need.)</li>
+  <li><strong>Only leaves keep <code>.grad</code>.</strong> Tensors you created with <code>requires_grad=True</code> (in practice, model parameters) get <code>.grad</code>; intermediate results like <code>y</code> and <code>z</code> don't, unless you ask with <code>.retain_grad()</code>. The graph is freed after <code>backward()</code> to save memory.</li>
+  <li><strong>Gradients accumulate.</strong> Each <code>backward()</code> adds to <code>.grad</code>. Reset between steps with <code>w.grad = None</code> or <code>w.grad.zero_()</code>; optimizers do it with <code>optimizer.zero_grad()</code> (P4.2).</li>
+  <li><strong>Don't record what isn't part of the model.</strong> Weight updates and evaluation shouldn't build a graph. Wrap them in <code>torch.no_grad()</code> (or <code>torch.inference_mode()</code> for pure inference); use <code>.detach()</code> to get a copy of a tensor that is cut off from the graph.</li>
+</ul>
+<pre><code>with torch.no_grad():
+    w -= 0.1 * w.grad      # an in-place update, not recorded
+w.grad = None              # ready for the next step</code></pre>
+<p class="math-note">Without <code>no_grad()</code>, that in-place update on a leaf that requires grad raises an error, which is PyTorch protecting you from recording the update itself.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> an LLM training step is exactly this pattern at enormous scale: token ids of shape (B, T) go in, logits of shape (B, T, V) come out, a scalar cross-entropy loss is computed, <code>loss.backward()</code> fills <code>.grad</code> for billions of parameters, and the optimizer updates them inside <code>no_grad</code>. Shape and dtype discipline matter more than anything: most real bugs are a wrong dimension silently broadcast, or a tensor on the wrong device or in the wrong precision.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">What happens, step by step, between <code>loss = model(x)...</code> and <code>w.grad</code> holding a number?</p>
+  <div class="model-answer"><strong>Model answer:</strong> As each operation runs on tensors that require grad, autograd records it as a node (<code>grad_fn</code>) in a graph, keeping the values it will need. <code>loss.backward()</code> starts at the scalar loss with gradient 1, walks the graph in reverse applying each node's local derivative (the chain rule), and adds the result into the <code>.grad</code> of every leaf, such as <code>w</code>. The graph is then freed.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What is the shape of <code>torch.ones(8, 1, 5) + torch.ones(3, 1)</code>?</p>
+    <ol class="q-src">
+      <li>An error: the shapes don't match</li>
+      <li>(8, 1, 5)</li>
+      <li>(8, 3, 1)</li>
+      <li>(8, 3, 5)</li>
+    </ol>
+    <div class="q-explain">Align from the right: (8, 1, 5) and (·, 3, 1). Position by position: 5 vs 1 → 5, 1 vs 3 → 3, 8 vs missing → 8. Result (8, 3, 5).</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">After <code>loss.backward()</code>, which tensors have a populated <code>.grad</code> by default?</p>
+    <ol class="q-src">
+      <li>Leaf tensors created with <code>requires_grad=True</code>, such as model parameters</li>
+      <li>Every tensor in the computation</li>
+      <li>Only the loss</li>
+      <li>Only intermediate results</li>
+    </ol>
+    <div class="q-explain">Leaves are what you optimise, so they keep <code>.grad</code>. Intermediate tensors don't (unless <code>.retain_grad()</code>), which saves memory.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why wrap a manual weight update in <code>torch.no_grad()</code>?</p>
+    <ol class="q-src">
+      <li>It makes the update use less precision</li>
+      <li>It zeroes the gradients automatically</li>
+      <li>The update isn't part of the model's computation, so it must not be recorded in the graph (and an in-place change to a leaf that requires grad would raise an error)</li>
+      <li>It moves the tensor to the GPU</li>
+    </ol>
+    <div class="q-explain"><code>no_grad</code> only switches off recording. Zeroing gradients is a separate step.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In P2.3, a value used in two places got the <em>sum</em> of the gradients from both paths. Which PyTorch behaviour comes from the same rule?</p>
+    <ol class="q-src">
+      <li>Tensors broadcasting to a common shape</li>
+      <li><code>.grad</code> being accumulated with <code>+=</code> rather than overwritten</li>
+      <li><code>.backward()</code> requiring a scalar</li>
+      <li>The graph being freed after backward</li>
+    </ol>
+    <div class="q-explain">Accumulating is what makes branches correct inside one backward pass. The side effect is that gradients also pile up <em>across</em> backward calls, hence <code>zero_grad()</code>.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A tensor is an n-D array with a <strong>shape</strong>, a <strong>dtype</strong> and a <strong>device</strong>; check all three when debugging.</li>
+    <li><strong>Broadcasting</strong>: align shapes from the right; sizes must match or be 1, and 1s stretch.</li>
+    <li><code>requires_grad=True</code> makes autograd <strong>record</strong> operations; <code>.backward()</code> replays them in reverse.</li>
+    <li>Gradients land in leaves' <code>.grad</code> and <strong>accumulate</strong>, so reset them every step.</li>
+    <li>Use <code>torch.no_grad()</code> for updates and evaluation.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>About 20 minutes on a free CPU: predict and check shapes, fix a broadcasting bug, compare autograd with your hand-derived gradients from P2.3, and fit a line using nothing but tensors and <code>.backward()</code>.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p4-1-tensors-autograd.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p4-1-a","front":"What three attributes does every PyTorch tensor have that you should check when debugging?","back":"<code>shape</code> (size of each dimension), <code>dtype</code> (e.g. float32, bfloat16, int64) and <code>device</code> (cpu or cuda). Operations need matching devices."},
+  {"id":"p4-1-b","front":"State the broadcasting rule.","back":"Align shapes from the right. In each position the sizes must be equal or one must be 1 (missing dimensions count as 1); size-1 dimensions are stretched. E.g. (3, 1) + (4,) → (3, 4)."},
+  {"id":"p4-1-c","front":"What do <code>requires_grad</code>, <code>grad_fn</code> and <code>.backward()</code> do?","back":"<code>requires_grad=True</code> makes autograd record operations on a tensor; each result's <code>grad_fn</code> is the recorded node; <code>.backward()</code> on a scalar walks the graph in reverse and fills the leaves' <code>.grad</code>."},
+  {"id":"p4-1-d","front":"Why must gradients be reset between training steps in PyTorch?","back":"<code>.backward()</code> adds into <code>.grad</code> rather than overwriting it, so without <code>zero_grad()</code> (or <code>.grad = None</code>) the old gradients would pile up."},
+  {"id":"p4-1-e","front":"When do you use <code>torch.no_grad()</code>?","back":"For anything that shouldn't be recorded for backprop: parameter updates, evaluation, inference. It saves memory and time (<code>torch.inference_mode()</code> is a stricter variant for pure inference)."},
+  {"id":"p4-1-f","front":"How much memory do 7B parameters take in bfloat16 vs float32?","back":"bf16 is 2 bytes per number → about 14 GB; float32 is 4 bytes → about 28 GB (weights only)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p4-1-autograd.js"></script>
+</body>
+</html>

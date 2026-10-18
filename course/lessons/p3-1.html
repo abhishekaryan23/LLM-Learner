@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p3-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MLPs · LLMs, Animated</title>
+<meta name="description" content="Neurons, layers as matrix multiplies, why the nonlinearity matters, ReLU and GELU, universal approximation, and the MLP block inside every transformer.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>MLPs</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Neural nets → language</span></div>
+<p class="lede">A neural network is mostly one small move, repeated: <strong>multiply by weights, add a bias, bend.</strong> Stack a few layers of that and you get a multilayer perceptron (MLP), the block that holds about two thirds of the parameters in a classic transformer.</p>
+
+<div class="cover"><img src="../assets/img/cover-p3.webp" alt="Illustration: columns of glowing connected nodes flowing into a row of blank word-piece tiles." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute a neuron's output by hand, and write a whole layer as one matrix multiply.</li>
+    <li>Explain why stacked layers need a nonlinearity, and what ReLU and GELU do.</li>
+    <li>Describe the MLP block inside a transformer: expand ×4, bend, project back.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-1.html">Vectors &amp; dot products</a> (a neuron is a dot product), <a href="p1-2.html">Matrices as transformations</a> (a layer is a matrix) and <a href="p2-2.html">Gradient descent</a> (how the weights get their values). <a href="p2-3.html">Backpropagation</a> computes the gradients.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first. A wrong guess now makes the right answer stick.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You stack ten layers that each just multiply by a matrix (no other operation in between). The result is as expressive as…</p>
+    <ol class="q-src">
+      <li>ten times more than one layer</li>
+      <li>a network that can fit any function</li>
+      <li>a single matrix multiply</li>
+      <li>it depends on how wide each layer is</li>
+    </ol>
+    <div class="q-explain">Multiplying by $W_1$, then $W_2$, … is the same as multiplying once by the product $W_1W_2\cdots W_{10}$. Without a nonlinearity in between, depth buys nothing.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In a GPT-2-style transformer block, roughly what share of the parameters sits in the MLP (rather than in attention)?</p>
+    <ol class="q-src">
+      <li>About 10%</li>
+      <li>About two thirds</li>
+      <li>About half</li>
+      <li>Almost none: the MLP has no weights</li>
+    </ol>
+    <div class="q-explain">The MLP has two $d \times 4d$ matrices ($8d^2$ weights), while attention has four $d \times d$ ones ($4d^2$). So the MLP holds about $8/12 \approx 2/3$ of a block's weights.</div>
+  </div>
+</section>
+
+<h2>One neuron: a weighted vote, then a bend</h2>
+<p>An artificial <strong>neuron</strong> takes a vector of inputs $x = (x_1, \dots, x_n)$ and does two things:</p>
+$$z = w \cdot x + b = \sum_{i=1}^{n} w_i x_i + b, \qquad a = \varphi(z)$$
+<p>Here $w$ is the neuron's <strong>weight</strong> vector (one weight per input, saying how much that input counts and in which direction), $b$ is a single <strong>bias</strong> number that shifts the result, $z$ is the <strong>pre-activation</strong>, and $\varphi$ (phi) is a fixed <strong>nonlinear</strong> function called the <strong>activation</strong>. The output $a$ is one number. The weights and the bias are learned; $\varphi$ is chosen by the designer.</p>
+<p>The first part is just the dot product from P1.1: $z$ is large when the input points the same way as the weights. So a neuron is a <em>pattern detector</em> that fires when it sees inputs that look like its weights.</p>
+
+<figure class="anim wide" data-anim="p3-1-neuron"></figure>
+
+<h2>A layer is a matrix multiply</h2>
+<p>Put $m$ neurons side by side, all reading the same input. Write each neuron's weights as a column, and you get a weight matrix $W$ with $n$ rows and $m$ columns. The whole layer is then one line (treating $x$ as a row vector, as in the attention lesson):</p>
+$$h = \varphi(xW + b)$$
+<p>$x$ is $1 \times n$, $W$ is $n \times m$, the bias $b$ is $1 \times m$, and $\varphi$ is applied to each of the $m$ entries separately. The output $h$ is a new vector of $m$ numbers, the <strong>hidden</strong> representation. This is why GPUs matter: a layer applied to a whole batch of inputs is one big matrix multiply, exactly the operation GPUs are built for.</p>
+<p>Stack two or more such layers and you have a <strong>multilayer perceptron (MLP)</strong>, also called a feed-forward network.</p>
+
+<h2>Why the bend matters</h2>
+<p>Drop $\varphi$ and see what two layers compute:</p>
+$$(xW_1 + b_1)W_2 + b_2 \;=\; x\,(W_1W_2) \;+\; (b_1W_2 + b_2)$$
+<p>That's just $xW + b$ with $W = W_1W_2$ and $b = b_1W_2 + b_2$: <strong>a single linear layer</strong>. However deep you stack linear layers, the result can only stretch, rotate and shift its input (P1.2). It can never draw a curved decision boundary or compute something like "this <em>and</em> that but not both".</p>
+<p>The activation is what lets depth pay off. The two you'll meet most:</p>
+<ul>
+  <li><strong>ReLU</strong>, $\max(0, z)$: zero for negatives, identity for positives. Cheap, and its gradient is exactly 1 wherever it's active, which made deep networks much easier to train (Nair &amp; Hinton, 2010; Glorot et al., 2011).</li>
+  <li><strong>GELU</strong>, $z\,\Phi(z)$, where $\Phi$ is the standard normal cumulative distribution function (Hendrycks &amp; Gimpel, 2016). A smooth ReLU: it fades in rather than switching on at 0, and dips slightly below zero (minimum about $-0.17$ near $z = -0.75$). BERT and GPT-2 use GELU.</li>
+</ul>
+
+<figure class="anim">
+  <div class="anim-head"><p class="anim-title">ReLU vs GELU</p></div>
+  <div class="anim-stage">
+    <svg viewBox="0 0 360 210" role="img" aria-label="Plot of ReLU and GELU from minus 3 to 3. ReLU is flat at zero for negative inputs and then a straight line. GELU follows it closely but bends smoothly near zero and dips slightly below zero for small negative inputs." style="overflow:hidden;max-width:560px;margin:0 auto">
+      <path d="M30 82.9H348M30 121.7H348" class="s-grid"/>
+      <path d="M30 44V180H348" class="s-axis"/>
+      <path d="M189 44V180" class="s-grid"/>
+      <path d="M30 160.6H348" class="s-grid"/>
+      <path d="M30.0 160.6L189.0 160.6L348.0 44.0" class="s-blue" stroke-width="3"/>
+      <path d="M30.0 160.7L35.3 160.8L40.6 160.8L45.9 160.9L51.2 161.0L56.5 161.2L61.8 161.3L67.1 161.5L72.4 161.8L77.7 162.0L83.0 162.3L88.3 162.7L93.6 163.1L98.9 163.5L104.2 164.0L109.5 164.5L114.8 165.0L120.1 165.5L125.4 165.9L130.7 166.4L136.0 166.7L141.3 167.0L146.6 167.2L151.9 167.2L157.2 167.0L162.5 166.6L167.8 165.9L173.1 165.0L178.4 163.8L183.7 162.4L189.0 160.6L194.3 158.5L199.6 156.1L204.9 153.4L210.2 150.4L215.5 147.1L220.8 143.7L226.1 140.0L231.4 136.1L236.7 132.0L242.0 127.9L247.3 123.6L252.6 119.3L257.9 114.9L263.2 110.6L268.5 106.2L273.8 101.8L279.1 97.5L284.4 93.1L289.7 88.9L295.0 84.6L300.3 80.4L305.6 76.3L310.9 72.2L316.2 68.1L321.5 64.0L326.8 60.0L332.1 56.0L337.4 52.0L342.7 48.1L348.0 44.2" class="s-orange" stroke-width="2.5"/>
+      <path d="M8 13H30" class="s-blue" stroke-width="3"/>
+      <text x="35" y="17" class="t t-sm">ReLU</text>
+      <path d="M86 13H108" class="s-orange" stroke-width="3"/>
+      <text x="113" y="17" class="t t-sm">GELU</text>
+      <text x="4" y="36" class="t t-sm t-muted">↑ output</text>
+      <text x="24" y="164.6" class="t t-sm t-muted t-end">0</text>
+      <text x="24" y="86.9" class="t t-sm t-muted t-end">2</text>
+      <text x="83" y="196" class="t t-sm t-muted t-mid">−2</text>
+      <text x="189" y="196" class="t t-sm t-muted t-mid">0</text>
+      <text x="295" y="196" class="t t-sm t-muted t-mid">2</text>
+      <text x="348" y="196" class="t t-sm t-muted t-end">z →</text>
+      <text x="36" y="146" class="t t-sm t-orange">GELU dips to −0.17</text>
+    </svg>
+  </div>
+  <figcaption class="anim-caption">For large positive or negative $z$ the two are nearly identical. The difference is near zero, where GELU is <strong>smooth</strong> instead of having a sharp corner.</figcaption>
+</figure>
+
+<p>Why does "adding bends" give so much power? A layer of ReLU units outputs a sum of hinges, and sums of hinges can trace out any shape:</p>
+
+<figure class="anim wide" data-anim="p3-1-relu-sum"></figure>
+
+<p>This is the <strong>universal approximation theorem</strong> (Cybenko, 1989, for sigmoid units; Hornik, 1991; Leshno et al., 1993, for any non-polynomial activation, ReLU included): a network with one hidden layer and enough units can approximate any continuous function on a bounded region as closely as you like. Two honest caveats. It says nothing about <em>how many</em> units you need (it can be astronomically many), and nothing about whether gradient descent will actually <em>find</em> the right weights. In practice, deeper networks reach the same accuracy with far fewer units, which is one reason models are deep rather than just wide.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-mlp-committees.webp" alt="Three rows of animal committees passing glowing notes forward, from a cat picture to a single decision card." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine three rows of animal committees. The first row looks at a picture. Each animal checks for its favourite thing (whiskers, pointy ears, fur) and passes a glowing note forward saying how much it sees it. An animal that sees nothing stays quiet and passes no note at all. That's the ReLU.</p>
+      <p>The second row reads those notes. Each animal trusts some friends more than others (those are the <strong>weights</strong>) and writes a new note: "whiskers <em>and</em> pointy ears, so maybe a face?"</p>
+      <p>The last row combines everything into one decision card: <strong>"cat!"</strong> Learning means adjusting how much each animal trusts each note.</p>
+      <p><em>Where it breaks:</em> real neurons don't usually have a single tidy job like "whiskers". What each one detects is learned, and is often a blend that's hard to name.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>A ReLU neuron with weights $w = (0.4,\,-0.5,\,0.3)$ and bias $b = 0.1$ sees the input $x = (1,\,2,\,3)$:</p>
+<ol class="steps">
+  <li>Products: $0.4 \times 1 = 0.4$, $\;-0.5 \times 2 = -1.0$, $\;0.3 \times 3 = 0.9$</li>
+  <li>Weighted sum plus bias: $z = 0.4 - 1.0 + 0.9 + 0.1 = 0.4$</li>
+  <li>Activation: $a = \max(0,\, 0.4) = 0.4$ ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same kind of neuron, new numbers: $w = (-1,\,0.5,\,0.5)$, $b = 1$, input $x = (3,\,1,\,2)$.</p>
+  <ol class="steps">
+    <li>Weighted sum $w \cdot x =$ <span class="blank" data-answer="-1.5" data-tol="0.001" data-hint="(−1)(3) + (0.5)(1) + (0.5)(2)."></span></li>
+    <li>Pre-activation $z = w \cdot x + b =$ <span class="blank" data-answer="-0.5" data-tol="0.001" data-hint="Add the bias, 1."></span></li>
+    <li>ReLU output $a =$ <span class="blank" data-answer="0" data-tol="0.001" data-hint="max(0, z). What does ReLU do with negatives?"></span></li>
+  </ol>
+  <p>Now see the collapse with plain numbers. Layer 1 computes $2x + 1$, layer 2 computes $3h - 2$, with no activation in between.</p>
+  <ol class="steps">
+    <li>The pair equals one layer $y = ax + c$ with slope $a =$ <span class="blank" data-answer="6" data-tol="0.001" data-hint="Substitute: y = 3(2x + 1) − 2. Multiply out."></span></li>
+    <li>… and intercept $c =$ <span class="blank" data-answer="1" data-tol="0.001" data-hint="3 × 1 − 2."></span></li>
+  </ol>
+</section>
+
+<h2>The MLP block inside every transformer</h2>
+<p>Each transformer layer (M1.4) has two halves. <strong>Attention</strong> (M1.1) moves information <em>between</em> tokens. The <strong>MLP</strong> then processes each token's vector <em>on its own</em>, with the same weights at every position:</p>
+$$\mathrm{MLP}(x) = \varphi(xW_{\text{up}} + b_1)\,W_{\text{down}} + b_2$$
+<ol class="steps">
+  <li><strong>Expand:</strong> $W_{\text{up}}$ is $d \times 4d$. It maps the token's $d$-dimensional vector up to $4d$ hidden units, so there are many more pattern detectors than input dimensions.</li>
+  <li><strong>Bend:</strong> apply $\varphi$ (GELU in GPT-2) to each hidden unit.</li>
+  <li><strong>Project back:</strong> $W_{\text{down}}$ is $4d \times d$, returning to the model width so the result can be added back onto the token's vector.</li>
+</ol>
+<p>In GPT-2 small, $d = 768$, so each MLP goes $768 \to 3072 \to 768$. With two $d \times 4d$ matrices the MLP has $8d^2$ weights, against $4d^2$ for attention's four $d \times d$ matrices: about two thirds of each block. One popular reading of what MLPs do is that they act like a big key-value memory, where hidden units fire on particular input patterns and write back associated information (Geva et al., 2021). Treat that as a useful lens, not the full story.</p>
+<p>Most current open LLMs (Llama, Qwen, Mistral and others) use a gated variant called <strong>SwiGLU</strong> (Shazeer, 2020): $\big(\mathrm{SiLU}(xW_1) \odot xW_3\big)W_2$. Here $\odot$ means element-wise multiplication, and $\mathrm{SiLU}(z) = z\,\sigma(z)$, with $\sigma$ the sigmoid, is another smooth ReLU-like curve. There are three matrices instead of two, so the hidden size is usually shrunk to around $\tfrac{8}{3}d$ to $3.5d$ to keep the cost similar. The shape of the idea is unchanged: expand, bend, project back.</p>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · count the parameters</div>
+  <p>GPT-2 small: $d = 768$, MLP hidden size $3072$, with biases on both layers.</p>
+  <ol class="steps">
+    <li>Weights in $W_{\text{up}}$ ($768 \times 3072$), in millions: <span class="blank" data-answer="2.36" data-tol="0.006" data-hint="768 × 3072 = 2,359,296."></span></li>
+    <li>Total MLP parameters per block (both matrices plus both biases), in millions: <span class="blank" data-answer="4.72" data-tol="0.006" data-hint="2 × 2,359,296 weights, plus 3072 + 768 biases."></span></li>
+    <li>With 12 blocks, the MLPs hold this many million parameters (of GPT-2 small's 124M): <span class="blank" data-answer="56.7" data-tol="0.15" data-hint="12 × 4.72."></span></li>
+  </ol>
+</section>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> MLP weights are the bulk of a dense LLM's parameters, so they dominate memory and compute. That's why <strong>quantization</strong> (M5.1) and <strong>LoRA</strong> (M3.7) spend so much effort on these matrices, and why <strong>mixture-of-experts</strong> models (M5.3) replace the single MLP with many expert MLPs and send each token to only a few of them. When people say a model "has 70B parameters", most of those numbers live in MLP matrices.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Why does a neural network need a nonlinear activation between its layers, and what does that buy you?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Without it, each layer is a matrix multiply plus a shift, and a chain of those collapses into a single matrix multiply plus a shift, so extra layers add nothing. The nonlinearity (ReLU, GELU) adds a bend at each unit; summing many bends lets the network build curved, complex functions, which is what the universal approximation theorem formalises.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What does a single neuron compute?</p>
+    <ol class="q-src">
+      <li>$\varphi(x) \cdot w + b$</li>
+      <li>$\varphi(w \cdot x + b)$</li>
+      <li>$w \cdot x$, with nothing else</li>
+      <li>The largest input, $\max_i x_i$</li>
+    </ol>
+    <div class="q-explain">Weighted sum (a dot product), plus bias, then the activation. The activation goes on the <em>result</em>, not on the raw inputs.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A layer maps 512 inputs to 2048 hidden units: $h = \varphi(xW + b)$ with $x$ a row vector. What shape is $W$?</p>
+    <ol class="q-src">
+      <li>$2048 \times 512$</li>
+      <li>$512 \times 512$</li>
+      <li>$1 \times 2048$</li>
+      <li>$512 \times 2048$</li>
+    </ol>
+    <div class="q-explain">A $1 \times 512$ row vector times a $512 \times 2048$ matrix gives $1 \times 2048$. Each of the 2048 columns holds one neuron's weights. (With the column-vector convention $Wx$, the matrix is transposed: $2048 \times 512$.)</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Inside a transformer block, which part mixes information <em>between</em> token positions?</p>
+    <ol class="q-src">
+      <li>Attention. The MLP processes each position independently with shared weights.</li>
+      <li>The MLP. Attention only looks at one token at a time.</li>
+      <li>Both mix positions equally.</li>
+      <li>Neither: positions never exchange information.</li>
+    </ol>
+    <div class="q-explain">Attention (M1.1) builds each token's new vector from a weighted mix of the others. The MLP is applied to every token's vector separately, like running the same small network at each position.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A ReLU unit's input is negative for every example in the batch. During gradient descent (P2.2), what happens to its incoming weights on this batch?</p>
+    <ol class="q-src">
+      <li>They get large updates, because the error is large</li>
+      <li>They are reset to random values</li>
+      <li>They get zero gradient, so they don't change</li>
+      <li>They flip sign</li>
+    </ol>
+    <div class="q-explain">ReLU is flat for negative inputs, so its slope there is 0, and by the chain rule no gradient reaches the weights behind it. A unit stuck there permanently is called a "dead ReLU". GELU's small negative-side slope softens this.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>A neuron computes $\varphi(w \cdot x + b)$: a dot product, a bias, then a <strong>nonlinearity</strong>.</li>
+    <li>A layer is one matrix multiply, $h = \varphi(xW + b)$; an MLP is a stack of such layers.</li>
+    <li>Without $\varphi$, stacked layers <strong>collapse</strong> into one linear map. The bends are what make depth useful.</li>
+    <li>ReLU is $\max(0, z)$; GELU is a smooth version. Enough units can approximate any continuous function, but the theorem doesn't say how many or how to find them.</li>
+    <li>Every transformer block has an MLP: <strong>expand to ~4d, bend, project back</strong>, applied to each token separately. It holds most of the parameters.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p3-1-a","front":"What does one artificial neuron compute?","back":"$a = \\varphi(w \\cdot x + b)$: a weighted sum of the inputs (a dot product), plus a bias, passed through a nonlinear activation $\\varphi$."},
+  {"id":"p3-1-b","front":"Write a whole layer of neurons as one formula, with shapes.","back":"$h = \\varphi(xW + b)$ with $x$ of shape $1 \\times n$, $W$ of shape $n \\times m$ (one column per neuron), $b$ of shape $1 \\times m$; $\\varphi$ is applied element-wise."},
+  {"id":"p3-1-c","front":"Why do stacked layers need a nonlinearity?","back":"Linear layers compose into one: $(xW_1 + b_1)W_2 + b_2 = x(W_1W_2) + (b_1W_2 + b_2)$. Without $\\varphi$, any depth equals a single linear layer."},
+  {"id":"p3-1-d","front":"Define ReLU and GELU.","back":"ReLU: $\\max(0, z)$. GELU: $z\\,\\Phi(z)$, with $\\Phi$ the standard normal CDF; a smooth ReLU that dips slightly below 0 (min ≈ −0.17)."},
+  {"id":"p3-1-e","front":"What does the universal approximation theorem say, and what doesn't it say?","back":"One hidden layer with enough units can approximate any continuous function on a bounded region arbitrarily well. It doesn't say how many units are needed or whether training will find the weights."},
+  {"id":"p3-1-f","front":"Describe the MLP block in a transformer (GPT-2 style).","back":"Per token: expand $d \\to 4d$ with $W_{\\text{up}}$, apply GELU, project $4d \\to d$ with $W_{\\text{down}}$. About $8d^2$ weights, roughly 2/3 of a block. Modern LLMs often use the gated SwiGLU variant."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/p3-1-neuron.js"></script>
+<script src="../assets/js/anims/p3-1-relu-sum.js"></script>
+</body>
+</html>

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m3-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Constitutional AI &amp; RLAIF · LLMs, Animated</title>
+<meta name="description" content="How a written set of principles lets a model critique and revise its own answers, and label preferences for RL: Constitutional AI and RL from AI feedback.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Constitutional AI &amp; RLAIF</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of Post-training</span></div>
+<p class="lede">RLHF needs people to compare thousands of answers. <strong>Constitutional AI</strong> replaces most of that labour for harmlessness with a short list of written principles: the model critiques and rewrites its own answers, then an AI judge supplies the preference labels for RL. That second part has a name of its own: <strong>RL from AI feedback (RLAIF)</strong>.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe Constitutional AI's two phases: critique-and-revise SFT, then RL from AI feedback.</li>
+    <li>Turn a feedback model's answer probabilities into a soft preference label, and plug it into a preference-model loss.</li>
+    <li>Weigh the benefits and limits of AI feedback against human feedback.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="m3-1.html">SFT</a>, <a href="m3-2.html">Reward models</a> (the Bradley–Terry loss) and <a href="m3-3.html">RLHF with PPO</a>. We'll also connect to <a href="m3-4.html">DPO</a>.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>A guess now, even a wrong one, makes the answer stick.</p>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">RLHF needs many human comparisons. What is the core idea of RLAIF?</p>
+    <ol class="q-src">
+      <li>Let an AI model produce the preference labels instead of people</li>
+      <li>Skip preferences entirely and only do supervised fine-tuning</li>
+      <li>Run RL with no reward at all</li>
+      <li>Collect labels from users clicking thumbs-up in production</li>
+    </ol>
+    <div class="q-explain">RLAIF keeps the RLHF machinery (preference model, then RL) but the comparisons come from an AI "feedback model" guided by written principles.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In Constitutional AI, the "constitution" is…</p>
+    <ol class="q-src">
+      <li>a law that regulates AI companies</li>
+      <li>a set of hard-coded keyword filters</li>
+      <li>a list of natural-language principles that guide the model's critiques and the AI preference labels</li>
+      <li>the system prompt shown to users at deployment</li>
+    </ol>
+    <div class="q-explain">It's a short list of plain-language rules, used <em>during training</em>: to steer self-critiques and to tell the feedback model what "better" means.</div>
+  </div>
+</section>
+
+<h2>The bottleneck: human labels for harmlessness</h2>
+<p>RLHF (M3.3) trains a reward model on human comparisons. For harmlessness this is especially painful: labellers must read a lot of disturbing text, they disagree, and the criteria they use live only in instructions and their heads. Assistants trained this way also tended to become <strong>evasive</strong>, refusing anything borderline with an unhelpful "I can't help with that".</p>
+<p><strong>Constitutional AI</strong> (Bai et al., 2022, Anthropic, "Constitutional AI: Harmlessness from AI Feedback") aims for a model that is <em>harmless but not evasive</em>, using no human labels for harmlessness at all. Human oversight comes from writing the <strong>principles</strong>. The method has two phases.</p>
+
+<h2>Phase 1: critique, revise, fine-tune</h2>
+<ol class="steps">
+  <li>Send <strong>red-team prompts</strong> (requests designed to elicit harmful output) to a helpful-only RLHF model and collect its answers.</li>
+  <li>Ask the same model to <strong>critique</strong> its answer according to a principle drawn at random from the constitution.</li>
+  <li>Ask it to <strong>revise</strong> the answer in light of the critique. Repeat critique and revision a few times if you like.</li>
+  <li><strong>Fine-tune</strong> a pretrained model on the final revisions, mixed with ordinary helpful answers so it stays helpful. This is the <strong>SL-CAI</strong> model.</li>
+</ol>
+
+<h2>Phase 2: RL from AI feedback</h2>
+<ol class="steps">
+  <li>SL-CAI generates <strong>two answers</strong> to each harmful prompt.</li>
+  <li>A <strong>feedback model</strong> sees the prompt, both answers and one principle, posed as a multiple-choice question: which answer is better, (A) or (B)?</li>
+  <li>Its probabilities for "(A)" and "(B)" become a <strong>soft preference label</strong>.</li>
+  <li>Train a <strong>preference model</strong> on these AI labels, mixed with human labels for helpfulness, then run RL against it exactly as in RLHF. The result is <strong>RL-CAI</strong>.</li>
+</ol>
+
+<figure class="anim wide" data-anim="m3-6-cai"></figure>
+
+<p>The paper reports that, in its experiments, the RL-CAI models were judged by crowdworkers to be both more harmless and less evasive than an RLHF baseline trained on human harmlessness labels. It also found that letting the feedback model reason step by step (chain of thought) before answering improved the labels; because those reasoned answers tended to be overconfident, the authors clamped the resulting probabilities to the 40–60% range.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-constitution-poster.webp" alt="A child comparing their drawing with a poster of picture rules on the wall and fixing part of it with an eraser." width="1200" height="900" loading="lazy">
+    <div>
+      <p>There's a <strong>poster of rules</strong> on the wall: "be kind", "tell the truth", "no scary pictures".</p>
+      <p>After drawing, the child <strong>checks their own picture</strong> against the poster: "Hmm, this part breaks rule 3." Then they take the <strong>eraser</strong> and fix it. Nobody had to stand over them.</p>
+      <p>Do this enough and they learn to draw it right the first time. They also get good at saying which of two drawings follows the rules better, which helps them practise even more.</p>
+    </div>
+  </div>
+</details>
+<p class="math-note">Where the analogy breaks: the model's "checking" is only as good as its own understanding of the rules. It can miss problems, or confidently "fix" things that weren't broken, and no grown-up checks every picture.</p>
+
+<h2>From the feedback model's answer to a training label</h2>
+<p>Let $\ell_A$ and $\ell_B$ be the feedback model's log-probabilities of answering "(A)" and "(B)". Normalising over just those two options gives the soft label:</p>
+$$p_A = \frac{e^{\ell_A}}{e^{\ell_A} + e^{\ell_B}} = \sigma(\ell_A - \ell_B)$$
+<p>$\sigma$ is the logistic sigmoid, $\sigma(z) = 1/(1 + e^{-z})$. The preference model gives each answer a scalar score, $r_A$ and $r_B$, and is trained with the Bradley–Terry loss from M3.2, using the soft label as the target instead of a hard 0 or 1:</p>
+$$\mathcal{L} = -\Big[p_A \log \sigma(r_A - r_B) + (1 - p_A)\log \sigma(r_B - r_A)\Big]$$
+<p>When $p_A = 1$ this is exactly the usual reward-model loss. A soft label like 0.6 says "slightly prefer A", and the model is not punished for being unsure.</p>
+
+<h3>Worked example</h3>
+<p>The feedback model gives $\ell_A = -0.4$ and $\ell_B = -1.6$.</p>
+<ol class="steps">
+  <li><strong>Difference:</strong> $\ell_A - \ell_B = -0.4 - (-1.6) = 1.2$</li>
+  <li><strong>Soft label:</strong> $p_A = \sigma(1.2) = 1/(1 + e^{-1.2}) = 1/(1 + 0.301) \approx 0.77$</li>
+  <li><strong>Meaning:</strong> "A is better" with weight 0.77 and "B is better" with weight 0.23. That's the label in the animation.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Now $\ell_A = -2.0$ and $\ell_B = -0.5$. The preference model currently scores $r_A = 0.3$ and $r_B = 1.1$.</p>
+  <ol class="steps">
+    <li>Soft label $p_A = \sigma(\ell_A - \ell_B)$: <span class="blank" data-answer="0.18" data-tol="0.011" data-hint="ℓA − ℓB = −1.5, and σ(−1.5) = 1/(1 + e^1.5) = 1/(1 + 4.48)."></span></li>
+    <li>$\sigma(r_B - r_A)$, the model's current probability that B is better: <span class="blank" data-answer="0.69" data-tol="0.011" data-hint="r_B − r_A = 0.8, and σ(0.8) = 1/(1 + e^−0.8) = 1/(1 + 0.449)."></span></li>
+    <li>Loss $\mathcal{L}$ (natural log): <span class="blank" data-answer="0.52" data-tol="0.015" data-hint="−[0.18·ln(0.31) + 0.82·ln(0.69)] = 0.18·1.17 + 0.82·0.37."></span></li>
+  </ol>
+  <p class="math-note">Here the AI label already agrees with the preference model (both favour B), so the loss is modest. If the label had favoured A, the loss would be larger and the gradient would push $r_A$ up.</p>
+</section>
+
+<h2>RLAIF beyond Constitutional AI</h2>
+<p>The idea spread quickly. Lee et al. (2023, Google), "RLAIF vs. RLHF", found that on summarisation and dialogue tasks, policies trained with AI-labelled preferences were rated by humans about as well as those trained with human labels. In open models, <strong>UltraFeedback</strong> (Cui et al., 2023) used GPT-4 to label preferences, and <strong>Zephyr-7B</strong> (Tunstall et al., 2023) trained on them with <strong>DPO</strong> instead of PPO: AI feedback with no RL loop at all. The evaluation-side twin of this idea is the LLM judge (<a href="m4-4.html">M4.4</a>), which has the same strengths and biases.</p>
+<p>Anthropic has also published the constitution it uses for its Claude models; the 2023 version drew on sources such as the UN Universal Declaration of Human Rights. That's the point: the rules are text anyone can read.</p>
+
+<h2>Benefits and limits</h2>
+<ul>
+  <li><strong>Scalable:</strong> AI labels are cheap and fast, so you can label far more comparisons and iterate in days, not months.</li>
+  <li><strong>Transparent:</strong> the target behaviour is written down. You can read it, argue about it and change it, and changing a principle changes the training signal.</li>
+  <li><strong>Less human exposure</strong> to harmful content, and a principle can directly target evasiveness.</li>
+  <li><strong>But</strong> AI labels inherit the feedback model's biases and blind spots, and a model judging its own family's outputs may share their mistakes.</li>
+  <li><strong>But</strong> principles are vague and can conflict ("be helpful" vs "avoid harm"), and choosing them is a values decision that someone has to own.</li>
+  <li><strong>But</strong> it's still optimisation against a learned preference model, so reward hacking and over-optimisation still apply. In the paper, humans still supplied the helpfulness labels and judged the final models.</li>
+</ul>
+<p><strong>Relation to RLHF:</strong> same pipeline, different labeller. RLHF: humans compare, a reward model learns, RL optimises. RLAIF: an AI model compares, guided by written principles; everything after the labels is unchanged, and you can swap PPO for DPO.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> AI feedback is now a standard ingredient of post-training: synthetic preference pairs, LLM judges scoring answers against written rubrics, and model-written critiques used for data filtering. A common pattern is to combine it with <a href="m3-5.html">verifiable rewards</a>: code checks what can be checked (maths, tests, formats), and principle-guided AI judges cover what can't (tone, safety, helpfulness). Either way, validate the AI labels against a sample of human judgements before trusting them.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">In Constitutional AI, what do humans still provide, and what does the AI take over?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Humans write the constitution (the principles), choose the red-team prompts and, in the original paper, still provide helpfulness labels and evaluate the final models. The AI takes over the harmlessness work: it critiques and revises its own answers for the supervised phase, and a feedback model labels which of two answers better follows a principle, producing the preference data for RL.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In the supervised phase of Constitutional AI, the model is fine-tuned on…</p>
+    <ol class="q-src">
+      <li>the critiques it wrote</li>
+      <li>its revised answers (plus ordinary helpful answers)</li>
+      <li>its harmful first drafts, with a negative weight</li>
+      <li>answers written by human experts</li>
+    </ol>
+    <div class="q-explain">Critiques are only a means to better revisions. The final revisions become ordinary SFT targets, which gives the SL-CAI model.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">The feedback model's log-probabilities for "(A)" and "(B)" are equal. What is the soft label $p_A$?</p>
+    <ol class="q-src">
+      <li>0.5</li>
+      <li>1</li>
+      <li>0</li>
+      <li>Undefined, so the pair must be dropped</li>
+    </ol>
+    <div class="q-explain">$p_A = \sigma(\ell_A - \ell_B) = \sigma(0) = 0.5$: "no preference". The loss then pushes the preference model to score A and B equally.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which is a genuine limitation of RLAIF compared with RLHF?</p>
+    <ol class="q-src">
+      <li>It can't be combined with PPO</li>
+      <li>It needs more human labels than RLHF</li>
+      <li>The principles have to be written as code</li>
+      <li>The labels inherit the feedback model's biases and blind spots</li>
+    </ol>
+    <div class="q-explain">An AI labeller is only as good as its judgement of the principles. That's why AI labels should be spot-checked against human judgements. RLAIF works with PPO, needs <em>fewer</em> human labels, and its principles are plain language.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You have 50,000 AI-labelled preference pairs and want to skip training a separate reward model. Which method fits? (Think back to M3.4.)</p>
+    <ol class="q-src">
+      <li>PPO</li>
+      <li>GRPO with a unit-test verifier</li>
+      <li>DPO</li>
+      <li>SFT on the rejected answers</li>
+    </ol>
+    <div class="q-explain">DPO optimises the policy directly on preference pairs, with no reward model and no sampling loop. That's how Zephyr used AI (GPT-4) feedback. PPO needs a reward model; a unit-test verifier doesn't use preference pairs at all.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li><strong>Constitutional AI</strong> (Bai et al., 2022) steers a model with a short, written list of principles.</li>
+    <li><strong>Supervised phase:</strong> the model critiques and revises its own answers; fine-tune on the revisions.</li>
+    <li><strong>RL phase (RLAIF):</strong> a feedback model's answer probabilities, $p_A = \sigma(\ell_A - \ell_B)$, become soft preference labels for a preference model, then RL.</li>
+    <li>Benefits: <strong>scalable</strong> and <strong>transparent</strong>. Limits: inherited <strong>AI biases</strong>, vague or conflicting principles, and the usual reward over-optimisation.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m3-6-a","front":"What is Constitutional AI (Bai et al., 2022)?","back":"A training method where a written list of principles (the constitution) guides the model to critique and revise its own answers (SFT phase) and guides an AI feedback model that labels preferences for RL (RLAIF phase)."},
+  {"id":"m3-6-b","front":"Describe the supervised (SL-CAI) phase in three steps.","back":"Red-team prompt → helpful-only model's draft → model critiques the draft against a sampled principle and revises it. Fine-tune on the final revisions (plus helpful data)."},
+  {"id":"m3-6-c","front":"How is a soft AI preference label computed?","back":"From the feedback model's log-probabilities of answering (A) and (B): $p_A = \\sigma(\\ell_A - \\ell_B) = e^{\\ell_A}/(e^{\\ell_A}+e^{\\ell_B})$."},
+  {"id":"m3-6-d","front":"Write the preference-model loss with a soft label $p_A$.","back":"$-[p_A \\log\\sigma(r_A - r_B) + (1-p_A)\\log\\sigma(r_B - r_A)]$: Bradley–Terry with a soft target."},
+  {"id":"m3-6-e","front":"RLHF vs RLAIF: what's the difference?","back":"Only who labels the comparisons: humans (RLHF) or an AI model guided by principles (RLAIF). The preference model and RL (or DPO) that follow are the same."},
+  {"id":"m3-6-f","front":"Two benefits and two limits of AI feedback?","back":"Benefits: scalable/cheap labels; transparent, editable principles. Limits: labels inherit the feedback model's biases and blind spots; principles can be vague or conflict, and over-optimisation of the preference model still happens."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m3-6-cai.js"></script>
+</body>
+</html>

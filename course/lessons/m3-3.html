@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m3-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RLHF with PPO · LLMs, Animated</title>
+<meta name="description" content="The RLHF loop behind InstructGPT: sample, score with a reward model, penalize drift with KL, and update with PPO's clipped objective. Why it needs four models.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>RLHF with PPO</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 3 of Post-training</span></div>
+<p class="lede">Reinforcement learning from human feedback closes the loop. The model writes answers, the reward model grades them, and the model is nudged toward higher grades without drifting too far from where it started. This is the recipe behind InstructGPT and the first ChatGPT.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Walk through one round of RLHF and name the four models involved.</li>
+    <li>Explain the KL penalty $r - \beta\,\mathrm{KL}$ and compute a penalized reward by hand.</li>
+    <li>Say what the advantage and PPO's clipped objective do, and why RLHF is expensive.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> the reward model from <a href="m3-2.html">Reward models</a> (M3.2), the SFT starting point from <a href="m3-1.html">SFT &amp; instruction tuning</a> (M3.1), KL divergence from <a href="p1-6.html">Entropy, cross-entropy &amp; KL</a> (P1.6), and the update rule from <a href="p2-2.html">Gradient descent</a> (P2.2).</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">During RLHF, what does the model actually learn from?</p>
+    <ol class="q-src">
+      <li>New human-written ideal answers, like in SFT</li>
+      <li>Its own sampled answers, each scored by the reward model</li>
+      <li>The reward model's weights, copied in</li>
+      <li>Only the fixed chosen/rejected pairs from the preference dataset</li>
+    </ol>
+    <div class="q-explain">RL is <em>on-policy</em>: the model generates, gets graded, and adjusts. The human preferences reach it indirectly, through the reward model.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why does RLHF penalize the model for drifting away from the SFT model it started from?</p>
+    <ol class="q-src">
+      <li>To make training faster</li>
+      <li>Because the SFT model is always right</li>
+      <li>To save memory</li>
+      <li>The reward model is only trustworthy near the kind of text it was trained on; far away, the policy can exploit its mistakes</li>
+    </ol>
+    <div class="q-explain">That's the reward-hacking curve from M3.2. The KL penalty is a leash that keeps the policy where the reward model's judgement still means something, and keeps the text fluent.</div>
+  </div>
+</section>
+
+<h2>The objective</h2>
+<p>We now have a policy to improve (the SFT model, M3.1) and a reward model $r_\phi$ that scores any response (M3.2). RLHF maximizes the reward the policy earns on fresh prompts, minus a penalty for moving away from a frozen <strong>reference</strong> model $\pi_\text{ref}$, which is a copy of the SFT model:</p>
+$$\max_{\theta}\;\; \mathbb{E}_{x \sim \mathcal{D},\; y \sim \pi_\theta(\cdot \mid x)}\big[\, r_\phi(x, y) \,\big] \;-\; \beta\,\mathrm{KL}\big(\pi_\theta(\cdot \mid x)\,\big\|\,\pi_\text{ref}(\cdot \mid x)\big)$$
+<ul>
+  <li>$x \sim \mathcal{D}$: a prompt from the training set (prompts only, no answers).</li>
+  <li>$y \sim \pi_\theta(\cdot \mid x)$: a response <em>sampled from the current policy</em> with parameters $\theta$.</li>
+  <li>$\mathrm{KL}$: how different the policy's next-token distributions are from the reference's (P1.6). It's zero only when they match.</li>
+  <li>$\beta$: the strength of the leash. Too small and the policy reward-hacks; too large and it barely moves. Values around 0.01 to 0.2 are common, tuned per setup.</li>
+</ul>
+<p>In practice the KL is estimated from the sampled tokens themselves, and folded into the reward:</p>
+$$R(x, y) = r_\phi(x, y) \;-\; \beta \sum_{t} \Big(\log \pi_\theta(y_t \mid x, y_{&lt;t}) - \log \pi_\text{ref}(y_t \mid x, y_{&lt;t})\Big)$$
+<p>Each term in the sum is how much more likely the policy found that token than the reference did. Averaged over many samples, the sum is exactly the KL divergence.</p>
+
+<figure class="anim wide" data-anim="m3-3-rlhf"></figure>
+
+<h3>Worked example: the penalized reward</h3>
+<p>The animation's numbers. The reward model gives $r = 2.0$. For the response's three tokens the policy's log-probs are $[-0.5, -1.0, -0.2]$ and the reference's are $[-0.9, -1.2, -0.3]$. Use $\beta = 0.1$.</p>
+<ol class="steps">
+  <li>Per-token gaps $\log\pi_\theta - \log\pi_\text{ref}$: $0.4,\ 0.2,\ 0.1$.</li>
+  <li>KL estimate: $0.4 + 0.2 + 0.1 = 0.7$.</li>
+  <li>Penalty: $\beta \times 0.7 = 0.07$.</li>
+  <li>Reward used for learning: $R = 2.0 - 0.07 = 1.93$.</li>
+</ol>
+<p class="math-note">A single sample's estimate can come out negative when the policy happens to pick tokens the reference liked more. Its average over samples, the true KL, never is.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A 4-token response gets $r = 1.5$. Policy log-probs: $[-0.2, -0.4, -0.1, -0.3]$. Reference log-probs: $[-1.2, -0.9, -0.6, -0.8]$. Use $\beta = 0.05$.</p>
+  <ol class="steps">
+    <li>KL estimate (sum of the gaps): <span class="blank" data-answer="2.5" data-tol="0.001" data-hint="Gaps: −0.2 − (−1.2) = 1.0, then 0.5, 0.5 and 0.5."></span></li>
+    <li>Penalty $\beta \times \mathrm{KL}$: <span class="blank" data-answer="0.125" data-tol="0.001" data-hint="0.05 × 2.5."></span></li>
+    <li>Penalized reward $R$: <span class="blank" data-answer="1.375" data-tol="0.002" data-hint="1.5 − 0.125."></span></li>
+    <li>The value model expected $V = 1.6$. Advantage $A = R - V$: <span class="blank" data-answer="-0.225" data-tol="0.002" data-hint="1.375 − 1.6. Negative!"></span></li>
+  </ol>
+  <p class="math-note" style="margin-top:10px">The reward was positive, yet the advantage is negative, so PPO makes this response <em>less</em> likely. It was worse than the policy usually does on this prompt.</p>
+</section>
+
+<h2>Advantages and the value model</h2>
+<p>The simplest policy-gradient idea is: raise the log-probability of each sampled response in proportion to its reward. But raw rewards are noisy, and if every reward is positive, everything gets pushed up. The fix is to subtract a <strong>baseline</strong>, what we <em>expected</em> to get:</p>
+$$A = R - V(x)$$
+<p>$A$ is the <strong>advantage</strong>: positive means better than usual, so make it more likely; negative means worse, so make it less likely. $V$ comes from a <strong>value model</strong> (the “critic”), a fourth network, often initialized from the reward model and trained by regression to predict $R$.</p>
+<p class="math-note">Real implementations predict a value at every token and compute per-token advantages with Generalized Advantage Estimation (GAE; Schulman et al., 2015). The idea is the same: reward minus expectation.</p>
+
+<h2>PPO: small, safe steps</h2>
+<p>Sampling text is expensive, so we want several gradient steps per batch of samples. But after the first step the policy is no longer the one that generated the data. <strong>Proximal Policy Optimization</strong> (Schulman et al., 2017) corrects for this with the probability ratio, and caps how much it may count:</p>
+$$L^{\text{CLIP}}(\theta) = \mathbb{E}_t\Big[\min\big(\rho_t(\theta)\,A_t,\;\; \mathrm{clip}\big(\rho_t(\theta),\, 1-\epsilon,\, 1+\epsilon\big)\,A_t\big)\Big], \qquad \rho_t(\theta) = \frac{\pi_\theta(y_t \mid \cdot)}{\pi_{\theta_\text{old}}(y_t \mid \cdot)}$$
+<p>$\rho_t$ is the ratio (called $r$ in the animation, not to be confused with the reward) of the new to the old probability of token $y_t$, $A_t$ is its advantage, and $\epsilon$ (typically 0.2) sets the width of the allowed band. PPO <em>maximizes</em> this, so in code you minimize its negative.</p>
+
+<figure class="anim wide" data-anim="m3-3-clip"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ppo-puppy.webp" alt="A child training a puppy with treats on a long stretchy leash that lets it explore but not run off." width="1200" height="900" loading="lazy">
+    <div>
+      <p>You're teaching a puppy tricks. When it does something good, it gets a <strong>treat</strong>. Something better than usual gets an extra-happy treat; something worse gets none.</p>
+      <p>The puppy is on a <strong>long, stretchy leash</strong>. It can wander and try new things, but if it runs too far from you the leash pulls it back. And you only let it change its habits a little at a time.</p>
+      <p>Treats = rewards. The leash = the KL penalty. “A little at a time” = PPO's clipping.</p>
+      <p><em>Where it breaks:</em> the model gets one score for a whole answer, from a judge (the reward model) that can be fooled. A puppy's treat comes from you, and you know what you meant.</p>
+    </div>
+  </div>
+</details>
+
+<h2>InstructGPT: the recipe that made it work</h2>
+<p><strong>Ouyang et al., 2022</strong> (“Training language models to follow instructions with human feedback”) ran the three stages on GPT-3: SFT on roughly 13k prompts with demonstrations, a reward model trained on comparisons for roughly 33k prompts, and PPO on roughly 31k prompts. The headline result: labelers preferred outputs from the <strong>1.3B</strong> InstructGPT model over those of the <strong>175B</strong> GPT-3, a model more than 100 times larger.</p>
+<p>They also mixed some pretraining gradients into the PPO updates (“PPO-ptx”) to reduce the <strong>alignment tax</strong>, the drop in scores on standard NLP benchmarks that plain RLHF caused. The same recipe underlies the original ChatGPT.</p>
+
+<h2>Why RLHF is expensive, and finicky</h2>
+<ul>
+  <li><strong>Four models in memory:</strong> policy (trained), value model (trained), reward model (frozen) and reference (frozen). For a 70B policy that's on the order of four 70B networks, plus optimizer state for the two trained ones, which is several times their weights (M2.5).</li>
+  <li><strong>Generation inside the training loop:</strong> every round samples full responses token by token, which is slow and often dominates step time. Modern RL frameworks run a separate fast inference engine just for this.</li>
+  <li><strong>Many knobs and failure modes:</strong> $\beta$, $\epsilon$, two learning rates, advantage settings and batch sizes. Runs can reward-hack, see the KL blow up, or collapse to repetitive text.</li>
+</ul>
+<p>Hence the alternatives in the next lessons. <strong>DPO</strong> (M3.4) needs no reward model and no sampling. <strong>GRPO</strong> (M3.5) drops the value model by comparing each sample with the average of a group of samples for the same prompt.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> PPO-style RL is still central to frontier post-training in 2026, but the reward often comes from <strong>verifiers</strong> (unit tests, maths checkers) rather than a learned reward model, and value-free variants such as GRPO are popular. The KL-to-reference leash remains the standard knob for preference-based RL, though some reasoning-focused recipes drop it (e.g. DAPO, Yu et al., 2025). When an RLHF run goes wrong, the first things to plot are reward, KL and response length over time.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Name the four models in PPO-based RLHF and what each one is for.</p>
+  <div class="model-answer"><strong>Model answer:</strong> The <strong>policy</strong> (trained, starts as the SFT model) generates responses. The frozen <strong>reward model</strong> scores them. The frozen <strong>reference</strong> (a copy of the SFT model) provides log-probs for the KL penalty that keeps the policy from drifting. The <strong>value model</strong> (trained) predicts the expected reward, so the advantage $R - V$ tells PPO whether a response was better or worse than usual.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Connect to P1.6: the penalty $\beta\,\mathrm{KL}(\pi_\theta \,\|\, \pi_\text{ref})$ is zero exactly when…</p>
+    <ol class="q-src">
+      <li>The policy's distributions are identical to the reference's</li>
+      <li>The reward is at its maximum</li>
+      <li>$\beta = 1$</li>
+      <li>The policy always picks its single most likely token</li>
+    </ol>
+    <div class="q-explain">KL is non-negative and equals 0 only when the two distributions match. Any drift from the SFT model costs reward.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">With $\epsilon = 0.2$, a token has advantage $A = +2$ and ratio $\rho = 1.5$. What is its clipped objective $\min(\rho A,\ \mathrm{clip}(\rho, 0.8, 1.2)\,A)$?</p>
+    <ol class="q-src">
+      <li>3.0</li>
+      <li>1.5</li>
+      <li>2.4</li>
+      <li>0</li>
+    </ol>
+    <div class="q-explain">$\rho A = 3.0$ and the clipped term is $1.2 \times 2 = 2.4$. The min is 2.4, a flat region, so this token gives no further push: its probability has already risen by more than 20%.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which models are updated by gradient steps during PPO-based RLHF?</p>
+    <ol class="q-src">
+      <li>All four</li>
+      <li>Only the reward model</li>
+      <li>The policy and the reference</li>
+      <li>The policy and the value model</li>
+    </ol>
+    <div class="q-explain">The reward model and reference stay frozen: one is the judge, the other the anchor for the KL penalty. Training either would defeat its purpose.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A sampled response gets penalized reward $R = 3.0$, but the value model predicted $V = 3.4$. What does PPO do with it?</p>
+    <ol class="q-src">
+      <li>Makes it more likely, because the reward is positive</li>
+      <li>Makes it less likely, because the advantage $R - V = -0.4$ is negative</li>
+      <li>Ignores it, because only negative rewards are used</li>
+      <li>Retrains the reward model on it</li>
+    </ol>
+    <div class="q-explain">What matters is the advantage, reward minus expectation. Worse than usual means less likely, however positive the raw reward is.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>RLHF loop: the <strong>policy samples</strong>, the <strong>reward model scores</strong>, and <strong>PPO updates</strong> the policy. It learns from its own outputs.</li>
+    <li>A <strong>KL penalty</strong> to a frozen reference keeps the policy near the SFT model: $R = r - \beta\,\mathrm{KL}$. It's the main defence against reward hacking.</li>
+    <li>The <strong>advantage</strong> $A = R - V$ (reward minus a value model's expectation) decides the direction of each update.</li>
+    <li><strong>PPO's clipping</strong> keeps the ratio $\pi_\theta/\pi_\text{old}$ within $1 \pm \epsilon$, giving small, safe steps and several epochs per batch.</li>
+    <li>Cost: <strong>four models</strong> in memory and generation inside the loop. That's what motivates DPO and GRPO.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m3-3-a","front":"Describe one round of RLHF with PPO.","back":"Sample prompts; the policy generates responses; the reward model scores them; subtract a KL penalty to the reference; a value model gives a baseline, so advantage = reward − value; PPO updates the policy (and the value model) with clipped steps."},
+  {"id":"m3-3-b","front":"Write the RLHF objective with the KL penalty.","back":"$\\max_\\theta \\mathbb{E}[r_\\phi(x,y)] - \\beta\\,\\mathrm{KL}(\\pi_\\theta \\| \\pi_\\text{ref})$, with $y$ sampled from $\\pi_\\theta$. In practice $R = r - \\beta\\sum_t(\\log\\pi_\\theta(y_t) - \\log\\pi_\\text{ref}(y_t))$."},
+  {"id":"m3-3-c","front":"What does $\\beta$ control in RLHF, and what goes wrong at each extreme?","back":"The strength of the KL leash to the reference model. Too small: the policy drifts and reward-hacks. Too large: it barely moves from the SFT model."},
+  {"id":"m3-3-d","front":"Write PPO's clipped objective and explain the clip.","back":"$\\mathbb{E}[\\min(\\rho A, \\mathrm{clip}(\\rho, 1-\\epsilon, 1+\\epsilon)A)]$ with $\\rho = \\pi_\\theta/\\pi_\\text{old}$. Beyond $1\\pm\\epsilon$ in the helpful direction the objective is flat (zero gradient), so each update stays small; the min keeps harmful moves penalized."},
+  {"id":"m3-3-e","front":"What is the advantage, and why subtract a value estimate?","back":"$A = R - V(x)$: how much better the sample was than expected. Subtracting the baseline cuts variance and lets below-average samples be pushed down even if their reward is positive."},
+  {"id":"m3-3-f","front":"Which four models does PPO-based RLHF hold in memory, and which are trained?","back":"Policy (trained), value model (trained), reward model (frozen), reference/SFT model (frozen)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m3-3-rlhf.js"></script>
+<script src="../assets/js/anims/m3-3-clip.js"></script>
+</body>
+</html>

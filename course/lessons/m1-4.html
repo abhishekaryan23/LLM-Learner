@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m1-4">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The decoder-only transformer · LLMs, Animated</title>
+<meta name="description" content="The whole GPT-style model, bottom to top: token embedding, the residual stream, pre-norm attention and MLP blocks, final norm and unembedding. Plus a full parameter count for GPT-2 small, and training vs generation.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>The decoder-only transformer</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 4 of Transformers</span></div>
+<p class="lede">You now have every part. This lesson snaps them together into the architecture behind GPT, Llama, Claude and nearly every other LLM: a stack of identical-looking layers wrapped around one long “residual stream”. Then you'll count every one of GPT-2 small's 124 million parameters.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Trace a token from embedding through $N$ pre-norm layers to next-token probabilities.</li>
+    <li>Explain the residual stream, and what attention and the MLP each contribute.</li>
+    <li>Count a model's parameters from its config, and contrast training with generation.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Before you start:</strong> this assembles <a href="m1-1.html">attention</a>, <a href="m1-2.html">multi-head attention</a> and <a href="m1-3.html">positional encodings</a>. It also uses <a href="p3-1.html">MLPs</a>, <a href="p3-2.html">softmax</a> and <a href="p3-4.html">embeddings</a> from P3.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Guess first; you'll check yourself against the parameter count below.</p>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In a large transformer, roughly what share of the parameters (not counting embeddings) sits in the MLP, or feed-forward, layers?</p>
+    <ol class="q-src">
+      <li>About 5%</li>
+      <li>About one third</li>
+      <li>About two thirds</li>
+      <li>All of them</li>
+    </ol>
+    <div class="q-explain">Per layer, attention has about $4d^2$ parameters and a 4×-wide MLP about $8d^2$, so the MLP holds about two thirds.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Training on a 1,000-token text, how many next-token predictions does the model learn from in one forward pass?</p>
+    <ol class="q-src">
+      <li>1, the token after the end</li>
+      <li>About 1,000, one per position</li>
+      <li>About 1,000,000, one per pair of tokens</li>
+      <li>None; it has to generate first</li>
+    </ol>
+    <div class="q-explain">Every position predicts its own next token at the same time, and the causal mask stops each one seeing its answer. That parallelism is a big reason transformers train so efficiently.</div>
+  </div>
+</section>
+
+<h2>The whole model, bottom to top</h2>
+<p>A decoder-only transformer turns $n$ input tokens into $n$ probability distributions over the next token:</p>
+<ol class="steps">
+  <li><strong>Token embedding:</strong> look up each token ID in a $V \times d_{\text{model}}$ table ($V$ is the vocabulary size). Older models also add a learned position vector here; RoPE models don't (<a href="m1-3.html">M1.3</a>).</li>
+  <li><strong>$N$ layers</strong>, each: normalize → causal multi-head self-attention → add; normalize → MLP → add.</li>
+  <li><strong>Final norm</strong>, then the <strong>unembedding</strong> $W_U$ ($d_{\text{model}} \times V$) gives a score, a <strong>logit</strong>, for every vocabulary token.</li>
+  <li><strong>Softmax</strong> turns each position's logits into probabilities for the next token.</li>
+</ol>
+
+<figure class="anim wide" data-anim="m1-4-decoder"></figure>
+
+<h2>The residual stream</h2>
+<p>Write $h$ for the $n \times d_{\text{model}}$ matrix of token vectors (one row per token). Each layer does two updates:</p>
+$$h \leftarrow h + \mathrm{Attn}\big(\mathrm{Norm}(h)\big)$$
+$$h \leftarrow h + \mathrm{MLP}\big(\mathrm{Norm}(h)\big)$$
+<p>Nothing ever <em>replaces</em> $h$; each sub-block reads a normalized copy and <strong>adds</strong> its contribution. That running sum is called the <strong>residual stream</strong> (Elhage et al., 2021, “A Mathematical Framework for Transformer Circuits”). Two consequences:</p>
+<ul>
+  <li><strong>Training stays stable at depth.</strong> The “+ h” path is an identity, so gradients flow straight down through dozens of layers, the same trick that made very deep ResNets trainable (He et al., 2016).</li>
+  <li><strong>Layers communicate through a shared space.</strong> Any layer can write information that any later layer reads. Each layer tends to nudge the representation rather than rebuild it.</li>
+</ul>
+<p>The two sub-blocks have different jobs. <strong>Attention is the only place tokens exchange information</strong>: it moves information between positions. The <strong>MLP</strong> works on each token on its own; it's where much of the per-token processing happens, and interpretability work suggests a lot of factual association is stored there.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-layer-stack.webp" alt="A lump of clay rising floor by floor through a tower of identical workstations, polished a little more at each one, and coming out of the top as a finished vase." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A lump of clay rides an elevator up a tall building. On every floor there's a workstation that looks just like the others.</p>
+      <p>Each station doesn't throw the clay away and start over. It <strong>adds a little touch</strong>: smooths a bump, shapes the neck a bit more. Floor by floor, the lump turns into a <strong>vase</strong>.</p>
+      <p>The clay is the token's vector, the elevator is the residual stream, the stations are layers. Where it breaks: each real station has its own learned tools (its own weights), and at the attention step the lumps on a floor can peek at each other.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Normalization: pre-norm, LayerNorm, RMSNorm</h2>
+<p>The original 2017 transformer normalized <em>after</em> each add (“post-norm”). GPT-2 moved the norm to the <em>input</em> of each sub-block (“pre-norm”, as in the equations above) and added one final norm before the unembedding. Pre-norm keeps the residual path clean and trains more reliably, needing less careful learning-rate warm-up (Xiong et al., 2020). Nearly every LLM since uses it.</p>
+<p><strong>LayerNorm</strong> rescales each token's vector to mean 0 and variance 1, then applies a learned scale and shift. Many modern models (Llama, Mistral, Gemma) use the simpler <strong>RMSNorm</strong> (Zhang &amp; Sennrich, 2019), which skips the mean and the shift:</p>
+$$\mathrm{RMSNorm}(x) = \frac{x}{\sqrt{\tfrac{1}{d}\sum_{j=1}^{d} x_j^2 + \epsilon}} \odot g$$
+<p class="math-note">$x$ is one token's vector of length $d$; the square root is its root-mean-square size; $\epsilon$ is a tiny constant to avoid dividing by 0; $g$ is a learned per-dimension gain; $\odot$ multiplies entry by entry.</p>
+
+<h2>The MLP</h2>
+<p>GPT-2's MLP is two matrices with a nonlinearity between: $\mathrm{MLP}(x) = \mathrm{GELU}(xW_1 + b_1)\,W_2 + b_2$, where $W_1$ expands $d_{\text{model}}$ to $4\,d_{\text{model}}$ and $W_2$ shrinks it back. Modern models mostly use <strong>SwiGLU</strong> (Shazeer, 2020, “GLU Variants Improve Transformer”): $\big(\mathrm{SiLU}(xW_1) \odot xW_3\big)\,W_2$. It has three matrices, so the hidden size is usually cut to about $\tfrac{8}{3}d_{\text{model}}$ to keep a similar parameter count, though many models pick larger (Llama 3 8B uses 14,336 for $d_{\text{model}} = 4096$, 3.5×).</p>
+
+<h2>Counting the parameters</h2>
+<p>Here's GPT-2 small: vocabulary $V = 50{,}257$, context 1,024, $d = d_{\text{model}} = 768$, $N = 12$ layers, 12 heads. It uses learned positions, LayerNorm, biases, a 4× GELU MLP, and <strong>tied</strong> embeddings ($W_U$ is the transpose of the token embedding, so it adds no parameters).</p>
+<ol class="steps">
+  <li><strong>Token embedding:</strong> $50{,}257 \times 768 = 38{,}597{,}376$.</li>
+  <li><strong>Position embedding:</strong> $1{,}024 \times 768 = 786{,}432$.</li>
+  <li><strong>Attention, per layer:</strong> $W_Q, W_K, W_V$ as one $768 \times 2304$ matrix plus 2,304 biases $= 1{,}771{,}776$; $W_O$ is $768 \times 768$ plus 768 biases $= 590{,}592$. Total $2{,}362{,}368$, about $4d^2$.</li>
+  <li><strong>MLP, per layer:</strong> $768 \times 3072 + 3072 = 2{,}362{,}368$ and $3072 \times 768 + 768 = 2{,}360{,}064$. Total $4{,}722{,}432$, about $8d^2$.</li>
+  <li><strong>Two LayerNorms, per layer:</strong> $2 \times (768 + 768) = 3{,}072$. So one layer is $7{,}087{,}872$, and 12 layers are $85{,}054{,}464$.</li>
+  <li><strong>Final LayerNorm</strong> $1{,}536$; unembedding tied, $0$. Grand total: $38{,}597{,}376 + 786{,}432 + 85{,}054{,}464 + 1{,}536 = 124{,}439{,}808$, the famous “124M” ✓</li>
+</ol>
+<p>Dropping the small terms gives a rule of thumb worth memorizing:</p>
+$$\text{params} \approx \underbrace{12\,N\,d_{\text{model}}^2}_{\text{layers}} + \underbrace{V\,d_{\text{model}}}_{\text{embeddings}}$$
+<p class="math-note">For GPT-2 small: $12 \times 12 \times 768^2 = 84{,}934{,}656$, within 0.2% of the exact layer total. GQA (M1.2) and SwiGLU change the constant 12 somewhat.</p>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>A small model: $d_{\text{model}} = 512$, $N = 8$ layers, $V = 32{,}000$, 4× MLP, RoPE (no position table), tied embeddings. Ignore biases and norms. Answer in <strong>millions</strong>.</p>
+  <ol class="steps">
+    <li>One layer, $12\,d_{\text{model}}^2$: <span class="blank" data-answer="3.15" data-tol="0.011" data-hint="512² = 262,144, and 12 × 262,144 = 3,145,728."></span></li>
+    <li>All 8 layers: <span class="blank" data-answer="25.17" data-tol="0.02" data-hint="8 × 3,145,728 = 25,165,824."></span></li>
+    <li>Token embedding $V \times d_{\text{model}}$: <span class="blank" data-answer="16.38" data-tol="0.011" data-hint="32,000 × 512."></span></li>
+    <li>Whole model: <span class="blank" data-answer="41.55" data-tol="0.03" data-hint="Layers plus embedding; tied means W_U is free."></span> (so about 39% of this small model is its embedding table)</li>
+  </ol>
+</section>
+
+<h2>Training vs generation</h2>
+<p><strong>Training</strong> feeds a whole sequence at once. The output is an $n \times V$ grid of logits, and position $t$'s logits are scored against the true token at $t+1$ with cross-entropy (<a href="m2-2.html">M2.2</a>). Because of the causal mask, no position can see its own answer, so one forward pass yields $n - 1$ graded predictions. Feeding the true previous tokens, rather than the model's own guesses, is called <strong>teacher forcing</strong>.</p>
+<p><strong>Generation</strong> is a loop: run the model on the text so far, keep only the <em>last</em> position's distribution, pick a token from it, append it, and repeat. Run naively, every step recomputes all earlier positions, which is wasteful. The fix, the <strong>KV cache</strong>, and the ways to “pick a token” are the subject of <a href="m1-5.html">M1.5</a>.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> parameter counts drive everything downstream. A forward pass costs roughly $2$ FLOPs per parameter per token, and training roughly $6$ (Kaplan et al., 2020), which is how compute budgets in <a href="m2-4.html">scaling laws</a> are estimated. The memory for weights is params × bytes per parameter: 124M parameters in 16-bit floats is about 250 MB, and an 8B model about 16 GB, before any KV cache. Architecture variants (GQA, SwiGLU, RMSNorm, untied embeddings) change these totals in ways you can now compute yourself from a model's config file.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain the residual stream, and the different jobs of attention and the MLP inside one layer.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Each token has a vector that's carried up through all the layers; every sub-block reads a normalized copy of it and adds its output back, so the stream is a running sum that layers write to and read from, and gradients flow straight through the additions. Attention is the only step where tokens exchange information, mixing in context from earlier positions. The MLP then processes each token separately, and holds about two thirds of a layer's parameters.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which sub-block lets a token use information from other tokens?</p>
+    <ol class="q-src">
+      <li>Only the attention sub-block</li>
+      <li>Only the MLP</li>
+      <li>Both attention and the MLP</li>
+      <li>The final norm</li>
+    </ol>
+    <div class="q-explain">The MLP and the norms act on each position independently. Attention is the only operation that mixes across positions.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">In a pre-norm transformer, where is the normalization applied?</p>
+    <ol class="q-src">
+      <li>After each residual add, to the whole stream</li>
+      <li>Only once, after the embedding</li>
+      <li>Only to the logits</li>
+      <li>To the input of each sub-block, while the residual add bypasses it (plus one final norm)</li>
+    </ol>
+    <div class="q-explain">$h \leftarrow h + f(\mathrm{Norm}(h))$: the sub-block sees a normalized copy, but the stream itself is never normalized until the final norm before the unembedding. Option 1 describes the original post-norm design.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model has $d_{\text{model}} = 1024$ and $N = 24$ layers with 4× MLPs. Roughly how many parameters do its layers hold (excluding embeddings)?</p>
+    <ol class="q-src">
+      <li>About 25 million</li>
+      <li>About 302 million</li>
+      <li>About 1.2 billion</li>
+      <li>About 3.6 billion</li>
+    </ol>
+    <div class="q-explain">$12 \times 24 \times 1024^2 \approx 302$M. That's GPT-2 medium; adding its ≈52M embedding parameters gives its advertised 355M.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Suppose you switched GPT-2 small from learned positions to RoPE (M1.3), keeping everything else. Its parameter count would…</p>
+    <ol class="q-src">
+      <li>grow, because every head needs rotation matrices</li>
+      <li>stay exactly the same</li>
+      <li>drop by 786,432, the size of the position table, since RoPE's rotations are fixed formulas</li>
+      <li>double</li>
+    </ol>
+    <div class="q-explain">RoPE has no learned parameters: the angles $m\theta_i$ come from a formula. Removing the $1{,}024 \times 768$ table saves 786,432 parameters.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Embedding → $N$ × [norm → attention → add; norm → MLP → add] → final norm → unembedding → softmax.</li>
+    <li>The <strong>residual stream</strong> is a running sum: layers read normalized copies and add their results.</li>
+    <li><strong>Attention</strong> moves information between tokens; the <strong>MLP</strong> processes each token and holds ≈ ⅔ of layer parameters.</li>
+    <li>Rule of thumb: params ≈ $12\,N\,d_{\text{model}}^2 + V\,d_{\text{model}}$. GPT-2 small is exactly 124,439,808.</li>
+    <li><strong>Training</strong> scores every position in parallel; <strong>generation</strong> loops one token at a time.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m1-4-a","front":"List the stages of a decoder-only transformer, bottom to top.","back":"Token embedding → $N$ × [norm → causal self-attention → add; norm → MLP → add] → final norm → unembedding $W_U$ → logits → softmax."},
+  {"id":"m1-4-b","front":"Write the two residual updates of a pre-norm layer.","back":"$h \\leftarrow h + \\mathrm{Attn}(\\mathrm{Norm}(h))$, then $h \\leftarrow h + \\mathrm{MLP}(\\mathrm{Norm}(h))$."},
+  {"id":"m1-4-c","front":"What are the different jobs of attention and the MLP?","back":"Attention is the only place tokens exchange information (mixing across positions). The MLP processes each token independently and holds about two thirds of a layer's parameters."},
+  {"id":"m1-4-d","front":"Rule of thumb for a transformer's parameter count?","back":"$\\approx 12\\,N\\,d_{\\text{model}}^2 + V\\,d_{\\text{model}}$ ($4d^2$ attention + $8d^2$ MLP per layer, plus the embedding). GPT-2 small: 124,439,808 exactly."},
+  {"id":"m1-4-e","front":"What is RMSNorm, and how does it differ from LayerNorm?","back":"$x / \\sqrt{\\mathrm{mean}(x^2) + \\epsilon} \\odot g$: it rescales by root-mean-square size with a learned gain, skipping LayerNorm's mean subtraction and bias. Cheaper; used by Llama-style models."},
+  {"id":"m1-4-f","front":"How do training and generation use the model differently?","back":"Training: one parallel pass over the whole sequence, every position predicts its next token (causal mask, teacher forcing). Generation: a loop that uses only the last position, appends the chosen token and runs again."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m1-4-decoder.js"></script>
+</body>
+</html>

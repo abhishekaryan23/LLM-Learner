@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m4-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Perplexity · LLMs, Animated</title>
+<meta name="description" content="Perplexity is the exponential of the average next-token loss: how many choices the model is effectively torn between. How to compute it, read it, and when not to trust it.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Perplexity</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Evaluation</span></div>
+<p class="lede">Before anyone asks an LLM a single question, its builders already have a number for how good it is: how <em>surprised</em> it is by real text it has never seen. That number is <strong>perplexity</strong>. It is cheap, smooth and tracked through every pretraining run. It is also easy to misread.</p>
+
+<div class="cover"><img src="../assets/img/cover-m4.webp" alt="Illustration: a robot standing on a podium in front of a row of judges holding blank score cards, with a magnifying glass and a balance scale nearby." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Compute perplexity from a model's per-token probabilities, and convert between perplexity and cross-entropy loss.</li>
+    <li>Read perplexity as an <em>effective number of choices</em> per token.</li>
+    <li>Explain why perplexities are only comparable on the same tokenizer and test data, and what perplexity can't tell you.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-6.html">P1.6 Entropy, cross-entropy &amp; KL</a> (surprise $-\log p$ and its average) and <a href="m2-2.html">M2.2 The next-token objective</a> (the loss an LLM is trained to minimise). Tokenization (<a href="p3-3.html">P3.3</a>) matters in the second half.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">On every token of a test text, a model gives the correct next token probability exactly 1/4. What is its perplexity?</p>
+    <ol class="q-src">
+      <li>0.25</li>
+      <li>4</li>
+      <li>1.39</li>
+      <li>25</li>
+    </ol>
+    <div class="q-explain">Perplexity is the inverse of the (geometric) average probability on the correct tokens: $1 / 0.25 = 4$. It's as if the model were choosing among 4 equally likely options each time. ($1.39 = \ln 4$ is the loss, not the perplexity.)</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Model A has perplexity 8 on Wikipedia. Model B, which uses a different tokenizer, has perplexity 12 on the same Wikipedia text. Which model predicts that text better?</p>
+    <ol class="q-src">
+      <li>A, because lower perplexity is better</li>
+      <li>B, because higher perplexity means more knowledge</li>
+      <li>They are equally good</li>
+      <li>You can't tell from these numbers alone</li>
+    </ol>
+    <div class="q-explain">Perplexity is measured <em>per token</em>, and the two models cut the text into different tokens. You'll see below how a tokenizer alone can move the number a lot, and how to compare fairly.</div>
+  </div>
+</section>
+
+<h2>How surprised is the model?</h2>
+<p>A language model reads text and, at every position, gives a probability to every possible next token (<a href="m2-2.html">M2.2</a>). To evaluate it, take text it has never seen and look at one number per position: the probability $p$ it gave to the token that <strong>actually</strong> came next.</p>
+<p>Turn each probability into <strong>surprise</strong>, $-\log p$: near 0 when the model was confident and right, large when the real token was one it thought unlikely. Average the surprise over all $N$ tokens and exponentiate:</p>
+$$\text{PPL} = \exp\!\Big(-\frac{1}{N}\sum_{t=1}^{N} \log p_\theta(x_t \mid x_{&lt;t})\Big)$$
+<p>Here $x_t$ is the $t$-th token of the test text, $x_{&lt;t}$ is everything before it, $p_\theta(x_t \mid x_{&lt;t})$ is the probability the model with parameters $\theta$ gave that token, and $\log$ is the natural log. The part inside $\exp(\cdot)$ is exactly the <strong>cross-entropy loss</strong> (in nats) that pretraining minimises, measured on held-out text. So:</p>
+<ul>
+  <li>$\text{PPL} = e^{\text{loss}}$ with the loss in nats, or $2^{\text{loss}}$ with the loss in bits. Same number either way.</li>
+  <li>Equivalently, PPL is the <strong>geometric mean</strong> of $1/p$ over the tokens. Lower is better; the minimum is 1.</li>
+</ul>
+
+<figure class="anim wide" data-anim="m4-1-perplexity"></figure>
+
+<h2>An effective number of choices</h2>
+<p>If a model spread its probability <strong>evenly over $k$ tokens</strong> and the right one was always among them, every token would get $p = 1/k$, and the perplexity would be exactly $k$. That gives the most useful reading: <strong>perplexity is how many equally likely options the model is effectively torn between</strong>, on average, at each step.</p>
+<ul>
+  <li>PPL = 1: the model always put probability 1 on the right token. Perfect, and impossible on real text.</li>
+  <li>PPL = 50,000 with a 50,000-token vocabulary: no better than uniform guessing.</li>
+  <li>Good LLMs on ordinary held-out web text typically land in the single digits per token; the exact value depends heavily on the data and tokenizer, as the next sections show.</li>
+</ul>
+<p>Because it averages <em>logs</em>, one confident miss costs a lot: a token given $p = 0.001$ adds a surprise of $6.9$ nats, as much as ten tokens each predicted with $p = 0.5$.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-perplexity-doors.webp" alt="Two scenes: a child stands confidently in front of just two doors, then looks puzzled in a long hallway lined with many doors." width="1200" height="900" loading="lazy">
+    <div>
+      <p>Imagine guessing which door the next word is hiding behind.</p>
+      <p>If you only have to choose between <strong>two doors</strong>, you feel pretty sure of yourself. In a <strong>long hallway with lots of doors</strong>, you're puzzled: it could be any of them.</p>
+      <p>Perplexity counts the doors. A small number means the model only had to pick between a few doors, so it knew the text well. A big number means it was lost in a long hallway.</p>
+      <p class="math-note">Where it breaks: real models don't see a few equal doors. They give every word a different chance. Perplexity is the number of <em>equal</em> doors that would be just as confusing on average.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>A model predicts four tokens of held-out text, giving the actual tokens probabilities $0.5$, $0.25$, $0.8$ and $0.1$.</p>
+<ol class="steps">
+  <li>Surprises $-\ln p$: $0.693$, $1.386$, $0.223$, $2.303$.</li>
+  <li>Sum: $4.605$. Mean over 4 tokens: $1.151$ nats. That is the loss.</li>
+  <li>Perplexity: $e^{1.151} \approx 3.16$.</li>
+  <li>Check with the geometric mean of $1/p$: $(2 \times 4 \times 1.25 \times 10)^{1/4} = 100^{1/4} \approx 3.16$ ✓</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Three tokens, with probabilities $0.1$, $0.5$ and $0.2$ on the actual tokens. Use natural logs.</p>
+  <ol class="steps">
+    <li>Surprise of the first token, $-\ln 0.1 =$ <span class="blank" data-answer="2.303" data-tol="0.01" data-hint="ln 0.1 ≈ −2.303, so its negative is…"></span></li>
+    <li>Mean surprise over the three tokens: <span class="blank" data-answer="1.535" data-tol="0.01" data-hint="−ln 0.5 ≈ 0.693 and −ln 0.2 ≈ 1.609. Add all three and divide by 3."></span></li>
+    <li>Perplexity: <span class="blank" data-answer="4.64" data-tol="0.03" data-hint="e^1.535. Check: (10 × 2 × 5)^(1/3) = 100^(1/3)."></span></li>
+    <li>A model's validation loss is $0.693$ nats per token. Its perplexity is <span class="blank" data-answer="2" data-tol="0.01" data-hint="e^0.693 = ? (0.693 is ln 2.)"></span></li>
+  </ol>
+</section>
+
+<div class="playground" id="ppl-playground">
+  <h3>Playground: one bad token</h3>
+  <p class="math-note" style="margin:0">Set the probability the model gave each of four actual tokens. Try the presets, especially “one confident miss”.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls" style="grid-template-columns:1fr 1fr">
+    <label><span>token 1: p = <output>0.50</output></span><input type="range" min="0.01" max="0.99" step="0.01" value="0.5"></label>
+    <label><span>token 2: p = <output>0.25</output></span><input type="range" min="0.01" max="0.99" step="0.01" value="0.25"></label>
+    <label><span>token 3: p = <output>0.80</output></span><input type="range" min="0.01" max="0.99" step="0.01" value="0.8"></label>
+    <label><span>token 4: p = <output>0.10</output></span><input type="range" min="0.01" max="0.99" step="0.01" value="0.1"></label>
+  </div>
+  <div class="chips" role="group" aria-label="Presets" style="margin-top:12px">
+    <button type="button" class="chip" data-preset="0.50,0.25,0.80,0.10" aria-pressed="true">Worked example</button>
+    <button type="button" class="chip" data-preset="0.25,0.25,0.25,0.25" aria-pressed="false">All 0.25</button>
+    <button type="button" class="chip" data-preset="0.90,0.90,0.90,0.90" aria-pressed="false">Confident &amp; right</button>
+    <button type="button" class="chip" data-preset="0.90,0.90,0.90,0.01" aria-pressed="false">One confident miss</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</div>
+
+<h2>Only compare like with like</h2>
+<p>A perplexity is a property of a <strong>model + tokenizer + test text</strong>. Change any one and the number moves, even if the model's skill doesn't.</p>
+<h3>Same tokenizer</h3>
+<p>Perplexity is <em>per token</em>, and tokenizers disagree about what a token is (<a href="p3-3.html">P3.3</a>). Suppose two models assign the <strong>same total probability</strong> to a 100-byte test text, a total surprise of 50 nats:</p>
+<ul>
+  <li>Model A's tokenizer cuts the text into 25 tokens: $50/25 = 2.0$ nats per token, so PPL $= e^{2.0} \approx 7.39$.</li>
+  <li>Model B's tokenizer cuts it into 40 shorter tokens: $50/40 = 1.25$ nats per token, so PPL $= e^{1.25} \approx 3.49$.</li>
+</ul>
+<p>B looks twice as good, yet both models find the text exactly equally likely. Shorter tokens are each easier to predict, but there are more of them. The fix is to normalise by something tokenizer-free, such as <strong>bits per byte</strong>: $50 / \ln 2 \approx 72.1$ bits over 100 bytes $= 0.72$ bits per byte for both. The Pile (Gao et al., 2020) reports bits per byte for exactly this reason.</p>
+<h3>Same test data</h3>
+<p>Predictable text (legal boilerplate, code with lots of repeated syntax) gets low perplexity; tweets and poetry get high perplexity. A perplexity on one dataset says nothing about another. The details of the protocol matter too: how long a context each token gets, and whether documents are scored in overlapping windows or cut into chunks. Finally, if the test text leaked into training, perplexity will be flatteringly low. That's <strong>contamination</strong>, the topic of <a href="m4-3.html">M4.3</a>.</p>
+
+<h2>What perplexity does and doesn't tell you</h2>
+<p><strong>It does</strong> tell you how well a model predicts text like the test set. It's cheap (one forward pass, no generation), low-noise and smooth, which is why pretraining teams watch validation loss on held-out data from each domain, and why scaling laws (<a href="m2-4.html">M2.4</a>) are written in terms of loss. Within one model family, same tokenizer and same data, lower loss usually goes with better downstream scores.</p>
+<p><strong>It doesn't</strong> tell you whether the model answers correctly, follows instructions, refuses safely or is pleasant to use:</p>
+<ul>
+  <li>Most tokens are easy (“the”, closing brackets). The few that matter, such as the final number of a maths answer, are a tiny share of the average.</li>
+  <li>Post-training (<a href="m3-1.html">M3</a>) deliberately reshapes the distribution toward a helpful assistant's style. Chat models often score <em>worse</em> perplexity on raw web text than their base models while being far more useful.</li>
+  <li>Perplexity scores the model's predictions on <em>given</em> text. It never looks at what the model writes when it generates freely.</li>
+</ul>
+<p>That's why evaluation doesn't stop here. Next come benchmarks (<a href="m4-2.html">M4.2</a>), which test specific skills with known answers, and model-based judges (<a href="m4-4.html">M4.4</a>) for open-ended outputs.</p>
+
+<div class="why"><strong>Why this matters in practice:</strong> perplexity is the everyday health check. Pretraining dashboards plot held-out loss per domain (web, code, maths) to catch data problems early. When a model is <strong>quantized</strong> (<a href="m5-1.html">M5.1</a>), the first sanity check is usually its perplexity on a fixed text such as WikiText-2, against the full-precision model with the same tokenizer: a jump means the compression hurt. And when comparing models with different tokenizers, switch to bits per byte.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">A colleague says “our new model has perplexity 6, theirs has 9, so ours is better”. What would you ask before agreeing, and why?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Were they measured on the same test text with the same tokenizer and context protocol? Perplexity is per token, so a tokenizer with shorter tokens lowers it without any real gain, and different data changes it completely. Even then, lower perplexity only means better next-token prediction, not that the model is more helpful or correct. A tokenizer-free measure like bits per byte, plus task benchmarks, would settle it.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A model's validation cross-entropy loss is 2.0 nats per token. Its perplexity is about…</p>
+    <ol class="q-src">
+      <li>2.0</li>
+      <li>4.0</li>
+      <li>7.4</li>
+      <li>100</li>
+    </ol>
+    <div class="q-explain">$\text{PPL} = e^{\text{loss}} = e^{2.0} \approx 7.39$. The loss is the average surprise from the next-token objective (M2.2, P1.6); 4.0 would be $2^{2.0}$, right only if the loss were in bits.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which change can lower per-token perplexity <em>without</em> the model predicting the text any better?</p>
+    <ol class="q-src">
+      <li>Switching to a tokenizer that cuts the same text into more, shorter tokens</li>
+      <li>Training on more data from the same distribution</li>
+      <li>Training a larger model on the same data</li>
+      <li>Fixing bugs in the data pipeline</li>
+    </ol>
+    <div class="q-explain">The total surprise of the text stays the same but is divided over more tokens. Bits per byte would expose this. The other options can genuinely improve prediction.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A model predicts 99 tokens with $p = 0.9$ and one token with $p = 0.0001$. Why does that single token move the perplexity so much?</p>
+    <ol class="q-src">
+      <li>Perplexity only counts the worst token</li>
+      <li>The rare token is weighted 100 times more by the formula</li>
+      <li>It doesn't; one token out of 100 barely matters</li>
+      <li>Surprise $-\ln p$ grows without limit as $p \to 0$: that one token adds 9.2 nats, as much as about 87 of the confident tokens</li>
+    </ol>
+    <div class="q-explain">Each token counts equally in the average, but its surprise is unbounded: $-\ln 0.0001 \approx 9.2$ while $-\ln 0.9 \approx 0.105$. Confident mistakes are punished hard, which is also why the training loss pushes models to stay calibrated.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">After chat fine-tuning, a model's perplexity on raw web text goes <em>up</em>. What should you conclude?</p>
+    <ol class="q-src">
+      <li>Fine-tuning broke the model; roll it back</li>
+      <li>Nothing about usefulness: the model now fits a different distribution (assistant answers), so it predicts raw web text less well</li>
+      <li>The tokenizer must have changed</li>
+      <li>The test set is contaminated</li>
+    </ol>
+    <div class="q-explain">Perplexity measures fit to one particular text distribution. Post-training moves the model away from average web text on purpose. Usefulness needs benchmarks, judges and human evaluation.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>$\text{PPL} = e^{\text{loss}}$: the exponential of the average surprise $-\log p$ on the actual next tokens (the cross-entropy loss).</li>
+    <li>Read it as an <strong>effective number of equally likely choices</strong> per token. 1 is perfect; the vocabulary size is uniform guessing.</li>
+    <li>It's per token, so compare only with the <strong>same tokenizer and test data</strong>; across tokenizers use <strong>bits per byte</strong>.</li>
+    <li>Low perplexity means good next-token prediction, <strong>not</strong> helpfulness, correctness or safety.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Compute perplexity from token probabilities, then build a tiny bigram language model and compare its perplexity on training text and held-out text. About 20 minutes, NumPy only, runs free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m4-1-perplexity.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m4-1-a","front":"Write the formula for perplexity.","back":"$\\text{PPL} = \\exp\\big(-\\frac{1}{N}\\sum_t \\log p_\\theta(x_t \\mid x_{\\lt t})\\big)$: the exponential of the average negative log-likelihood per token, i.e. $e^{\\text{loss}}$ (nats) or $2^{\\text{loss}}$ (bits)."},
+  {"id":"m4-1-b","front":"What does a perplexity of 4 mean intuitively?","back":"On average the model is as uncertain as if it were choosing uniformly among 4 equally likely next tokens. 1 is perfect; the vocabulary size is uniform guessing."},
+  {"id":"m4-1-c","front":"Validation loss 2.0 nats/token. Perplexity?","back":"$e^{2.0} \\approx 7.39$."},
+  {"id":"m4-1-d","front":"Why can't you compare perplexities across different tokenizers, and what do you use instead?","back":"Perplexity is per token; a tokenizer with shorter tokens spreads the same total surprise over more tokens and lowers the number. Use a tokenizer-free measure such as bits per byte (total surprise in bits ÷ bytes)."},
+  {"id":"m4-1-e","front":"Name two things perplexity does NOT tell you.","back":"Whether the model's answers are correct or helpful, follows instructions, or is safe. Chat-tuned models can have worse perplexity on web text yet be far more useful. It also never looks at freely generated output."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/m4-1-perplexity.js"></script>
+<script src="../assets/js/anims/m4-1-ppl-playground.js"></script>
+</body>
+</html>
