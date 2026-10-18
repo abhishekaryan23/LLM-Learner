@@ -16,7 +16,7 @@ const base = (process.argv[2] || "http://localhost:8123/").replace(/\/?$/, "/");
 let pages = process.argv.slice(3);
 if (!pages.length) {
   const root = path.join(__dirname, "../../course");
-  pages = ["index.html", "review.html"].concat(
+  pages = ["index.html", "review.html", "whats-new.html"].concat(
     fs.readdirSync(path.join(root, "lessons")).filter(f => f.endsWith(".html")).map(f => "lessons/" + f));
 }
 const VIEWPORTS = {

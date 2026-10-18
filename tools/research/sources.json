@@ -1,0 +1,18 @@
+{
+  "arxiv": {
+    "categories": ["cs.CL", "cs.LG", "cs.CV", "cs.AI", "cs.SD", "eess.AS", "cs.RO"],
+    "max_results": 600
+  },
+  "hf_daily_papers": "https://huggingface.co/api/daily_papers",
+  "feeds": [
+    {"name": "OpenAI", "url": "https://openai.com/news/rss.xml"},
+    {"name": "Google DeepMind", "url": "https://deepmind.google/blog/rss.xml"},
+    {"name": "Google Research", "url": "https://research.google/blog/rss/"},
+    {"name": "Hugging Face", "url": "https://huggingface.co/blog/feed.xml"},
+    {"name": "BAIR", "url": "https://bair.berkeley.edu/blog/feed.xml"},
+    {"name": "Microsoft Research", "url": "https://www.microsoft.com/en-us/research/feed/"},
+    {"name": "NVIDIA Technical Blog", "url": "https://developer.nvidia.com/blog/feed"}
+  ],
+  "days": 8,
+  "top_n": 40
+}

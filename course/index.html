@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>LLMs, Animated</title>
-<meta name="description" content="A free, animated course on how large language models are trained, evaluated and optimized, built on the science of how people remember.">
+<meta name="description" content="A free, animated course on modern AI: language, image, audio and video models, multimodal AI and reinforcement learning, in bite-sized lessons built on the science of how people remember.">
 <meta property="og:title" content="LLMs, Animated">
 <meta property="og:description" content="Learn LLM training, evaluation and optimization with interactive animations, ELI5s, spaced repetition and Colab exercises.">
 <meta property="og:image" content="assets/img/hero.webp">
@@ -23,17 +23,25 @@
 <section class="hero">
   <div>
     <p class="kicker">A free, animated course</p>
-    <h1>How LLMs are trained, evaluated and optimized</h1>
-    <p class="lede">Watch the ideas move. Step-by-step animations, plain-English ELI5s and optional Colab exercises take you from "what's a gradient?" to DPO, eval statistics and speculative decoding, using the learning science that makes it stick.</p>
+    <h1>Learn modern AI, from first principles to the frontier</h1>
+    <p class="lede">Language, images, audio, video, multimodal models and reinforcement learning, in the order the field invented them. Every idea comes in bite-sized, animated pieces, with ELI5s, quizzes and spaced review so it sticks, and weekly field notes keep it current.</p>
     <div class="hero-cta">
       <a class="btn btn-primary" id="start-btn" href="lessons/m0-1.html">Start the course</a>
       <a class="btn" href="#map">See the course map</a>
       <a class="btn btn-ghost" href="review.html" id="review-cta" hidden></a>
     </div>
     <div class="stats" id="stats"></div>
+    <div class="daily" id="daily" hidden></div>
   </div>
   <div class="hero-art"><img src="assets/img/hero.webp" alt="Illustration: tiny people on ladders assembling a glowing network-shaped brain, adjusting dials and measuring it." width="1200" height="800"></div>
 </section>
+
+<div class="section-head" id="goals">
+  <h2>Pick a goal, get a path</h2>
+</div>
+<p class="lede" style="max-width:46rem;margin-top:10px">Choose what you want to learn. You get the shortest route there, with every prerequisite you need, in a sensible order.</p>
+<div class="goal-chips" id="goal-chips" role="group" aria-label="Learning goals"></div>
+<div id="goal-path"></div>
 
 <div class="section-head" id="science">
   <h2>Built on how memory actually works</h2>

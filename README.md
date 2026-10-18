@@ -1,6 +1,8 @@
 # LLM Learner: "LLMs, Animated"
 
-A free, interactive course on how large language models are **trained, evaluated and optimized**, with 51 lessons across 11 modules (from the math prerequisites to RLHF/DPO, eval statistics and serving): step-through animations, plain-English ELI5s, optional Colab exercises, and a built-in spaced-repetition review deck. Works on phones, iPads and desktops, and can be installed as an offline app.
+A free, interactive course on modern AI, from first principles to the frontier: how large language models are **trained, evaluated and optimized**, and (Phase 2, in progress) images, audio, video, multimodal models, mixture-of-experts, reinforcement learning and reasoning, with the history and prerequisites behind each. Lessons come in 3–6 minute bytes with step-through animations, plain-English ELI5s, optional Colab exercises and a built-in spaced-repetition review deck. Pick a goal and the site builds your path. Works on phones, iPads and desktops, and can be installed as an offline app.
+
+See [`ROADMAP.md`](ROADMAP.md) for the plan and what's live.
 
 **Live site:** https://abhishekaryan23.github.io/LLM-Learner/
 
@@ -14,6 +16,9 @@ A free, interactive course on how large language models are **trained, evaluated
 | `.github/workflows/layout-check.yml` | Runs the layout guard on every push and pull request. |
 | `index.html`, `.nojekyll` | GitHub Pages serves `main` from the repo root; `index.html` forwards visitors to `course/`. |
 | `.github/workflows/fetch-images.yml` | Commits any illustration listed in `course/assets/img/sources.json` that isn't committed yet. |
+| `course/field-notes/notes.json` | Reviewed notes on new research, shown on *What's new* and in matching lessons. |
+| `tools/research/`, `research/` | Weekly research pipeline: ranked inbox of new papers and lab posts, review queue. See [`research/README.md`](research/README.md). |
+| `.github/workflows/research-inbox.yml` | Builds the research inbox every Monday. |
 
 ## Preview locally
 

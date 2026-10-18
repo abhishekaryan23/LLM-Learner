@@ -7,9 +7,9 @@ name: Layout check
 on:
   push:
     branches: [main]
-    paths: ["course/**", "tools/qa/**", ".github/workflows/layout-check.yml"]
+    paths: ["course/**", "tools/qa/**", "tools/research/**", ".github/workflows/layout-check.yml"]
   pull_request:
-    paths: ["course/**", "tools/qa/**", ".github/workflows/layout-check.yml"]
+    paths: ["course/**", "tools/qa/**", "tools/research/**", ".github/workflows/layout-check.yml"]
   workflow_dispatch:
 
 permissions:
@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate field notes
+        run: python3 tools/research/validate_notes.py
       - uses: actions/setup-node@v4
         with:
           node-version: 20

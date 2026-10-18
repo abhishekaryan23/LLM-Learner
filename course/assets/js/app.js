@@ -89,6 +89,7 @@
         '<a class="brand" href="' + root + 'index.html">' + MARK + '<span>LLMs<span class="brand-name-long">, Animated</span></span></a>' +
         '<nav class="topnav" aria-label="Main">' +
           '<a class="navlink" href="' + root + 'index.html#map"' + (page === "home" ? ' aria-current="page"' : "") + '>' + I.map + '<span class="lbl">Course map</span></a>' +
+          '<a class="navlink" href="' + root + 'whats-new.html"' + (page === "new" ? ' aria-current="page"' : "") + '>' + I.spark + '<span class="lbl">What\'s new</span></a>' +
           '<a class="navlink" href="' + root + 'review.html"' + (page === "review" ? ' aria-current="page"' : "") + '>' + I.review + '<span class="lbl">Review</span> <span class="badge" id="due-badge" hidden>0</span></a>' +
           '<button class="btn btn-ghost icon-btn theme-btn" type="button"></button>' +
         '</nav>' +
@@ -179,6 +180,11 @@
     if (kicker) kicker.textContent = cur.moduleCode + " · " + cur.moduleTitle;
     var mins = document.querySelector("[data-mins]");
     if (mins) mins.innerHTML = I.clock + cur.mins + " min";
+    var rv = (cur.reviewed || LC.config.reviewed || "").split("-");
+    if (mins && rv.length === 2) {
+      var month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][+rv[1] - 1];
+      mins.parentNode.appendChild(el('<span title="When this lesson was last checked against current research">Reviewed ' + month + " " + rv[0] + "</span>"));
+    }
     LC.markProgress(lessonId, { visited: Date.now() });
   }
 

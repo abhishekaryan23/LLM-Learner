@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-root="./" data-page="new">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>What's new · LLMs, Animated</title>
+<meta name="description" content="Weekly field notes: the most important new AI research and releases, in bite-sized form, linked to the lessons they update.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icons/icon-180.png">
+<link rel="stylesheet" href="assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page">
+<main class="review-wrap" id="main" style="max-width:46rem">
+  <p class="kicker">Field notes</p>
+  <h1>What's new</h1>
+  <p class="lede">Every week a research pipeline scans new papers and lab releases. The few that matter most are verified against their sources and written up here as two-minute notes, each linked to the lesson it updates.</p>
+  <div class="chips" id="note-filter" role="group" aria-label="Filter by area" style="margin:12px 0 4px"></div>
+  <div id="notes" aria-live="polite"></div>
+  <hr>
+  <h2 style="margin-top:0;font-size:1.1rem">How this page stays current</h2>
+  <ol class="steps">
+    <li><strong>Every Monday</strong> an automated job collects the week's papers from arXiv (language, learning, vision and audio) and posts from major AI labs, and scores them against the course's topics.</li>
+    <li><strong>A research pass</strong> reads the top candidates and checks each claim against the original paper or announcement. Only significant, verified items become field notes.</li>
+    <li><strong>A person approves</strong> every update before it goes live. Lessons that need revising get flagged, and their "Reviewed" date changes when they're updated.</li>
+  </ol>
+</main>
+</div>
+<script src="assets/js/course-data.js"></script>
+<script src="assets/js/app.js"></script>
+<script src="assets/js/whatsnew.js"></script>
+</body>
+</html>

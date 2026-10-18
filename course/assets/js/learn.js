@@ -224,7 +224,155 @@
     LC.renderMath(preview);
   }
 
+  /* ---------- Bytes: every lesson as a series of 3–6 minute chunks ----------
+     Chunks are cut at the lesson's top-level <h2>s. Everything before the first
+     <h2> is the warm-up; everything from the first wrap-up block (explain-it-back,
+     quiz, takeaways, Colab, lock-in) on is the wrap-up. Focus mode shows one byte
+     at a time. A byte counts as done when its end scrolls into view or its byte
+     check is answered. Deep links: lesson.html#byte-3, add ?focus=1 for focus mode. */
+  var WRAP_SEL = ".recall, [data-quiz], .takeaways, [data-lockin], .colab";
+
+  function readMinutes(sec) {
+    var words = (sec.textContent || "").trim().split(/\s+/).length;
+    var visuals = sec.querySelectorAll("figure.anim, .playground").length;
+    var m = words / 200 + visuals * 1.0;
+    return Math.max(1, Math.round(m * 2) / 2);
+  }
+
+  function buildBytes() {
+    var main = document.getElementById("main");
+    if (!main || !LC.lessonId) return;
+    var kids = Array.prototype.slice.call(main.children);
+    var firstH2 = kids.findIndex(function (n) { return n.tagName === "H2"; });
+    if (firstH2 < 0) return;
+    // the lesson head (kicker, title, meta) stays outside the bytes so it's always visible
+    var meta0 = main.querySelector(":scope > .lesson-meta");
+    var head = document.createElement("header"); head.className = "lesson-head";
+    main.insertBefore(head, main.firstChild);
+    kids.slice(0, kids.indexOf(meta0) + 1).forEach(function (n) { head.appendChild(n); });
+    kids = Array.prototype.slice.call(main.children).filter(function (n) { return n !== head; });
+    firstH2 = kids.findIndex(function (n) { return n.tagName === "H2"; });
+    var groups = [{ kind: "warmup", nodes: kids.slice(0, firstH2) }], cur = null, wrapping = false;
+    kids.slice(firstH2).forEach(function (n) {
+      if (n.classList && n.classList.contains("lesson-nav")) return;
+      if (!wrapping && n.matches && (n.matches(WRAP_SEL) || (n.tagName === "SCRIPT" && n.id === "cards"))) {
+        wrapping = true; cur = { kind: "wrapup", nodes: [] }; groups.push(cur);
+      } else if (!wrapping && n.tagName === "H2") {
+        cur = { kind: "learn", nodes: [] }; groups.push(cur);
+      }
+      cur.nodes.push(n);
+    });
+    var total = groups.length, P = LC.progress()[LC.lessonId] || {}, done = P.bytes || {};
+    var secs = groups.map(function (g, i) {
+      var sec = document.createElement("section");
+      sec.className = "byte byte-" + g.kind; sec.id = "byte-" + i; sec.dataset.byte = i;
+      g.nodes[0].parentNode.insertBefore(sec, g.nodes[0]);
+      g.nodes.forEach(function (n) { sec.appendChild(n); });
+      var label = g.kind === "warmup" ? "Warm-up" : g.kind === "wrapup" ? "Wrap-up" : "Byte " + i + " of " + (total - 2);
+      var tag = LC.el('<p class="byte-tag"><span class="byte-num"></span><span class="byte-mins"></span></p>');
+      tag.firstChild.textContent = label;
+      tag.lastChild.textContent = "~" + readMinutes(sec) + " min";
+      sec.insertBefore(tag, sec.firstChild);
+      // end-of-byte navigation (shown in focus mode) + sentinel for "read"
+      var nav = LC.el('<div class="byte-nav"></div>');
+      if (i > 0) nav.appendChild(LC.el('<button type="button" class="btn" data-go="' + (i - 1) + '">' + I.prev + 'Previous</button>'));
+      if (i < total - 1) nav.appendChild(LC.el('<button type="button" class="btn btn-primary" data-go="' + (i + 1) + '">Next byte' + I.next + '</button>'));
+      sec.appendChild(nav);
+      sec.appendChild(LC.el('<div class="byte-end" aria-hidden="true"></div>')); // always-visible "read to here" marker
+      return sec;
+    });
+
+    // byte strip in the lesson header
+    var strip = LC.el('<div class="byte-strip" role="group" aria-label="Bytes in this lesson"></div>');
+    secs.forEach(function (s, i) {
+      var g = groups[i];
+      var b = LC.el('<button type="button" class="byte-dot" data-go="' + i + '"></button>');
+      b.textContent = g.kind === "warmup" ? "▶" : g.kind === "wrapup" ? "✓" : i;
+      b.setAttribute("aria-label", (g.kind === "learn" ? "Byte " + i : g.kind === "warmup" ? "Warm-up" : "Wrap-up") + (done[i] ? " (done)" : ""));
+      if (done[i]) b.classList.add("done");
+      strip.appendChild(b);
+    });
+    var focusBtn = LC.el('<button type="button" class="btn btn-ghost focus-toggle" aria-pressed="false"></button>');
+    var meta = head.querySelector(".lesson-meta");
+    var bar = LC.el('<div class="byte-bar"></div>');
+    bar.appendChild(strip); bar.appendChild(focusBtn);
+    head.appendChild(bar);
+    var minsEl = meta.querySelector("[data-mins]");
+    if (minsEl) minsEl.insertAdjacentHTML("afterend", '<span>' + (total - 2) + " bytes</span>");
+
+    function markDone(i) {
+      if (done[i]) return;
+      done[i] = true;
+      LC.markProgress(LC.lessonId, { bytes: done });
+      var dot = strip.children[i]; if (dot) { dot.classList.add("done"); dot.setAttribute("aria-label", dot.getAttribute("aria-label") + " (done)"); }
+    }
+    if ("IntersectionObserver" in window) {
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) { if (e.isIntersecting) markDone(+e.target.closest(".byte").dataset.byte); });
+      }, { rootMargin: "0px 0px -10% 0px" });
+      secs.forEach(function (s) { io.observe(s.querySelector(".byte-end")); });
+    }
+    secs.forEach(function (s, i) {
+      s.addEventListener("lc:answered", function (e) { if (e.target.closest(".byte-check")) markDone(i); });
+    });
+
+    var focus = false, current = 0;
+    function show(i, scroll) {
+      current = Math.max(0, Math.min(total - 1, i));
+      secs.forEach(function (s, k) { s.classList.toggle("current", k === current); });
+      document.body.classList.toggle("byte-last", current === total - 1);
+      Array.prototype.forEach.call(strip.children, function (b, k) { if (k === current) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current"); });
+      if (scroll) {
+        if (focus) window.scrollTo(0, 0); // keep the title and byte strip in view
+        else secs[current].scrollIntoView({ behavior: "auto", block: "start" });
+      }
+    }
+    function setFocus(on) {
+      focus = on;
+      document.body.classList.toggle("focus-mode", on);
+      focusBtn.setAttribute("aria-pressed", String(on));
+      focusBtn.textContent = on ? "Show whole lesson" : "Focus: one byte at a time";
+      window.dispatchEvent(new Event("resize")); // let animations re-measure
+    }
+    focusBtn.addEventListener("click", function () { setFocus(!focus); LC.store.set("focus", focus); show(current, true); });
+    main.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-go]"); if (!b) return;
+      show(+b.dataset.go, true);
+      history.replaceState(null, "", "#byte-" + current);
+    });
+
+    var m = /#byte-(\d+)/.exec(location.hash);
+    var wantFocus = /[?&]focus=1/.test(location.search) || LC.store.get("focus", false) === true;
+    setFocus(wantFocus);
+    show(m ? +m[1] : 0, !!m);
+  }
+
+  /* ---------- Latest developments (from the weekly field notes) ---------- */
+  function buildLatest() {
+    if (!LC.lessonId || !window.fetch) return;
+    fetch(LC.root + "field-notes/notes.json", { cache: "no-cache" }).then(function (r) { return r.ok ? r.json() : []; }).then(function (notes) {
+      var mine = (notes || []).filter(function (n) { return (n.lessons || []).indexOf(LC.lessonId) >= 0; })
+        .sort(function (a, b) { return a.date < b.date ? 1 : -1; }).slice(0, 3);
+      if (!mine.length) return;
+      var box = LC.el('<section class="card latest" aria-labelledby="latest-h"><div class="card-label" id="latest-h">Latest developments</div><ul class="latest-list"></ul>' +
+        '<p class="math-note" style="margin:0"><a href="' + LC.root + 'whats-new.html">All field notes →</a></p></section>');
+      var ul = box.querySelector("ul");
+      mine.forEach(function (n) {
+        var li = document.createElement("li");
+        li.innerHTML = '<span class="latest-date"></span> <a></a><br><span class="latest-why"></span>';
+        li.querySelector(".latest-date").textContent = n.date;
+        var a = li.querySelector("a"); a.textContent = n.title; a.href = LC.root + "whats-new.html#" + encodeURIComponent(n.id);
+        li.querySelector(".latest-why").textContent = n.why || "";
+        ul.appendChild(li);
+      });
+      var wrap = document.querySelector(".byte-wrapup") || document.querySelector("[data-quiz]");
+      if (wrap) wrap.insertBefore(box, wrap.querySelector(".byte-tag") ? wrap.querySelector(".byte-tag").nextSibling : wrap.firstChild);
+    }).catch(function () {});
+  }
+
   document.addEventListener("lc:ready", function () {
     buildEli5(); buildQuizzes(); buildRecall(); buildBlanks(); buildColab(); buildLockIn();
+    document.querySelectorAll(".byte-check .q").forEach(function (q) { buildMCQ(q, {}); });
+    buildBytes(); buildLatest();
   });
 })();
