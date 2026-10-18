@@ -71,7 +71,7 @@ $$\max_{\theta}\;\; \mathbb{E}_{x \sim \mathcal{D},\; y \sim \pi_\theta(\cdot \m
 </ul>
 <p>In practice the KL is estimated from the sampled tokens themselves, and folded into the reward:</p>
 $$R(x, y) = r_\phi(x, y) \;-\; \beta \sum_{t} \Big(\log \pi_\theta(y_t \mid x, y_{&lt;t}) - \log \pi_\text{ref}(y_t \mid x, y_{&lt;t})\Big)$$
-<p>Each term in the sum is how much more likely the policy found that token than the reference did. Averaged over many samples, the sum is exactly the KL divergence.</p>
+<p>Each term in the sum is how much more likely the policy found that token than the reference did. Averaged over many samples, the sum estimates the KL divergence: its expected value is exactly the KL.</p>
 
 <figure class="anim wide" data-anim="m3-3-rlhf"></figure>
 

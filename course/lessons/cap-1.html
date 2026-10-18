@@ -111,7 +111,7 @@ $$\hat d = \frac{b - c}{n}, \qquad \mathrm{SE}(\hat d) = \sqrt{\frac{b + c}{n^2}
     <li>Accuracy change $\hat d$, in points: <span class="blank" data-answer="-2" data-tol="0.05" data-hint="(b − c)/n = (6 − 10)/200, times 100."></span></li>
     <li>$\mathrm{SE}(\hat d)$, in points: <span class="blank" data-answer="2.0" data-tol="0.05" data-hint="√(16/40,000 − 16/8,000,000) ≈ √0.000398, times 100."></span></li>
     <li>Lower end of the 95% CI, in points: <span class="blank" data-answer="-5.9" data-tol="0.1" data-hint="−2 − 1.96 × 2.0"></span></li>
-    <li>Weights-only size of a 1.5B-parameter model at 4 bits, in GB (ignore scales and overheads): <span class="blank" data-answer="0.75" data-tol="0.01" data-hint="1.5 × 10⁹ parameters × 0.5 bytes."></span></li>
+    <li>Weights-only size of a 1.5B-parameter model at 4 bits, in GB (ignore scales and overheads): <span class="blank" data-answer="0.75" data-tol="0.01" data-hint="1.5 × 10⁹ parameters × 0.5 bytes. (Real 4-bit files come out nearer 1 GB, since embeddings, scales and the output head stay in higher precision.)"></span></li>
   </ol>
   <p class="math-note">So with the decision rule "lower bound above −3 points", this run can't ship the 4-bit model yet: the data are consistent with no loss <em>and</em> with a 6-point loss. Options: a larger eval set (the CI shrinks like $1/\sqrt{n}$), 8-bit instead, or a looser margin if the use case allows.</p>
 </section>

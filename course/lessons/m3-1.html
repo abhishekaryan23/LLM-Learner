@@ -125,18 +125,18 @@ $$\mathcal{L}_{\text{SFT}}(\theta) = -\frac{1}{|R|}\sum_{t \in R} \log p_\theta\
 
 <section class="card" aria-labelledby="ft">
   <div class="card-label" id="ft">Your turn · faded example</div>
-  <p>A templated example has 12 prompt tokens (role tokens included) and a reply of 4 tokens: <code>It</code>, <code>is</code>, <code>Lima</code>, <code>&lt;end&gt;</code>. The model gives them probabilities 0.5, 0.5, 0.25 and 0.5.</p>
+  <p>A templated example has 13 prompt tokens (role tokens included) and a reply of 4 tokens: <code>It</code>, <code>is</code>, <code>Lima</code>, <code>&lt;end&gt;</code>. The model gives them probabilities 0.5, 0.5, 0.25 and 0.5.</p>
   <ol class="steps">
     <li>How many positions contribute to the SFT loss? <span class="blank" data-answer="4" data-tol="0" data-hint="Only the reply's tokens, including the end-of-turn token."></span></li>
     <li>Loss on <code>Lima</code>: <span class="blank" data-answer="1.39" data-tol="0.011" data-hint="−ln 0.25 = ln 4."></span></li>
     <li>Mean SFT loss: <span class="blank" data-answer="0.87" data-tol="0.011" data-hint="−ln 0.5 ≈ 0.69 three times, plus 1.39, divided by 4."></span></li>
-    <li>Suppose you forget the mask, and each of the 12 prompt positions has loss 3.0. Mean loss over all 16 positions: <span class="blank" data-answer="2.47" data-tol="0.02" data-hint="(12 × 3.0 + the 4 reply losses, which sum to 3.47) / 16."></span></li>
+    <li>Suppose you forget the mask, and each of the 12 masked prompt positions has loss 3.0 (the first token is never predicted, so 13 prompt tokens give 12 prompt targets). Mean loss over all 16 predicted positions: <span class="blank" data-answer="2.47" data-tol="0.02" data-hint="(12 × 3.0 + the 4 reply losses, which sum to 3.47) / 16."></span></li>
   </ol>
   <p class="math-note" style="margin-top:10px">That last number is why masking matters: unmasked, the hard-to-predict prompt dominates the loss and the gradient, even though you only care about the reply.</p>
 </section>
 
 <h2>Quality beats quantity</h2>
-<p><strong>LIMA</strong> (Zhou et al., 2023, “Less Is More for Alignment”) fine-tuned a 65B LLaMA on just <strong>1,000</strong> carefully chosen prompt–response pairs. In their human study, its answers were rated as good as or better than GPT-4's in 43% of comparisons. The authors proposed the <strong>Superficial Alignment Hypothesis</strong>: almost all knowledge comes from pretraining, and SFT mainly teaches the <em>format and style</em> of a good answer.</p>
+<p><strong>LIMA</strong> (Zhou et al., 2023, “Less Is More for Alignment”) fine-tuned a 65B LLaMA on just <strong>1,000</strong> carefully chosen prompt–response pairs. In their human study on 300 test prompts, its answers were rated as good as or better than GPT-4's in 43% of comparisons. The authors proposed the <strong>Superficial Alignment Hypothesis</strong>: almost all knowledge comes from pretraining, and SFT mainly teaches the <em>format and style</em> of a good answer.</p>
 <p>Treat that as a strong hint, not a law. It was one evaluation set, and later work shows that more (and more diverse) data still helps for harder skills such as maths, coding and long multi-turn chats. The practical lesson holds up well, though:</p>
 <ul>
   <li>The model imitates <em>everything</em> in the demos, including mistakes, padding and over-hedging.</li>

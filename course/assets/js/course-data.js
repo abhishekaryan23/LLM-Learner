@@ -58,20 +58,20 @@ LC.course = {
       { id: "p1-6", title: "Entropy, cross-entropy & KL", mins: 12, pre: ["p1-5"], ready: true, colab: "p1-6-entropy-kl.ipynb" }
     ]},
     p2: { code: "P2", title: "Machine-learning basics", cover: "cover-p2.webp", tags: [], lessons: [
-      { id: "p2-1", title: "Loss functions", mins: 8, pre: ["p1-5"], ready: true },
+      { id: "p2-1", title: "Loss functions", mins: 8, pre: ["p1-5", "p1-6"], ready: true },
       { id: "p2-2", title: "Gradient descent", mins: 12, pre: ["p1-3", "p2-1"], ready: true, colab: "p2-2-gradient-descent.ipynb" },
-      { id: "p2-3", title: "Backpropagation", mins: 12, pre: ["p1-3", "p2-2"], ready: true, colab: "p2-3-backprop.ipynb" },
-      { id: "p2-4", title: "Overfitting & data splits", mins: 8, pre: ["p2-1"], ready: true }
+      { id: "p2-3", title: "Backpropagation", mins: 12, pre: ["p1-3", "p1-4", "p2-2"], ready: true, colab: "p2-3-backprop.ipynb" },
+      { id: "p2-4", title: "Overfitting & data splits", mins: 8, pre: ["p2-1", "p2-2"], ready: true }
     ]},
     p3: { code: "P3", title: "Neural nets → language", cover: "cover-p3.webp", tags: ["tokenizer", "tokenization", "embedding"], lessons: [
-      { id: "p3-1", title: "MLPs", mins: 8, pre: ["p1-2", "p2-3"], ready: true },
-      { id: "p3-2", title: "Softmax", mins: 6, pre: ["p1-5"], ready: true },
-      { id: "p3-3", title: "Tokenization (BPE)", mins: 10, pre: [], ready: true, colab: "p3-3-bpe-tokenizer.ipynb" },
-      { id: "p3-4", title: "Embeddings", mins: 8, pre: ["p1-1", "p3-3"], ready: true, colab: "p3-4-embeddings.ipynb" }
+      { id: "p3-1", title: "MLPs", mins: 8, pre: ["p1-1", "p1-2", "p2-3"], ready: true },
+      { id: "p3-2", title: "Softmax", mins: 6, pre: ["p3-1", "p1-5", "p1-6"], ready: true },
+      { id: "p3-3", title: "Tokenization (BPE)", mins: 10, pre: ["p3-2"], ready: true, colab: "p3-3-bpe-tokenizer.ipynb" },
+      { id: "p3-4", title: "Embeddings", mins: 8, pre: ["p1-1", "p1-2", "p3-2", "p3-3"], ready: true, colab: "p3-4-embeddings.ipynb" }
     ]},
     p4: { code: "P4", title: "PyTorch in an hour", cover: "cover-p4.webp", tags: ["pytorch"], lessons: [
       { id: "p4-1", title: "Tensors & autograd", mins: 12, pre: ["p1-2", "p2-3"], ready: true, colab: "p4-1-tensors-autograd.ipynb" },
-      { id: "p4-2", title: "A training loop", mins: 12, pre: ["p4-1", "p2-2"], ready: true, colab: "p4-2-training-loop.ipynb" }
+      { id: "p4-2", title: "A training loop", mins: 12, pre: ["p4-1", "p2-2", "p2-4"], ready: true, colab: "p4-2-training-loop.ipynb" }
     ]},
     p5: { code: "P5", title: "Math for generative models", cover: "cover-p5.webp", tags: [], lessons: [
       { id: "p5-1", title: "Gaussians & noise", mins: 8, pre: ["p1-5"], ready: true, colab: "p5-1-gaussians-noise.ipynb" },

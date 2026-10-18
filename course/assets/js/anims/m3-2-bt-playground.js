@@ -62,7 +62,7 @@
         " · ∂loss/∂r_chosen = " + f(-(1 - p), 2);
       var msg;
       if (shifted) msg = "You moved both rewards by the same amount and nothing changed: Bradley–Terry only sees the difference. That's why reward models are often normalized afterwards.";
-      else if (d < -0.5) msg = "The reward model disagrees with the person: big loss, and the biggest push (gradient magnitude near 1) to fix it.";
+      else if (d < -0.5) msg = "The reward model disagrees with the person: big loss, and a big push (gradient magnitude well above 0.5, approaching 1 as Δ gets more negative) to fix it.";
       else if (d <= 0.5) msg = "Unsure: P is near 0.5, the loss is near log 2 ≈ 0.69, and the gradient is about 0.5.";
       else if (d < 3) msg = "Agrees with the person: the loss and the push are getting small.";
       else msg = "Confidently agrees: almost no loss and almost no gradient, so this pair barely changes the model any more.";

@@ -62,7 +62,7 @@
       S("text", { x: left + 18, y: lgY, class: "t t-sm", text: "model weights" }, svg);
       var l2 = left + (compact ? 120 : 140);
       S("rect", { x: l2, y: lgY - 10, width: 12, height: 12, rx: 2, class: "f-orange" }, svg);
-      S("text", { x: l2 + 18, y: lgY, class: "t t-sm", text: "trainable: grads + optimizer" }, svg);
+      S("text", { x: l2 + 18, y: lgY, class: "t t-sm", text: compact ? "grads + fp32 copy + Adam" : "trainable: grads + fp32 master copy + optimizer" }, svg);
       stage.innerHTML = ""; stage.appendChild(svg);
 
       var f = P * 16, l = P * (2 + ADAPT), q = P * (METHODS[2].base + ADAPT);

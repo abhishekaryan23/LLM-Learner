@@ -75,7 +75,7 @@
 <h2>Phase 2: RL from AI feedback</h2>
 <ol class="steps">
   <li>SL-CAI generates <strong>two answers</strong> to each harmful prompt.</li>
-  <li>A <strong>feedback model</strong> sees the prompt, both answers and one principle, posed as a multiple-choice question: which answer is better, (A) or (B)?</li>
+  <li>A <strong>feedback model</strong> (in the paper, a pretrained language model) sees the prompt, both answers and one principle, posed as a multiple-choice question: which answer is better, (A) or (B)?</li>
   <li>Its probabilities for "(A)" and "(B)" become a <strong>soft preference label</strong>.</li>
   <li>Train a <strong>preference model</strong> on these AI labels, mixed with human labels for helpfulness, then run RL against it exactly as in RLHF. The result is <strong>RL-CAI</strong>.</li>
 </ol>
@@ -125,7 +125,7 @@ $$\mathcal{L} = -\Big[p_A \log \sigma(r_A - r_B) + (1 - p_A)\log \sigma(r_B - r_
 
 <h2>RLAIF beyond Constitutional AI</h2>
 <p>The idea spread quickly. Lee et al. (2023, Google), "RLAIF vs. RLHF", found that on summarisation and dialogue tasks, policies trained with AI-labelled preferences were rated by humans about as well as those trained with human labels. In open models, <strong>UltraFeedback</strong> (Cui et al., 2023) used GPT-4 to label preferences, and <strong>Zephyr-7B</strong> (Tunstall et al., 2023) trained on them with <strong>DPO</strong> instead of PPO: AI feedback with no RL loop at all. The evaluation-side twin of this idea is the LLM judge (<a href="m4-4.html">M4.4</a>), which has the same strengths and biases.</p>
-<p>Anthropic has also published the constitution it uses for its Claude models; the 2023 version drew on sources such as the UN Universal Declaration of Human Rights. That's the point: the rules are text anyone can read.</p>
+<p>Anthropic has also published the constitution it uses for its Claude models. The 2023 version was a short list of principles drawing on sources such as the UN Universal Declaration of Human Rights. In January 2026 Anthropic replaced it with a much longer document, released under a CC0 public-domain licence, that explains the reasoning behind its guidance rather than listing standalone rules, and sets out Claude's core priorities: being broadly safe, broadly ethical, compliant with Anthropic's guidelines and genuinely helpful. Either way, the target behaviour is written down as text anyone can read.</p>
 
 <h2>Benefits and limits</h2>
 <ul>
