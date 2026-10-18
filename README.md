@@ -11,7 +11,8 @@ A free, interactive course on how large language models are **trained, evaluated
 | `course/` | The static site (no build step). Details in [`course/README.md`](course/README.md). |
 | `course/notebooks/` | Optional Colab exercises: TODO stubs, auto-checks, solutions at the end. |
 | `tools/qa/check-layout.js` | Layout guard: every page and every animation step at phone, iPad and desktop sizes. Fails on overlapping or clipped labels. |
-| `.github/workflows/pages.yml` | Runs the layout guard, then deploys `course/` to GitHub Pages on every push to `main`. |
+| `.github/workflows/layout-check.yml` | Runs the layout guard on every push and pull request. |
+| `index.html`, `.nojekyll` | GitHub Pages serves `main` from the repo root; `index.html` forwards visitors to `course/`. |
 | `.github/workflows/fetch-images.yml` | Commits any illustration listed in `course/assets/img/sources.json` that isn't committed yet. |
 
 ## Preview locally

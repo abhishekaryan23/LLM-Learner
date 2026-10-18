@@ -8,7 +8,7 @@ Static, mobile-first course on LLM training/eval/optimization. See `course/READM
 
 Every animation and playground must be legible at **every step** on **phone (360–430px), iPad (portrait + landscape) and desktop**. Overlapping labels have shipped before (forgetting-curve axis title colliding with "learned!"/"R1" on phones), so before any commit that touches `course/`:
 
-1. Run the layout guard and make it pass. It also runs in CI and blocks deploys:
+1. Run the layout guard and make it pass. It also runs in CI (`layout-check.yml`) on every push and PR:
    ```bash
    (cd course && python3 -m http.server 8123 &)
    cd tools/qa && npm install && node check-layout.js http://localhost:8123/
@@ -29,5 +29,5 @@ When designing an animation:
 ### Other course conventions
 - Lesson pages follow `course/lessons/m0-1.html`: pretest → learn (animation) → ELI5 → explain-it-back → quiz → takeaways → lock-in cards.
 - Mark a lesson `ready: true` in `assets/js/course-data.js` only when its page exists.
-- Images: OpenArt, GPT Image 2.5 Flare (ELI5) / Sunburst (covers), `quality: low`, `resolutionTier: 1k` (5 credits each). No text inside generated images; labels are drawn in code. Add new image URLs to `assets/img/sources.json` (the Pages build downloads them).
+- Images: OpenArt, GPT Image 2.5 Flare (ELI5) / Sunburst (covers), `quality: low`, `resolutionTier: 1k` (5 credits each). No text inside generated images; labels are drawn in code. Add new image URLs to `assets/img/sources.json`; the `fetch-images.yml` workflow commits them as WebP. Pages serves `main` from the repo root (`index.html` forwards to `course/`), so only committed files go live.
 - Colab notebooks: `course/notebooks/`, TODO stubs + assert checks + solutions at the end, outputs cleared; execute a solved copy before committing.

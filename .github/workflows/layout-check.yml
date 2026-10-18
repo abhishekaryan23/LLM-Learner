@@ -1,0 +1,35 @@
+name: Layout check
+
+# GitHub Pages serves this repo straight from the `main` branch (Settings → Pages →
+# Deploy from a branch), so no deploy job is needed. This workflow guards quality:
+# it fails on overlapping/clipped animation labels, stray dots, sideways scroll or
+# JS errors, at phone, iPad and desktop sizes, for every step of every animation.
+on:
+  push:
+    branches: [main]
+    paths: ["course/**", "tools/qa/**", ".github/workflows/layout-check.yml"]
+  pull_request:
+    paths: ["course/**", "tools/qa/**", ".github/workflows/layout-check.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  layout-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install headless Chromium
+        working-directory: tools/qa
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright-core install --with-deps chromium
+      - name: Check every page and animation step
+        run: |
+          (cd course && python3 -m http.server 8123 >/dev/null 2>&1 &)
+          sleep 2
+          node tools/qa/check-layout.js http://localhost:8123/

@@ -14,11 +14,10 @@ python3 -m http.server 8000
 
 ## Deploy (GitHub Pages, free for public repos)
 
-1. Repo **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-2. Merge to `main`. The workflow `.github/workflows/pages.yml` publishes the `course/` folder to
-   `https://<user>.github.io/<repo>/`.
-3. During the build, `.github/scripts/fetch_images.py` downloads any image listed in
-   `assets/img/sources.json` that isn't committed yet and converts it to WebP.
+Pages is set to **Deploy from a branch → `main` / (root)**: every push to `main` is live at
+`https://abhishekaryan23.github.io/LLM-Learner/` (the root `index.html` forwards to `course/`).
+Images must be committed: add the URL to `assets/img/sources.json` and the
+`fetch-images.yml` workflow downloads it, converts it to WebP and commits it.
 
 ## Layout
 
