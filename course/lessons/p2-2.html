@@ -21,18 +21,20 @@
 
 <p class="kicker" data-kicker></p>
 <h1>Gradient descent</h1>
-<div class="lesson-meta"><span data-mins></span><span>Needs: what a derivative is</span></div>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 2 of Machine-learning basics</span></div>
 <p class="lede">Every model in this course learns the same way, from a two-parameter line to a trillion-parameter LLM: <strong>feel the slope, take a small step downhill, repeat.</strong> That loop is gradient descent.</p>
 
 <section class="objectives" aria-labelledby="obj">
   <h2 id="obj">By the end you can</h2>
   <ul>
-    <li>Explain what a loss function is and why training means <em>minimising</em> it.</li>
+    <li>Explain why training means <em>minimising</em> a loss, and what the slope of the loss tells you.</li>
     <li>Compute one gradient-descent step by hand.</li>
     <li>Predict what a too-small, good or too-large learning rate will do.</li>
     <li>Describe the gradient in several dimensions, and why we use mini-batches.</li>
   </ul>
 </section>
+
+<div class="why"><strong>Builds on:</strong> <a href="p1-3.html">P1.3 Derivatives &amp; the chain rule</a> (what a slope is) and <a href="p2-1.html">P2.1 Loss functions</a> (the number we push down). Next, <a href="p2-3.html">P2.3 Backpropagation</a> computes the slope for every parameter at once.</div>
 
 <section class="card" data-pretest aria-labelledby="pt">
   <div class="card-label" id="pt">Warm-up · guess before you learn</div>
@@ -169,7 +171,7 @@ $$\boldsymbol\theta \leftarrow \boldsymbol\theta - \eta\,\nabla L$$
       <text x="44" y="48" class="t t-sm t-orange">start</text>
       <text x="267.5" y="140" class="t t-sm t-blue t-mid">minimum</text>
       <text x="96" y="176" class="t t-sm t-orange">gradient descent path</text>
-      <text x="120" y="70" class="t t-sm t-blue">direct route</text>
+      <text x="120" y="62" class="t t-sm t-blue">direct route</text>
       <text x="14" y="216" class="t t-sm t-muted">grey ellipses = contour lines (equal loss)</text>
     </svg>
   </div>

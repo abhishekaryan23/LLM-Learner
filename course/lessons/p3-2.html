@@ -33,7 +33,7 @@
   </ul>
 </section>
 
-<div class="why"><strong>Builds on:</strong> <a href="p3-1.html">MLPs</a> (the network's last layer produces the scores), <a href="p1-5.html">Probability &amp; expectation</a> (what a distribution is) and <a href="p1-6.html">Entropy, cross-entropy &amp; KL</a> (the loss that softmax feeds). You also met softmax briefly in <a href="m1-1.html">Attention</a>.</div>
+<div class="why"><strong>Builds on:</strong> <a href="p3-1.html">MLPs</a> (the network's last layer produces the scores), <a href="p1-5.html">Probability &amp; expectation</a> (what a distribution is) and <a href="p1-6.html">Entropy, cross-entropy &amp; KL</a> (the loss that softmax feeds). You'll meet it again in M1.1 Attention, where it turns scores into weights.</div>
 
 <section class="card" data-pretest aria-labelledby="pt">
   <div class="card-label" id="pt">Warm-up · guess before you learn</div>
@@ -126,7 +126,7 @@ $$p_i = \frac{e^{z_i / T}}{\sum_j e^{z_j / T}}$$
 <h2>Softmax meets cross-entropy</h2>
 <p>During training, the correct next token is known. The loss is the <strong>cross-entropy</strong> from <a href="p1-6.html">P1.6</a>: minus the log of the probability the model gave to the right answer.</p>
 $$\mathcal{L} = -\log p_{\text{target}}$$
-<p>In the animation, if the true next word was "mat" ($p = 0.73$), the loss is $-\ln 0.73 \approx 0.32$. If it was "floor" ($p = 0.16$), the loss is about $1.82$: a bigger surprise costs more.</p>
+<p>In the animation, if the true next word was "mat" ($p = 0.73$), the loss is $-\ln 0.73 \approx 0.32$. If it was "floor" ($p \approx 0.16$), the loss is about $1.8$: a bigger surprise costs more.</p>
 <p>Softmax and cross-entropy fit together beautifully. The gradient of the loss with respect to each logit is just</p>
 $$\frac{\partial \mathcal{L}}{\partial z_i} = p_i - y_i$$
 <p>where $y$ is the one-hot vector of the true token (1 for the target, 0 elsewhere). So with target "floor", the gradient is $[0.73,\ 0.16 - 1,\ 0.10,\ 0.01] = [0.73,\ -0.84,\ 0.10,\ 0.01]$. Gradient descent (<a href="p2-2.html">P2.2</a>) subtracts it, which pushes the "floor" logit <em>up</em> and every other logit <em>down</em>, each in proportion to how much probability it wrongly took.</p>

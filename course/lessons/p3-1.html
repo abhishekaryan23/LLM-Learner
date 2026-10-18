@@ -22,7 +22,7 @@
 <p class="kicker" data-kicker></p>
 <h1>MLPs</h1>
 <div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Neural nets → language</span></div>
-<p class="lede">A neural network is mostly one small move, repeated: <strong>multiply by weights, add a bias, bend.</strong> Stack a few layers of that and you get a multilayer perceptron (MLP), the block that holds about two thirds of the parameters in a classic transformer.</p>
+<p class="lede">A neural network is mostly one small move, repeated: <strong>multiply by weights, add a bias, bend.</strong> Stack a few layers of that and you get a multilayer perceptron (MLP), the block that holds about two thirds of the weights in each layer of a classic transformer.</p>
 
 <div class="cover"><img src="../assets/img/cover-p3.webp" alt="Illustration: columns of glowing connected nodes flowing into a row of blank word-piece tiles." width="1200" height="800"></div>
 
@@ -35,7 +35,7 @@
   </ul>
 </section>
 
-<div class="why"><strong>Builds on:</strong> <a href="p1-1.html">Vectors &amp; dot products</a> (a neuron is a dot product), <a href="p1-2.html">Matrices as transformations</a> (a layer is a matrix) and <a href="p2-2.html">Gradient descent</a> (how the weights get their values). <a href="p2-3.html">Backpropagation</a> computes the gradients.</div>
+<div class="why"><strong>Builds on:</strong> <a href="p1-1.html">Vectors &amp; dot products</a> (a neuron is a dot product), <a href="p1-2.html">Matrices as transformations</a> (a layer is a matrix) and <a href="p2-3.html">Backpropagation</a> (it computes the gradients that gradient descent uses to set the weights).</div>
 
 <section class="card" data-pretest aria-labelledby="pt">
   <div class="card-label" id="pt">Warm-up · guess before you learn</div>
@@ -164,7 +164,7 @@ $$\mathrm{MLP}(x) = \varphi(xW_{\text{up}} + b_1)\,W_{\text{down}} + b_2$$
   <li><strong>Project back:</strong> $W_{\text{down}}$ is $4d \times d$, returning to the model width so the result can be added back onto the token's vector.</li>
 </ol>
 <p>In GPT-2 small, $d = 768$, so each MLP goes $768 \to 3072 \to 768$. With two $d \times 4d$ matrices the MLP has $8d^2$ weights, against $4d^2$ for attention's four $d \times d$ matrices: about two thirds of each block. One popular reading of what MLPs do is that they act like a big key-value memory, where hidden units fire on particular input patterns and write back associated information (Geva et al., 2021). Treat that as a useful lens, not the full story.</p>
-<p>Most current open LLMs (Llama, Qwen, Mistral and others) use a gated variant called <strong>SwiGLU</strong> (Shazeer, 2020): $\big(\mathrm{SiLU}(xW_1) \odot xW_3\big)W_2$. Here $\odot$ means element-wise multiplication, and $\mathrm{SiLU}(z) = z\,\sigma(z)$, with $\sigma$ the sigmoid, is another smooth ReLU-like curve. There are three matrices instead of two, so the hidden size is usually shrunk to around $\tfrac{8}{3}d$ to $3.5d$ to keep the cost similar. The shape of the idea is unchanged: expand, bend, project back.</p>
+<p>Most current open LLMs (Llama, Qwen, Mistral and others) use a gated variant called <strong>SwiGLU</strong> (Shazeer, 2020): $\big(\mathrm{SiLU}(xW_1) \odot xW_3\big)W_2$. Here $\odot$ means element-wise multiplication, and $\mathrm{SiLU}(z) = z\,\sigma(z)$, with $\sigma$ the sigmoid, is another smooth ReLU-like curve. There are three matrices instead of two, so the hidden size is often shrunk to about $\tfrac{8}{3}d$, which keeps the cost the same as a $4d$ MLP; many models go somewhat wider (Llama 2 7B: about $2.7d$; Llama 3 8B and Mistral 7B: $3.5d$). The shape of the idea is unchanged: expand, bend, project back.</p>
 
 <section class="card" aria-labelledby="ft2">
   <div class="card-label" id="ft2">Your turn · count the parameters</div>

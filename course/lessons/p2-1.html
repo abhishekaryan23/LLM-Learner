@@ -151,7 +151,7 @@ $$\ell = -\ln p_\theta(y \mid x)$$
   <li><strong>Confident mistakes are expensive.</strong> $-\ln p$ heads to infinity as $p \to 0$, so the model is pushed hard never to rule out what actually happens.</li>
   <li><strong>Clean gradients.</strong> Combined with softmax, the gradient with respect to the model's raw scores (logits) is just $p - q$: predicted probabilities minus the one-hot target.</li>
 </ul>
-<p>A useful reference point: a model that spreads probability evenly over a vocabulary of $V$ tokens has loss $\ln V$. For GPT-2's 50,257-token vocabulary that's $\ln 50{,}257 \approx 10.8$, roughly where an untrained LLM's loss curve begins. Training drives it down to a few nats per token; Karpathy's nanoGPT reproduction of the 124M-parameter GPT-2, for example, reaches about 2.85 on its OpenWebText validation set. (Using $\ln$ means the loss is measured in <strong>nats</strong>; with $\log_2$ it would be bits.)</p>
+<p>A useful reference point: a model that spreads probability evenly over a vocabulary of $V$ tokens has loss $\ln V$. For GPT-2's 50,257-token vocabulary that's $\ln 50{,}257 \approx 10.8$, roughly where an untrained LLM's loss curve begins. Training drives it down to a few nats per token; Karpathy's nanoGPT reproduction of the 124M-parameter GPT-2, for example, reaches a loss of about 2.85 on OpenWebText (the original OpenAI checkpoint scores about 3.1 on the same data). (Using $\ln$ means the loss is measured in <strong>nats</strong>; with $\log_2$ it would be bits.)</p>
 
 <h3>Worked example</h3>
 <p>A model reads "The cat sat on the" and gives the correct next token, <em>mat</em>, probability $0.25$.</p>

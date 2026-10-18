@@ -33,7 +33,7 @@
   </ul>
 </section>
 
-<div class="why"><strong>Builds on:</strong> <a href="p3-2.html">Softmax</a> (the model outputs one probability per vocabulary entry) and, for the cost argument, <a href="m1-1.html">Attention</a> (its cost grows with the square of the number of tokens). Next, <a href="p3-4.html">Embeddings</a> turns each token ID into a vector.</div>
+<div class="why"><strong>Builds on:</strong> <a href="p3-2.html">Softmax</a> (the model outputs one probability per vocabulary entry) and looks ahead to M1.1 Attention, whose cost grows with the square of the number of tokens. Next, <a href="p3-4.html">Embeddings</a> turns each token ID into a vector.</div>
 
 <section class="card" data-pretest aria-labelledby="pt">
   <div class="card-label" id="pt">Warm-up · guess before you learn</div>
@@ -124,7 +124,7 @@
 <h2>Byte-level BPE: nothing is ever unknown</h2>
 <p>If the base symbols are characters, a character missing from training (an emoji, a rare script) has no token at all. GPT-2 (Radford et al., 2019) fixed this by running BPE on the <strong>bytes</strong> of the UTF-8 encoding instead. There are only 256 possible bytes, so <em>any</em> string can be encoded. GPT-2's vocabulary is exactly 256 bytes + 50,000 merges + 1 special end-of-text token = 50,257.</p>
 <p>The price is that a token can be part of a character. The emoji 🙂 is 4 bytes in UTF-8, and GPT-4's tokenizer splits it into 2 tokens of 2 bytes each; GPT-4o's larger vocabulary has it as one token.</p>
-<p>Real tokenizers also <strong>pre-tokenize</strong> with a regular expression before BPE: the text is split into chunks such as words (with their leading space), runs of digits and punctuation, and merges never cross chunk boundaries. GPT-4's tokenizer, for example, splits digits into chunks of at most three. Other popular schemes include WordPiece (used by BERT) and SentencePiece (Kudo &amp; Richardson, 2018), a library that tokenizes raw text, spaces included, and powers T5 and the first two Llama generations (BPE with a fallback to bytes for unknown characters).</p>
+<p>Real tokenizers also <strong>pre-tokenize</strong> with a regular expression before BPE: the text is split into chunks such as words (with their leading space), runs of digits and punctuation, and merges never cross chunk boundaries. GPT-4's tokenizer, for example, splits digits into chunks of at most three. Other popular schemes include WordPiece (used by BERT) and SentencePiece (Kudo &amp; Richardson, 2018), a library that tokenizes raw text, spaces included, and powers T5 (with its unigram model) and the first two Llama generations (BPE with a fallback to bytes for unknown characters).</p>
 
 <h2>Tokens are not words</h2>
 <p>Real examples from GPT-4's tokenizer (<code>cl100k_base</code>), with ␣ marking a space that is part of the token:</p>
@@ -144,7 +144,7 @@
   <li><strong>Whitespace and formatting.</strong> " Hello" and "Hello" are different tokens, so a stray trailing space in a prompt can shift what the model expects next. Runs of spaces in code indentation get their own tokens.</li>
 </ol>
 
-<div class="why"><strong>Why this matters in practice:</strong> context windows, API prices and rate limits are all counted in <strong>tokens</strong>. For ordinary English text, GPT-4-era tokenizers average roughly 4 to 5 characters per token (an English paragraph we checked came to 5.0 characters, or 0.9 words, per token with <code>cl100k_base</code>), and many other languages need far more tokens. The tokenizer is also frozen before pretraining: change it, and the embedding table (P3.4) no longer matches, which is why a model and its tokenizer always ship together.</div>
+<div class="why"><strong>Why this matters in practice:</strong> context windows, API prices and rate limits are all counted in <strong>tokens</strong>. For ordinary English text, GPT-4-era tokenizers average roughly 4 to 5 characters per token (the playground's paragraph above comes to about 5.2 characters, or 0.86 words, per token with <code>cl100k_base</code>), and many other languages need far more tokens. The tokenizer is also frozen before pretraining: change it, and the embedding table (P3.4) no longer matches, which is why a model and its tokenizer always ship together.</div>
 
 <section class="card recall" data-id="explain" aria-labelledby="eb">
   <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
