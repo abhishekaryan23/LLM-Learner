@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en" data-root="./" data-page="home">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LLMs, Animated</title>
+<meta name="description" content="A free, animated course on how large language models are trained, evaluated and optimized, built on the science of how people remember.">
+<meta property="og:title" content="LLMs, Animated">
+<meta property="og:description" content="Learn LLM training, evaluation and optimization with interactive animations, ELI5s, spaced repetition and Colab exercises.">
+<meta property="og:image" content="assets/img/hero.webp">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/icons/icon-180.png">
+<link rel="stylesheet" href="assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page">
+<main id="main">
+
+<section class="hero">
+  <div>
+    <p class="kicker">A free, animated course</p>
+    <h1>How LLMs are trained, evaluated and optimized</h1>
+    <p class="lede">Watch the ideas move. Step-by-step animations, plain-English ELI5s and optional Colab exercises take you from "what's a gradient?" to DPO, eval statistics and speculative decoding, using the learning science that makes it stick.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" id="start-btn" href="lessons/m0-1.html">Start the course</a>
+      <a class="btn" href="#map">See the course map</a>
+      <a class="btn btn-ghost" href="review.html" id="review-cta" hidden></a>
+    </div>
+    <div class="stats" id="stats"></div>
+  </div>
+  <div class="hero-art"><img src="assets/img/hero.webp" alt="Illustration: tiny people on ladders assembling a glowing network-shaped brain, adjusting dials and measuring it." width="1200" height="800"></div>
+</section>
+
+<div class="section-head" id="science">
+  <h2>Built on how memory actually works</h2>
+</div>
+<p class="lede" style="max-width:46rem;margin-top:10px">Most courses optimise for how learning <em>feels</em>. This one optimises for what you'll still remember in a month. Every lesson uses these research-backed techniques:</p>
+<div class="science-grid">
+  <div class="science"><h3>Pre-testing</h3><p>Two warm-up guesses before each lesson prime your attention, even when you're wrong.</p><span class="cite">Richland, Kornell &amp; Kao, 2009</span></div>
+  <div class="science"><h3>Retrieval practice</h3><p>Quizzes and "explain it back" boxes make you pull ideas out of memory, which strengthens them far more than re-reading.</p><span class="cite">Roediger &amp; Karpicke, 2006</span></div>
+  <div class="science"><h3>Spaced repetition</h3><p>A built-in review deck brings each idea back after about 1, 3, 7, 16 and 35 days, right before you'd forget.</p><span class="cite">Cepeda et al., 2006</span></div>
+  <div class="science"><h3>Interleaving</h3><p>Reviews mix topics, so you practise choosing the right tool, not just repeating one.</p><span class="cite">Rohrer &amp; Taylor, 2007</span></div>
+  <div class="science"><h3>Dual coding &amp; segmenting</h3><p>Animations pair pictures with short captions, and <em>you</em> control the pace, one step at a time.</p><span class="cite">Paivio; Mayer, Multimedia Learning</span></div>
+  <div class="science"><h3>Elaboration &amp; calibration</h3><p>ELI5 analogies, "why does this work?" prompts, worked → faded examples, and confidence ratings on every quiz.</p><span class="cite">Dunlosky et al., 2013</span></div>
+</div>
+
+<div class="section-head" id="map">
+  <h2>Course map</h2>
+  <span class="math-note" style="margin:0" id="map-note"></span>
+</div>
+<div id="course-map"></div>
+
+</main>
+</div>
+<script src="assets/js/course-data.js"></script>
+<script src="assets/js/app.js"></script>
+<script src="assets/js/home.js"></script>
+</body>
+</html>

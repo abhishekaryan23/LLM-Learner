@@ -1,0 +1,7 @@
+{
+  "name": "course-qa",
+  "private": true,
+  "description": "Layout guard for the course: overlapping labels, clipped text, stray dots, sideways scroll.",
+  "scripts": { "check": "node check-layout.js" },
+  "dependencies": { "playwright-core": "1.56.1" }
+}

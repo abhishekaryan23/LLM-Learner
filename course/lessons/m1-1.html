@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m1-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Attention · LLMs, Animated</title>
+<meta name="description" content="How a transformer lets every word look at the others: queries, keys, values, the √d_k scaling and the causal mask, animated step by step.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Attention</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of Transformers</span></div>
+<p class="lede">Attention is the one idea that makes transformers work. It lets every word look at every other word and decide which ones matter for understanding it. In this lesson you'll take it apart step by step: queries, keys, values, one softmax and one weighted sum.</p>
+
+<div class="cover"><img src="../assets/img/cover-m1.webp" alt="Illustration: a row of blank tiles connected by curved beams of light of different thickness." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="pre">
+  <h2 id="pre">You'll need</h2>
+  <ul>
+    <li><strong>Vectors &amp; dot products</strong> (P1.1, coming soon): a dot product is large when two vectors point the same way.</li>
+    <li><strong>Softmax</strong> (P3.2, coming soon): turns any list of numbers into positive weights that sum to 1.</li>
+    <li><strong>Embeddings</strong> (P3.4, coming soon): each token starts life as a learned vector.</li>
+  </ul>
+</section>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what queries, keys and values are, and where they come from.</li>
+    <li>Compute scaled dot-product attention by hand for a tiny example.</li>
+    <li>Explain why scores are divided by $\sqrt{d_k}$ and what the causal mask does.</li>
+    <li>Say why attention's cost grows with the <em>square</em> of the sequence length.</li>
+  </ul>
+</section>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>No pressure. A guess now makes the answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">In “I sat by the river bank”, how can a transformer tell that <em>bank</em> means a riverside, not a place for money?</p>
+    <ol class="q-src">
+      <li>It looks the word up in a built-in dictionary of meanings</li>
+      <li>It updates bank's vector with a weighted mix of the other words' vectors, mostly <em>river</em></li>
+      <li>It only ever looks at the single word right before bank</li>
+      <li>It can't. Each word always has the same vector.</li>
+    </ol>
+    <div class="q-explain">That weighted mix is exactly what attention computes. The weights depend on the input, so the same word gets a different vector in a different sentence.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">For one word, its attention weights over the words it can see…</p>
+    <ol class="q-src">
+      <li>are all positive and add up to 1</li>
+      <li>are always equal</li>
+      <li>can be any number, including negative</li>
+      <li>are fixed after training, whatever the sentence</li>
+    </ol>
+    <div class="q-explain">They come out of a softmax, so they're positive and sum to 1. And they're recomputed for every input.</div>
+  </div>
+</section>
+
+<h2>The problem: words change meaning with context</h2>
+<p>A language model starts by turning each token into an <strong>embedding</strong>, a vector looked up in a table. But that table has only one vector for “bank”, whether the sentence is about rivers or mortgages. Something has to <strong>mix in context</strong>, so that “bank” next to “river” ends up with a different vector than “bank” next to “loan”.</p>
+<p>Attention does this mixing. For each token it asks: <em>which other tokens are relevant to me, and how much?</em> Then it rebuilds the token's vector as a weighted blend of what those tokens offer.</p>
+
+<h2>Queries, keys and values</h2>
+<p>Every token's embedding $x$ is multiplied by three <strong>learned</strong> matrices to produce three new vectors:</p>
+<ul>
+  <li><strong>Query</strong> $q = x\,W_Q$: what this token is <em>looking for</em>.</li>
+  <li><strong>Key</strong> $k = x\,W_K$: what this token <em>offers</em>, the label others match against.</li>
+  <li><strong>Value</strong> $v = x\,W_V$: the information it <em>hands over</em> if someone attends to it.</li>
+</ul>
+<p>A query is compared with every key by a <strong>dot product</strong>. A large score means a good match. The scores become weights, and the weights decide how much of each value to blend in. Watch it happen for one token:</p>
+
+<figure class="anim wide" data-anim="attention"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-classroom-attention.webp" alt="A classroom: the child in the middle has a question, and beams of different brightness shine from their thought bubble onto classmates; the brightest, orange beam lands on one of them." width="1024" height="768" loading="lazy">
+    <div>
+      <p>Imagine a classroom. One kid, “bank”, has a question: <em>“what kind of bank am I?”</em> They shine a flashlight around the room.</p>
+      <p>Kids who can help glow brightest: “river” lights up a lot, “the” barely at all. Then “bank” listens to everyone, but <strong>listens hardest to the brightest kids</strong>. Now it knows it's a river bank.</p>
+      <p>Every kid in the class does this at the same time, and nobody may peek at kids who haven't spoken yet.</p>
+    </div>
+  </div>
+</details>
+
+<h2>The whole thing in one line</h2>
+<p>Stack all $n$ tokens as rows of a matrix $X$. Then $Q = XW_Q$, $K = XW_K$, $V = XW_V$, and <em>all</em> the attention in a layer is:</p>
+$$\mathrm{Attention}(Q,K,V)=\mathrm{softmax}\!\left(\frac{QK^\top}{\sqrt{d_k}}+M\right)V$$
+<p class="math-note">Vaswani et al., 2017, “Attention Is All You Need”. $d_k$ is the length of each query/key vector.</p>
+<ol class="steps">
+  <li>$QK^\top$ is an $n \times n$ table: row $i$ holds token $i$'s score against every token $j$.</li>
+  <li>Dividing by $\sqrt{d_k}$ keeps those scores in a sensible range (more below).</li>
+  <li>$M$ is the <strong>causal mask</strong>: $0$ where $j \le i$ and $-\infty$ where $j &gt; i$. Since $e^{-\infty} = 0$, future tokens get exactly zero weight. A decoder LLM generates text left to right, so it must never peek at the words it's about to predict.</li>
+  <li><strong>softmax</strong> is applied to each row, so every token's weights are positive and sum to 1.</li>
+  <li>Multiplying by $V$ gives each token its new vector: a weighted average of the values.</li>
+</ol>
+
+<details class="eli5">
+  <summary>Explain like I'm 5: query, key, value</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-qkv-library.webp" alt="A child with a magnifying glass in front of shelves of boxes with coloured tags; the best-matching box glows and opens, and its contents float out." width="1024" height="768" loading="lazy">
+    <div>
+      <p>You walk into a library with a <strong>question</strong> (the query). Every box has a <strong>label</strong> on the front (the key). The <strong>stuff inside</strong> is the value.</p>
+      <p>You compare your question with every label. Boxes whose labels match well open wide, poor matches open just a crack. You walk out with a mix of everything, <strong>mostly from the best-matching boxes</strong>.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Why divide by √d<sub>k</sub>?</h2>
+<p>Suppose the numbers inside $q$ and $k$ are roughly independent with mean 0 and variance 1. Their dot product adds up $d_k$ such products, so its variance is about $d_k$ and its typical size is about $\sqrt{d_k}$. With $d_k = 128$, scores of ±11 are routine.</p>
+<p>Softmax is very sensitive to big gaps between scores: it collapses to almost <strong>one-hot</strong>, putting nearly all weight on one token. Then the gradients for every other token almost vanish, and learning stalls. Dividing by $\sqrt{d_k}$ brings the variance back to about 1, whatever the vector size.</p>
+
+<section class="playground" data-attn-playground aria-labelledby="pg">
+  <h3 id="pg">Try it: attention weights for any token</h3>
+  <p>Pick a query token. Then switch off the √d<sub>k</sub> scaling and raise $d_k$ to watch the softmax saturate.</p>
+</section>
+
+<h2>Worked example (by hand)</h2>
+<p>Three tokens, $d_k = 2$. The third token's query is $q = [1, 2]$. The keys are $k_1 = [1,0]$, $k_2 = [0,1]$, $k_3 = [1,1]$, and the values are the same vectors, $v_i = k_i$.</p>
+<ol class="steps">
+  <li><strong>Scores:</strong> $q\cdot k_1 = 1$, $q\cdot k_2 = 2$, $q\cdot k_3 = 1+2 = 3$.</li>
+  <li><strong>Scale</strong> by $\sqrt{2} \approx 1.414$: $[0.71,\ 1.41,\ 2.12]$.</li>
+  <li><strong>Softmax:</strong> $e^{0.71} \approx 2.03$, $e^{1.41} \approx 4.11$, $e^{2.12} \approx 8.34$. The sum is $14.48$, so the weights are $[0.14,\ 0.28,\ 0.58]$.</li>
+  <li><strong>Blend the values:</strong> $0.14\,[1,0] + 0.28\,[0,1] + 0.58\,[1,1] = [0.72,\ 0.86]$</li>
+</ol>
+
+<section class="card" aria-labelledby="ft">
+  <div class="card-label" id="ft">Your turn · faded example</div>
+  <p>Same keys and values as above, but a new query $q = [2, 0]$. Fill in each step.</p>
+  <ol class="steps">
+    <li>Raw score $q\cdot k_2 =$ <span class="blank" data-answer="0" data-tol="0.001" data-hint="Multiply matching entries and add: 2·0 + 0·1."></span></li>
+    <li>Scaled score $q\cdot k_1/\sqrt{2} =$ <span class="blank" data-answer="1.41" data-tol="0.011" data-hint="q·k₁ = 2, and 2 / 1.414 ≈ ?"></span> (and $q\cdot k_3/\sqrt2$ is the same)</li>
+    <li>Weight on token 2, $w_2 =$ <span class="blank" data-answer="0.11" data-tol="0.011" data-hint="e^0 = 1 and e^1.41 ≈ 4.11, so w₂ = 1 / (4.11 + 1 + 4.11)."></span></li>
+    <li>First entry of the output $=$ <span class="blank" data-answer="0.89" data-tol="0.015" data-hint="w₁ = w₃ ≈ 0.446; only v₁ and v₃ have a 1 in the first entry."></span></li>
+  </ol>
+</section>
+
+<div class="why"><strong>Why this matters later:</strong> every token scores every other token, so a sequence of $n$ tokens needs $n^2$ scores, in every head of every layer. At 1,000 tokens that's a million scores; at 100,000 tokens, ten billion. This quadratic cost is why <strong>KV caching</strong> (M1.5) and <strong>FlashAttention</strong> (M5.4) exist. Attention by itself also ignores word order, which is why we add <strong>positional encodings</strong> (M1.3). And real models run many attentions in parallel, which is <strong>multi-head attention</strong>, coming up next in M1.2.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">Explain to a friend what the query, key and value are for, and what the softmax does.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Each token makes a query (what it's looking for), a key (what it offers to others) and a value (what it passes on). A token's query is dot-producted with every key to get relevance scores, and softmax turns those scores into positive weights that sum to 1. The token's new vector is the weighted average of all the values.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">For a sequence of $n$ tokens, what is the shape of the score matrix $QK^\top$?</p>
+    <ol class="q-src">
+      <li>$n \times n$</li>
+      <li>$n \times d_k$</li>
+      <li>$d_k \times d_k$</li>
+      <li>$n \times 1$</li>
+    </ol>
+    <div class="q-explain">$Q$ is $n \times d_k$ and $K^\top$ is $d_k \times n$, so the product is $n \times n$: one score for every (query, key) pair. That's the source of the quadratic cost.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why are scores divided by $\sqrt{d_k}$?</p>
+    <ol class="q-src">
+      <li>To make the computation faster</li>
+      <li>To make the attention weights sum to 1</li>
+      <li>To keep the scores' variance near 1, so softmax doesn't saturate and gradients keep flowing</li>
+      <li>To turn query and key into unit vectors</li>
+    </ol>
+    <div class="q-explain">A dot product of $d_k$ random unit-variance entries has variance $\approx d_k$. Scaling restores variance ≈ 1. Summing to 1 is softmax's job, not the scaling's.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What does the causal mask do in a decoder-only LLM?</p>
+    <ol class="q-src">
+      <li>Randomly drops some attention weights during training</li>
+      <li>Sets the scores for <em>future</em> tokens to $-\infty$, so their weights become exactly 0</li>
+      <li>Removes the first token from the sequence</li>
+      <li>Forces each token to attend only to itself</li>
+    </ol>
+    <div class="q-explain">The model predicts the next token, so it must not see it. With $-\infty$ scores, $e^{-\infty}=0$ and the future gets no weight. Random dropping is dropout, a different thing.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Where do $W_Q$, $W_K$ and $W_V$ come from?</p>
+    <ol class="q-src">
+      <li>Engineers design them by hand</li>
+      <li>They are recomputed from each input sentence</li>
+      <li>They are the embedding table</li>
+      <li>They are learned parameters, trained by gradient descent along with the rest of the model</li>
+    </ol>
+    <div class="q-explain">They're ordinary weight matrices, fixed after training. What changes with the input are the vectors $q$, $k$, $v$ they produce, and therefore the attention weights.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Attention rebuilds each token's vector as a <strong>weighted average of values</strong>, using weights that depend on the context.</li>
+    <li>The weights come from a <strong>softmax</strong> over query·key scores, scaled by $1/\sqrt{d_k}$.</li>
+    <li>$W_Q, W_K, W_V$ are <strong>learned</strong>; $q, k, v$ and the weights change with every input.</li>
+    <li>Decoder LLMs use a <strong>causal mask</strong> so tokens can't see the future.</li>
+    <li>Cost grows as $n^2$ in sequence length, which drives a lot of later optimization work.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Python</div>
+    <p>Implement softmax, scaled dot-product attention and the causal mask in NumPy, check them against PyTorch, and plot an attention heatmap. About 25 minutes, free, runs in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="m1-1-attention.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m1-1-a","front":"What problem does attention solve?","back":"It lets each token's vector be updated with information from other tokens, so its meaning depends on context (river <em>bank</em> vs <em>bank</em> loan)."},
+  {"id":"m1-1-b","front":"What are the roles of the query, key and value?","back":"Query: what a token is looking for. Key: what a token offers for matching. Value: the information it passes on. Scores come from query·key; the output is a weighted sum of values."},
+  {"id":"m1-1-c","front":"Write the scaled dot-product attention formula.","back":"$\\mathrm{softmax}\\left(\\frac{QK^\\top}{\\sqrt{d_k}} + M\\right)V$, with softmax applied row by row and $M$ the causal mask."},
+  {"id":"m1-1-d","front":"Why divide attention scores by $\\sqrt{d_k}$?","back":"A dot product of $d_k$ unit-variance entries has variance ≈ $d_k$. Scaling restores variance ≈ 1 so softmax doesn't saturate (go one-hot) and gradients don't vanish."},
+  {"id":"m1-1-e","front":"What does the causal mask do, and how?","back":"It stops each token attending to future tokens by adding $-\\infty$ to those scores, so after softmax their weights are exactly 0."},
+  {"id":"m1-1-f","front":"How does attention's cost scale with sequence length $n$, and why?","back":"$O(n^2)$: every token scores every other token, giving an $n \\times n$ score matrix per head per layer."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/attention.js"></script>
+<script src="../assets/js/anims/attention-playground.js"></script>
+</body>
+</html>

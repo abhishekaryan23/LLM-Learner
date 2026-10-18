@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="p2-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gradient descent · LLMs, Animated</title>
+<meta name="description" content="How every neural network, LLMs included, learns: feel the slope, step downhill, repeat. With an interactive learning-rate playground.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Gradient descent</h1>
+<div class="lesson-meta"><span data-mins></span><span>Needs: what a derivative is</span></div>
+<p class="lede">Every model in this course learns the same way, from a two-parameter line to a trillion-parameter LLM: <strong>feel the slope, take a small step downhill, repeat.</strong> That loop is gradient descent.</p>
+
+<div class="cover"><img src="../assets/img/cover-p2.webp" alt="Illustration: a glowing ball rolling down a winding path into the lowest valley of a hilly landscape." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain what a loss function is and why training means <em>minimising</em> it.</li>
+    <li>Compute one gradient-descent step by hand.</li>
+    <li>Predict what a too-small, good or too-large learning rate will do.</li>
+    <li>Describe the gradient in several dimensions, and why we use mini-batches.</li>
+  </ul>
+</section>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Nudging a parameter <em>up</em> a little makes the model's error go <em>up</em>. To reduce the error you should…</p>
+    <ol class="q-src">
+      <li>Increase the parameter even more</li>
+      <li>Decrease the parameter a little</li>
+      <li>Leave it alone, since error can't be reduced that way</li>
+      <li>Set the parameter to zero</li>
+    </ol>
+    <div class="q-explain">If "up" makes things worse, "down" makes them better, at least for a small step. That one idea is the whole algorithm.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">What usually happens if the step size ("learning rate") is far too large?</p>
+    <ol class="q-src">
+      <li>Training is slow but very stable</li>
+      <li>The loss bounces around or blows up</li>
+      <li>The model memorises the training data</li>
+      <li>Nothing. Step size doesn't matter.</li>
+    </ol>
+    <div class="q-explain">Big steps overshoot the bottom of the valley, land higher on the other side, and can keep getting worse. You'll make this happen yourself in the playground below.</div>
+  </div>
+</section>
+
+<h2>Training = finding the bottom of a landscape</h2>
+<p>A model is a function with adjustable numbers inside it, its <strong>parameters</strong>. We'll call them $\theta$ (theta). A <strong>loss function</strong> $L(\theta)$ scores how wrong the model is on the training data for a given setting of $\theta$: lower is better. Training means finding the $\theta$ that makes $L$ as small as possible.</p>
+<p>With one parameter the loss is a curve; with two it's a landscape of hills and valleys; with an LLM it's a "landscape" in billions of dimensions. We can't look at all of it. We can only evaluate the loss, and its slope, <strong>right where we are</strong>.</p>
+<p class="math-note">Rusty on derivatives? Lesson P1.3 <em>Derivatives &amp; the chain rule</em> (coming soon) covers them. For now: the derivative $\frac{dL}{d\theta}$ is the slope of the curve at a point.</p>
+
+<h2>The slope points uphill, so step the other way</h2>
+<p>If the slope $\frac{dL}{d\theta}$ is positive, increasing $\theta$ increases the loss, so we decrease $\theta$. If it's negative, we increase $\theta$. Both cases are one rule:</p>
+$$\theta \;\leftarrow\; \theta \;-\; \eta\,\frac{dL}{d\theta}$$
+<p>$\eta$ (eta) is the <strong>learning rate</strong>, a small positive number that scales the step. Watch it work:</p>
+
+<figure class="anim wide" data-anim="gradient-descent"></figure>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-blind-hiker.webp" alt="A blindfolded hiker on a foggy hill feeling the slope with one foot and stepping downhill toward a cabin in the valley." width="1024" height="768" loading="lazy">
+    <div>
+      <p>Imagine you're on a hill in thick fog, wearing a blindfold, and your house is at the very bottom of the valley.</p>
+      <p>You can't see the house. But you <strong>can feel which way the ground tilts</strong> under your feet. So you take a small step downhill, feel again, step again… and eventually you're home.</p>
+      <p>Feeling the tilt = the <strong>slope</strong>. The size of your step = the <strong>learning rate</strong>.</p>
+    </div>
+  </div>
+</details>
+
+<h3>Worked example</h3>
+<p>Loss $L(\theta) = \theta^2$, so the slope is $\frac{dL}{d\theta} = 2\theta$. Start at $\theta = 2$ with $\eta = 0.1$.</p>
+<ol class="steps">
+  <li>Slope: $2 \times 2 = 4$</li>
+  <li>Step: $-\eta \times \text{slope} = -0.1 \times 4 = -0.4$</li>
+  <li>New $\theta$: $2 - 0.4 = 1.6$</li>
+  <li>Loss went from $2^2 = 4$ down to $1.6^2 = 2.56$ ✓</li>
+</ol>
+
+<h3>Your turn (faded example)</h3>
+<p>Now $L(\theta) = (\theta - 3)^2$, whose slope is $2(\theta - 3)$. Start at $\theta = 1$ with $\eta = 0.25$.</p>
+<ol class="steps">
+  <li>Slope at $\theta = 1$: <span class="blank" data-answer="-4" data-tol="0.001" data-hint="Plug θ = 1 into 2(θ − 3)."></span></li>
+  <li>Step $= -\eta \times \text{slope}$: <span class="blank" data-answer="1" data-tol="0.001" data-hint="−0.25 × (−4). Two negatives make a positive."></span></li>
+  <li>New $\theta$: <span class="blank" data-answer="2" data-tol="0.001" data-hint="Old θ plus the step."></span></li>
+  <li>New loss $(\theta - 3)^2$: <span class="blank" data-answer="1" data-tol="0.001" data-hint="It started at (1 − 3)² = 4."></span></li>
+</ol>
+
+<h2>The learning rate: the most important knob</h2>
+<p>For $L = \theta^2$ the update simplifies to $\theta \leftarrow (1 - 2\eta)\,\theta$. Each step multiplies the distance to the bottom by $(1 - 2\eta)$, which gives four regimes:</p>
+<ul>
+  <li><strong>Too small</strong> ($\eta$ near 0): the factor is close to 1, so progress crawls.</li>
+  <li><strong>Good</strong> ($0 &lt; \eta &lt; 0.5$): the factor is between 0 and 1, a smooth slide to the bottom.</li>
+  <li><strong>Overshooting</strong> ($0.5 &lt; \eta &lt; 1$): the factor is negative, so $\theta$ hops from side to side but still shrinks.</li>
+  <li><strong>Diverging</strong> ($\eta &gt; 1$): the factor's size exceeds 1, so every hop lands higher. Training explodes.</li>
+</ul>
+
+<div class="playground" id="gd-playground">
+  <h3>Playground: tune the learning rate</h3>
+  <p class="math-note" style="margin:0">Gradient descent on $L(\theta) = \theta^2$, starting at $\theta = 2.5$. Pick a preset or drag the slider, then step.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Learning rate η = <output>0.30</output></span>
+      <input type="range" min="0.01" max="1.1" step="0.01" value="0.3" aria-describedby="gd-hint">
+    </label>
+    <div class="pg-buttons">
+      <button type="button" class="btn" data-act="step">Step</button>
+      <button type="button" class="btn btn-primary" data-act="run">Run 20 steps</button>
+      <button type="button" class="btn btn-ghost" data-act="reset">Reset</button>
+    </div>
+  </div>
+  <div class="chips" role="group" aria-label="Learning-rate presets" style="margin-top:12px">
+    <button type="button" class="chip" data-eta="0.02" aria-pressed="false">Too small · 0.02</button>
+    <button type="button" class="chip" data-eta="0.3" aria-pressed="false">Good · 0.3</button>
+    <button type="button" class="chip" data-eta="0.85" aria-pressed="false">Overshoot · 0.85</button>
+    <button type="button" class="chip" data-eta="1.05" aria-pressed="false">Diverge · 1.05</button>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+  <p class="pg-hint" id="gd-hint" style="margin:4px 0 0"></p>
+</div>
+
+<details class="eli5">
+  <summary>Explain like I'm 5: learning rate</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-learning-rate.webp" alt="Three panels: a snail creeping down a slope, a child walking steadily down into a valley, and a child making a huge leap right over the valley." width="1024" height="768" loading="lazy">
+    <div>
+      <p>A <strong>snail</strong> takes teeny steps: it will get to the bottom… next year.</p>
+      <p>A kid taking <strong>giant leaps</strong> sails right over the bottom to the other side, maybe even higher up.</p>
+      <p>You want <strong>kid-sized steps</strong>: big enough to get there soon, small enough not to jump past it.</p>
+    </div>
+  </div>
+</details>
+
+<h2>More than one parameter: the gradient</h2>
+<p>With many parameters, we take the slope in each direction separately: the <strong>partial derivatives</strong>. Stacked into a vector, they form the <strong>gradient</strong>:</p>
+$$\nabla L = \left(\frac{\partial L}{\partial \theta_1},\; \frac{\partial L}{\partial \theta_2},\; \dots,\; \frac{\partial L}{\partial \theta_n}\right)$$
+<p>and the update is the same rule, applied to every parameter at once:</p>
+$$\boldsymbol\theta \leftarrow \boldsymbol\theta - \eta\,\nabla L$$
+<p>The gradient points in the direction of <strong>steepest ascent</strong>, and it is always <strong>perpendicular to the contour lines</strong> (lines of equal loss). So $-\nabla L$ is steepest descent. But "steepest downhill" is <em>not</em> the same as "straight toward the minimum":</p>
+
+<figure class="anim">
+  <div class="anim-head"><p class="anim-title">Two parameters: $L(x, y) = x^2 + 10y^2$</p></div>
+  <div class="anim-stage">
+    <svg viewBox="0 0 360 230" role="img" aria-label="Contour lines of a long thin elliptical bowl. Gradient descent starts at the upper left and zig-zags across the narrow valley toward the minimum on the right, while the direct route is a straight dashed line." style="overflow:hidden;max-width:560px;margin:0 auto">
+      <ellipse cx="267.5" cy="115.0" rx="54.7" ry="17.3" class="s-faint"/>
+      <ellipse cx="267.5" cy="115.0" rx="109.3" ry="34.6" class="s-faint"/>
+      <ellipse cx="267.5" cy="115.0" rx="164.0" ry="51.9" class="s-faint"/>
+      <ellipse cx="267.5" cy="115.0" rx="218.7" ry="69.1" class="s-faint"/>
+      <ellipse cx="267.5" cy="115.0" rx="278.9" ry="88.2" class="s-faint"/>
+      <path d="M48.8 60.3 L267.5 115" class="s-blue" stroke-width="2" stroke-dasharray="5 6"/>
+      <path d="M48.8 60.3 L86.0 153.3 L116.8 88.2 L142.4 133.8 L163.7 101.9 L181.3 124.2 L196.0 108.6 L208.1 119.5 L218.2 111.8 L226.6 117.2 L233.5 113.5 L239.3 116.1 L244.1 114.2" class="s-orange" stroke-width="2.5"/>
+      <g class="f-orange"><circle cx="48.8" cy="60.3" r="5"/><circle cx="86.0" cy="153.3" r="3.5"/><circle cx="116.8" cy="88.2" r="3.5"/><circle cx="142.4" cy="133.8" r="3.5"/><circle cx="163.7" cy="101.9" r="3.5"/><circle cx="181.3" cy="124.2" r="3.5"/><circle cx="196.0" cy="108.6" r="3.5"/><circle cx="208.1" cy="119.5" r="3.5"/><circle cx="218.2" cy="111.8" r="3.5"/><circle cx="226.6" cy="117.2" r="3.5"/><circle cx="233.5" cy="113.5" r="3.5"/><circle cx="239.3" cy="116.1" r="3.5"/><circle cx="244.1" cy="114.2" r="3.5"/></g>
+      <circle cx="267.5" cy="115" r="5" class="f-blue"/>
+      <text x="44" y="48" class="t t-sm t-orange">start</text>
+      <text x="267.5" y="140" class="t t-sm t-blue t-mid">minimum</text>
+      <text x="96" y="176" class="t t-sm t-orange">gradient descent path</text>
+      <text x="120" y="70" class="t t-sm t-blue">direct route</text>
+      <text x="14" y="216" class="t t-sm t-muted">grey ellipses = contour lines (equal loss)</text>
+    </svg>
+  </div>
+  <figcaption class="anim-caption">Each step is perpendicular to the contour it starts on. The steep $y$ direction makes the path <strong>zig-zag</strong> while the gentle $x$ direction crawls. Optimizers like Momentum and Adam (lesson M2.3) are designed to fix exactly this.</figcaption>
+</figure>
+
+<h2>Stochastic and mini-batch gradient descent</h2>
+<p>The loss is an <em>average over the training data</em>: $L(\theta) = \frac{1}{N}\sum_{i=1}^{N} \ell(\theta; x_i)$. Computing the exact gradient means a pass over all $N$ examples, which is hopeless when $N$ is trillions of tokens.</p>
+<p>Instead, each step uses a small random <strong>mini-batch</strong> of $B$ examples and follows <em>its</em> gradient. That's an unbiased but noisy estimate of the true gradient. It's far cheaper, so you can take vastly more steps, and the noise even helps the optimizer escape bad flat regions. One full pass through the data is an <strong>epoch</strong>. The extreme case $B = 1$ is classic <strong>stochastic gradient descent (SGD)</strong>; in practice "SGD" is often used for the mini-batch version too.</p>
+
+<div class="why"><strong>Why this matters for LLMs:</strong> pretraining an LLM is mini-batch gradient descent on the next-token loss, over billions of parameters, with batches of millions of tokens. The gradient comes from <strong>backpropagation</strong> (P2.3). The step rule is usually <strong>AdamW</strong> (M2.3), a smarter variant that adapts the step per parameter, but it is still "go against the gradient". And the learning rate, with its warm-up and decay schedule, is one of the most carefully tuned numbers in the whole training run.</div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">In the animation, the learning rate never changed, yet the steps got smaller near the bottom. Why?</p>
+  <div class="model-answer"><strong>Model answer:</strong> The step is $\eta$ times the slope, and the slope shrinks toward zero as you approach the minimum. So even with a fixed $\eta$, the steps shrink automatically and the parameter settles at the bottom.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Which is the gradient-descent update rule?</p>
+    <ol class="q-src">
+      <li>$\theta \leftarrow \theta + \eta\,\nabla L$</li>
+      <li>$\theta \leftarrow \eta\,\nabla L$</li>
+      <li>$\theta \leftarrow \theta - \eta\,\nabla L$</li>
+      <li>$\theta \leftarrow \theta - \nabla L / \eta$</li>
+    </ol>
+    <div class="q-explain">Subtract the gradient (it points uphill), scaled by the learning rate. Adding it would be gradient <em>ascent</em>.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">On $L(\theta) = \theta^2$ with learning rate $\eta = 0.75$, what does gradient descent do?</p>
+    <ol class="q-src">
+      <li>Converges smoothly from one side</li>
+      <li>Hops from side to side, but still converges</li>
+      <li>Bounces between the same two points forever</li>
+      <li>Diverges</li>
+    </ol>
+    <div class="q-explain">The update is $\theta \leftarrow (1 - 2 \times 0.75)\,\theta = -0.5\,\theta$: the sign flips each step (hopping) while the size halves (converging).</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">With two or more parameters, the negative gradient $-\nabla L$ points…</p>
+    <ol class="q-src">
+      <li>Steepest downhill, perpendicular to the contour line you're on</li>
+      <li>Straight at the minimum, always</li>
+      <li>Along the contour line, keeping the loss constant</li>
+      <li>In a random direction that's correct on average</li>
+    </ol>
+    <div class="q-explain">The gradient is perpendicular to contours. In a stretched valley that's often <em>not</em> toward the minimum, hence the zig-zag.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why do we train on mini-batches rather than the full dataset each step?</p>
+    <ol class="q-src">
+      <li>Mini-batch gradients are more accurate</li>
+      <li>Backpropagation only works on small batches</li>
+      <li>It completely prevents overfitting</li>
+      <li>Each step is far cheaper, so we can take many more steps; the noisy estimate is good enough</li>
+    </ol>
+    <div class="q-explain">A mini-batch gives an unbiased, noisy estimate of the full gradient at a tiny fraction of the cost. Many cheap, slightly noisy steps beat a few perfect, expensive ones.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Training = minimising a <strong>loss</strong> $L(\theta)$ over the model's parameters.</li>
+    <li>The gradient points uphill; step against it: $\theta \leftarrow \theta - \eta\,\nabla L$.</li>
+    <li>The <strong>learning rate</strong> $\eta$ decides between crawling, converging, oscillating and diverging.</li>
+    <li>In many dimensions, $-\nabla L$ is steepest descent, perpendicular to contours, so narrow valleys cause zig-zags.</li>
+    <li><strong>Mini-batch</strong> gradients are cheap, noisy estimates. Every LLM is trained this way.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Colab</div>
+    <p>Code it yourself in about 20 minutes: implement the update loop, break it with a bad learning rate, watch the 2-D zig-zag, and fit a line with mini-batch SGD. Runs free in your browser; nothing to install.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="p2-2-gradient-descent.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"p2-2-a","front":"Write the gradient-descent update rule and name each symbol.","back":"$\\theta \\leftarrow \\theta - \\eta\\,\\nabla L$: parameters $\\theta$, learning rate $\\eta$, gradient of the loss $\\nabla L$ (points uphill, so we subtract it)."},
+  {"id":"p2-2-b","front":"What does the derivative / gradient tell gradient descent?","back":"The local slope: which direction increases the loss and how steeply. Gradient descent moves the opposite way."},
+  {"id":"p2-2-c","front":"What goes wrong with a learning rate that is too small? Too large?","back":"Too small: very slow progress. Too large: overshoots the minimum, oscillates, and can diverge (loss explodes)."},
+  {"id":"p2-2-d","front":"On $L=\\theta^2$, GD gives $\\theta \\leftarrow (1-2\\eta)\\theta$. For which $\\eta$ does it converge?","back":"$0 < \\eta < 1$ (so $|1-2\\eta| < 1$). Above 0.5 it oscillates while converging; $\\eta = 1$ bounces forever; $\\eta > 1$ diverges."},
+  {"id":"p2-2-e","front":"How does the gradient relate to contour lines, and why can GD zig-zag?","back":"The gradient is perpendicular to the contours (steepest ascent). In a long narrow valley, steepest descent points across the valley rather than along it, so steps bounce side to side."},
+  {"id":"p2-2-f","front":"What is mini-batch (stochastic) gradient descent and why use it?","back":"Each step uses the gradient on a small random batch instead of all the data: a cheap, unbiased but noisy estimate, allowing many more steps. One pass over the data = one epoch."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/gradient-descent.js"></script>
+<script src="../assets/js/anims/gd-playground.js"></script>
+</body>
+</html>

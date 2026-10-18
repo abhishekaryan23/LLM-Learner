@@ -1,0 +1,32 @@
+name: Commit course images
+
+# Downloads any image listed in course/assets/img/sources.json that isn't committed yet,
+# converts it to WebP and commits it to the branch that triggered the run.
+on:
+  push:
+    paths: ["course/assets/img/sources.json", ".github/workflows/fetch-images.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch and compress
+        run: |
+          pip install --quiet pillow
+          python .github/scripts/fetch_images.py course/assets/img
+      - name: Commit new images
+        run: |
+          git add course/assets/img/*.webp
+          if git diff --cached --quiet; then echo "No new images."; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Add course illustrations (fetched from OpenArt, WebP)"
+          git push

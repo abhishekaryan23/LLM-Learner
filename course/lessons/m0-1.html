@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m0-1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How memory works · LLMs, Animated</title>
+<meta name="description" content="Why you forget, and the research-backed techniques this course uses so you don't.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>How memory works</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 1 of the course</span></div>
+<p class="lede">You will forget most of what you read today, and that's normal. This lesson shows you <em>why</em>, and the handful of techniques that reliably beat forgetting. Every lesson in this course is built around them.</p>
+
+<div class="cover"><img src="../assets/img/cover-m0.webp" alt="Illustration: a head drawn as a greenhouse, with small plants growing inside and a watering can." width="1200" height="800"></div>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Describe the forgetting curve and what flattens it.</li>
+    <li>Explain why <em>recalling</em> beats <em>re-reading</em>.</li>
+    <li>Name the five techniques this course uses, and where you'll meet each one.</li>
+  </ul>
+</section>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Answer before reading on. Getting it wrong is part of the method (you'll see why).</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Which study method gives the best recall one week later?</p>
+    <ol class="q-src">
+      <li>Re-reading the text four times</li>
+      <li>Reading it once, then testing yourself three times</li>
+      <li>Reading once and highlighting the key sentences</li>
+      <li>Reading once, very slowly</li>
+    </ol>
+    <div class="q-explain">In Roediger &amp; Karpicke's 2006 study, students who read once and then <em>recalled</em> three times remembered about 61% after a week. Students who re-read four times remembered about 40%.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You have 3 hours to prepare for an exam in two weeks. Which schedule wins?</p>
+    <ol class="q-src">
+      <li>3 hours the night before the exam</li>
+      <li>3 hours today, while it's fresh</li>
+      <li>1 hour today, 1 hour in 3 days, 1 hour in a week</li>
+      <li>It doesn't matter; total time is what counts</li>
+    </ol>
+    <div class="q-explain">This is the <strong>spacing effect</strong>, one of the most replicated results in psychology. The same total time, spread out, beats a single cram.</div>
+  </div>
+</section>
+
+<h2>Your brain is designed to forget</h2>
+<p>New information first lands in <strong>working memory</strong>, a tiny scratchpad that holds a few items for seconds. To last, it must be <strong>encoded</strong> into long-term memory and later <strong>retrieved</strong>. Most of what we read never makes that trip. That's a feature, not a bug: your brain filters out what it never needs again.</p>
+<p>So the brain is constantly asking: <em>"Did I need this again?"</em> Each time you pull a memory back out, you answer <em>yes</em>, and the brain makes it sturdier and slower to fade.</p>
+
+<figure class="anim wide" data-anim="forgetting-curve"></figure>
+
+<p class="math-note">The curves are an illustrative model, $R(t) = 0.2 + 0.8\,e^{-t/S}$, where each review raises the stability $S$. Real numbers vary by person and material; the shape is what holds up across studies.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-leaky-bucket.webp" alt="A child carrying a leaky bucket of water toward a tap to refill it." width="1024" height="768" loading="lazy">
+    <div>
+      <p>Your memory is like a <strong>bucket with tiny holes</strong>. When you learn something, the bucket is full. Then it slowly drips out.</p>
+      <p>Every time you <strong>remember it on your own</strong>, you refill the bucket <em>and</em> plug a few holes. So it drips slower next time, and you can wait longer before the next refill.</p>
+    </div>
+  </div>
+</details>
+
+<h2>Recalling is the workout, re-reading is watching the workout</h2>
+<p>Re-reading feels productive because the text looks familiar. But <strong>familiarity is not memory</strong>. The act that strengthens a memory is <em>pulling it out without looking</em>: answering a question, explaining it aloud, sketching the diagram from scratch. Psychologists call this the <strong>testing effect</strong> or <strong>retrieval practice</strong>.</p>
+<p>It feels harder, and that's the point. Robert Bjork calls these <strong>desirable difficulties</strong>: effort during practice that pays off later, even though it makes practice <em>feel</em> worse.</p>
+
+<div class="why"><strong>Why this matters for LLM topics:</strong> ideas like attention, KL divergence or DPO build on each other. If gradient descent has faded by the time you reach RLHF, you'll be re-learning instead of learning. The review deck keeps the foundations fresh.</div>
+
+<h2>The five techniques this course is built on</h2>
+<ol class="steps">
+  <li><strong>Retrieval practice:</strong> quizzes and "explain it back" boxes in every lesson. <em>(Roediger &amp; Karpicke, 2006)</em></li>
+  <li><strong>Spacing:</strong> your <a href="../review.html">Review</a> deck brings cards back after ~1, 3, 7, 16 and 35 days. <em>(Cepeda et al., 2006)</em></li>
+  <li><strong>Interleaving:</strong> review sessions shuffle topics, so you practise <em>choosing</em> the right idea, not just repeating one. <em>(Rohrer &amp; Taylor, 2007)</em></li>
+  <li><strong>Dual coding:</strong> every hard idea gets an animation <em>and</em> words, with labels on the picture, not far away. <em>(Paivio; Mayer's multimedia principles)</em></li>
+  <li><strong>Elaboration:</strong> "why does this work?" prompts and ELI5 analogies connect new ideas to things you already know. <em>(Dunlosky et al., 2013)</em></li>
+</ol>
+<p>Two more small habits you'll see: a <strong>warm-up guess</strong> before each lesson (pre-testing primes your attention; Richland et al., 2009) and a <strong>confidence rating</strong> on quiz answers, so you learn where your sense of "I know this" can be trusted.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5: spacing</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-spaced-plant.webp" alt="Five scenes of a child watering the same plant, which grows taller and sturdier each time." width="1024" height="768" loading="lazy">
+    <div>
+      <p>Watering a plant with a whole bucket once drowns it. A little water today, a little in a few days, then a little next week, and it grows strong roots.</p>
+      <p>Learning is the same: <strong>small sips, further and further apart.</strong></p>
+    </div>
+  </div>
+</details>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in one or two sentences</div>
+  <p class="q-prompt">Why does a quiz help you remember more than re-reading, even if you get the quiz wrong?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Pulling information out of memory (retrieval) strengthens it far more than seeing it again. A failed attempt still helps, because it makes the correct answer stick when you see it, as long as you get feedback.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">On the forgetting curve, what changes after each successful review?</p>
+    <ol class="q-src">
+      <li>Nothing. Memory always fades at the same speed.</li>
+      <li>Memory stops fading entirely.</li>
+      <li>Memory jumps back up <em>and</em> fades more slowly afterwards.</li>
+      <li>Memory fades faster, because you're overloading it.</li>
+    </ol>
+    <div class="q-explain">Each successful retrieval increases the memory's <em>stability</em>, so the next drop is gentler. That's why gaps between reviews can safely grow.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which of these is a "desirable difficulty"?</p>
+    <ol class="q-src">
+      <li>Sketching a diagram from memory before checking the original</li>
+      <li>Reading in a noisy café</li>
+      <li>Studying while tired</li>
+      <li>Using a smaller font</li>
+    </ol>
+    <div class="q-explain">Desirable difficulties make you <em>do the mental work</em> of retrieving or generating. Noise and fatigue are just difficulties.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why does the Review deck mix cards from different lessons?</p>
+    <ol class="q-src">
+      <li>It's simpler to build that way</li>
+      <li>To make sessions shorter</li>
+      <li>Because older cards are more important</li>
+      <li>Interleaving forces you to pick the right idea, which improves transfer</li>
+    </ol>
+    <div class="q-explain">When every question is about the same topic, you already know <em>which</em> tool to use. Mixing them makes you practise that choice, which is the hard part in real work.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Forgetting is fast and normal. Each successful <strong>recall</strong> resets it and slows it down.</li>
+    <li><strong>Recall &gt; re-read.</strong> Effortful retrieval is what builds memory.</li>
+    <li><strong>Space it out.</strong> Same time, spread across days, beats cramming.</li>
+    <li>Mixing topics (<strong>interleaving</strong>) and pairing words with pictures (<strong>dual coding</strong>) both help.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Adding cards schedules your first spaced review. It takes about a minute a day.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m0-1-a","front":"What does the forgetting curve show?","back":"Memory of new information drops quickly at first, then levels off. Without review, most of it is gone within days."},
+  {"id":"m0-1-b","front":"Retrieval practice vs re-reading: which builds longer-lasting memory, and why?","back":"Retrieval practice. Actively pulling information out of memory strengthens it; re-reading only builds a feeling of familiarity."},
+  {"id":"m0-1-c","front":"What is the spacing effect?","back":"The same total study time spread over increasing gaps (e.g. 1, 3, 7 days) produces much better long-term retention than one block."},
+  {"id":"m0-1-d","front":"What is a 'desirable difficulty'? Give an example.","back":"Effort during practice that improves long-term learning, e.g. recalling or sketching from memory before checking, or mixing (interleaving) topics."},
+  {"id":"m0-1-e","front":"Why does a pre-test (guessing before a lesson) help, even when you get it wrong?","back":"It primes attention for the answer and makes the correct information stick better when you meet it (Richland et al., 2009)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/forgetting-curve.js"></script>
+</body>
+</html>

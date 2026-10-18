@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m0-2">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The learning loop · LLMs, Animated</title>
+<meta name="description" content="The six-stage loop every lesson follows, and how to get the most from animations, ELI5s and Colab notebooks.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>The learning loop</h1>
+<div class="lesson-meta"><span data-mins></span></div>
+<p class="lede">Every lesson in this course runs the same loop: guess, learn, explain, quiz, lock in, review. Once you know the loop, you can move through any lesson, from gradient descent to DPO, on autopilot and spend your energy on the ideas.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Name the six stages of a lesson and what each one is for.</li>
+    <li>Use animations, ELI5 boxes and Colab notebooks the way they were designed to be used.</li>
+    <li>Plan a study session that fits in 20–40 minutes.</li>
+  </ul>
+</section>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">An animation explains a 6-step process. What's the best way to watch it?</p>
+    <ol class="q-src">
+      <li>Let it autoplay start to finish, twice</li>
+      <li>Step through it yourself, predicting each next step before you tap</li>
+      <li>Skip it and read the text instead</li>
+      <li>Watch it at double speed to save time</li>
+    </ol>
+    <div class="q-explain">Controlling the pace (Mayer's <strong>segmenting principle</strong>) and predicting before you see each step (a mini retrieval attempt) both help. Autoplay is there for a quick recap.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">You open the course after two days away. What should you do first?</p>
+    <ol class="q-src">
+      <li>Clear your due review cards, then start the next lesson</li>
+      <li>Re-read the last lesson from the top</li>
+      <li>Start the next lesson; reviews can wait until the weekend</li>
+      <li>Skip ahead to the topic you find most interesting</li>
+    </ol>
+    <div class="q-explain">Reviews are scheduled for the moment they help most: just as you're about to forget. Doing them first also warms up the ideas the next lesson builds on.</div>
+  </div>
+</section>
+
+<h2>Six stages, one loop</h2>
+<p>Step through the animation below. Before each tap, try to predict what the next stage will be.</p>
+
+<figure class="anim wide" data-anim="learning-loop"></figure>
+
+<h2>How to use each part</h2>
+<h3>Animations</h3>
+<p>Animations are interactive diagrams, not videos. Use <strong>◀ ▶</strong> (or swipe on a phone or iPad) to move one idea at a time, the slider to scrub, and the dots to jump. <strong>Pause and predict</strong> before you tap "next": the small effort of guessing is what turns watching into learning. If your device has "reduce motion" switched on, steps change instantly instead of animating.</p>
+
+<h3>Explain like I'm 5</h3>
+<p>Hard topics have a dashed <span style="color:var(--warm);font-weight:600">Explain like I'm 5</span> box with an everyday analogy and an illustration. Open it <em>after</em> trying the real explanation. Analogies are scaffolding: they help you hang the precise idea somewhere, but every analogy breaks eventually. The lesson text tells you where.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5: why a loop?</summary>
+  <div class="eli5-body">
+    <p>Learning to ride a bike isn't "watch someone ride, once." You try, wobble, get a tip, try again tomorrow, and a week later you just <em>can</em>. Every lesson here is one lap of that: try → see how → say it yourself → test → come back later.</p>
+  </div>
+</details>
+
+<h3>Worked, then faded examples</h3>
+<p>Math-heavy lessons show one example fully solved, then a near-identical one with a few steps left blank for you. This <strong>fading</strong> moves you from studying a solution to producing one, and it's gentler than a blank page.</p>
+
+<h3>Colab notebooks (optional)</h3>
+<p>Some lessons have an <strong>Open in Colab</strong> button. It opens a Python notebook in Google Colab, free in your browser with no install. Each notebook has small exercises with <code># TODO</code> markers, check cells that tell you if you got it right, and full solutions at the bottom. They're optional. The course works without them, but writing ten lines of code is the fastest way to discover what you <em>didn't</em> understand.</p>
+
+<div class="why"><strong>A good session (20–40 min):</strong> ① clear due reviews (5–10 min) → ② one new lesson (10–15 min) → ③ optionally its notebook. One or two lessons a day beats a weekend marathon: sleep is when the brain consolidates new memories.</div>
+
+<h2>Prerequisites: take only what you need</h2>
+<p>The <strong>Prerequisites</strong> track (math, ML basics, neural nets, PyTorch) is there so nobody gets stuck later. If a topic is already solid for you, skim its key takeaways and do its quiz. If you ace the quiz, move on. If not, that lesson is exactly where your time pays off.</p>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back</div>
+  <p class="q-prompt">From memory: list the six stages of a lesson, and say in a few words why the quiz asks for your confidence.</p>
+  <div class="model-answer"><strong>Model answer:</strong> Guess → Learn → Explain → Quiz → Lock in → Review. The confidence rating trains <em>calibration</em>: you find out whether your feeling of "I know this" matches reality, and shaky answers get reviewed sooner.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">What is the main purpose of the "Explain it back" box?</p>
+    <ol class="q-src">
+      <li>To grade you</li>
+      <li>To save notes for later</li>
+      <li>To make you put the idea in your own words and connect it to what you know</li>
+      <li>To slow you down so the lesson lasts longer</li>
+    </ol>
+    <div class="q-explain">That's <strong>elaboration</strong> plus retrieval: generating an explanation exposes gaps that re-reading hides.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">When should you open an ELI5 box?</p>
+    <ol class="q-src">
+      <li>Before reading anything else in the section</li>
+      <li>After attempting the real explanation, as a second angle</li>
+      <li>Only if you're a beginner</li>
+      <li>Never; analogies are inaccurate</li>
+    </ol>
+    <div class="q-explain">Analogies give you a hook, but the precise idea is what you need in practice. Try the real version first, then use the analogy to make it click.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Which plan is closest to the recommended routine?</p>
+    <ol class="q-src">
+      <li>Five lessons every Sunday, no reviews</li>
+      <li>One lesson a day, reviewing only when you feel lost</li>
+      <li>Re-read every lesson twice before moving on</li>
+      <li>Reviews first, then one new lesson, most days</li>
+    </ol>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Every lesson runs the loop <strong>Guess → Learn → Explain → Quiz → Lock in → Review</strong>.</li>
+    <li>Step through animations yourself and <strong>predict before you tap</strong>.</li>
+    <li>ELI5 boxes come <em>after</em> the real explanation; notebooks are optional practice.</li>
+    <li><strong>Reviews first</strong>, then one new lesson, most days.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m0-2-a","front":"Name the six stages of every lesson, in order.","back":"Guess → Learn → Explain → Quiz → Lock in → Review."},
+  {"id":"m0-2-b","front":"What's the best way to watch a step-by-step animation?","back":"Control the pace yourself and predict each next step before you reveal it (segmenting + retrieval)."},
+  {"id":"m0-2-c","front":"Why does the quiz ask how sure you are?","back":"To train calibration: matching your feeling of knowing to reality. Low-confidence answers get reviewed sooner."},
+  {"id":"m0-2-d","front":"What is a 'faded' worked example?","back":"A near-copy of a fully solved example with some steps left blank for you, a bridge from studying a solution to producing one."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/learning-loop.js"></script>
+</body>
+</html>

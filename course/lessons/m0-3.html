@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="m0-3">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Your review routine · LLMs, Animated</title>
+<meta name="description" content="How the spaced-repetition Review deck works, how to grade yourself honestly, and how to make it a five-minute daily habit.">
+<meta name="theme-color" content="#F6F3EC" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111317" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<style>
+  .grade-table { width: 100%; border-collapse: collapse; margin: 16px 0 24px; font-size: .97rem; }
+  .grade-table th, .grade-table td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .grade-table th { font: 600 .82rem/1.2 var(--font-body); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); }
+  .grade-table td:first-child { font-weight: 650; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Your review routine</h1>
+<div class="lesson-meta"><span data-mins></span></div>
+<p class="lede">Five minutes a day in the Review deck is what turns "I read that once" into "I know that." Here's how the deck decides what to show you, how to grade yourself, and how to make it stick as a habit.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how a card's next review date is chosen.</li>
+    <li>Grade a card honestly with Again / Hard / Good / Easy.</li>
+    <li>Set up the course as an app with a daily review cue.</li>
+  </ul>
+</section>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">You recalled a card easily yesterday. When should you see it next?</p>
+    <ol class="q-src">
+      <li>Again today, to be safe</li>
+      <li>Tomorrow, every day is best</li>
+      <li>After a longer gap than last time</li>
+      <li>Never, it's learned</li>
+    </ol>
+    <div class="q-explain">The ideal moment to review is <em>just before</em> you'd forget. After every success that moment moves further away, so the gaps grow.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">You flip a card and realise you had no idea. What's the right move?</p>
+    <ol class="q-src">
+      <li>Tap "Again". It comes back soon, and that's normal.</li>
+      <li>Tap "Good" anyway to keep your streak</li>
+      <li>Delete the card</li>
+      <li>Re-read the whole lesson immediately</li>
+    </ol>
+  </div>
+</section>
+
+<h2>What happens in a review session</h2>
+<p>Open <a href="../review.html">Review</a> (the badge in the top bar shows how many cards are due). Cards from <em>all</em> your lessons are shuffled together, which is interleaving at work. For each one:</p>
+<ol class="steps">
+  <li><strong>Read the question and answer it in your head</strong>, or out loud, or on paper. Commit to an answer before you look.</li>
+  <li><strong>Tap "Show answer"</strong> and compare.</li>
+  <li><strong>Grade yourself honestly.</strong> The grade decides when you'll see the card again.</li>
+</ol>
+
+<table class="grade-table">
+  <thead><tr><th>Grade</th><th>Use it when…</th><th>Next review</th></tr></thead>
+  <tbody>
+    <tr><td style="color:var(--bad)">Again</td><td>You couldn't recall it, or got it wrong.</td><td>In ~10 minutes, then the ladder restarts</td></tr>
+    <tr><td>Hard</td><td>You got there, but it was a real struggle.</td><td>Same rung, a bit sooner</td></tr>
+    <tr><td style="color:var(--good)">Good</td><td>You recalled it with some effort. <em>The normal answer.</em></td><td>Next rung up</td></tr>
+    <tr><td style="color:var(--accent)">Easy</td><td>Instant and effortless.</td><td>Skips a rung</td></tr>
+  </tbody>
+</table>
+
+<figure class="anim wide" data-anim="review-ladder"></figure>
+
+<p>The rungs are about <strong>4 hours, 1, 3, 7, 16, 35 and 90 days</strong>. This expanding schedule follows the spacing research: the best gap grows as the memory gets more stable. Cards you know well quickly drift to monthly visits, so your daily load stays small even after 50 lessons.</p>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <p>Imagine friends you want to stay close to. A new friend you call tomorrow. After a few good chats you call every week, then every month. If you suddenly can't remember their name, you call them soon again! The deck does that calling-schedule for every idea, so you never lose touch.</p>
+  </div>
+</details>
+
+<h2>Grade honestly: the deck only works if you do</h2>
+<p>Tapping "Good" on a card you blanked on doesn't save time. It schedules the card for when you'll have <em>completely</em> forgotten it. "Again" is not failure. Each lapse is just your brain saying "not yet," and the very next recall after a lapse is one of the most valuable moments in learning.</p>
+
+<div class="why"><strong>Tip:</strong> nothing due but want more? The Review page has <strong>Practise early</strong>. It quizzes you on upcoming cards without changing their schedule, so you can't accidentally ruin the spacing.</div>
+
+<h2>Make it automatic</h2>
+<h3>Install it like an app</h3>
+<ul>
+  <li><strong>iPhone / iPad (Safari):</strong> Share → <em>Add to Home Screen</em>.</li>
+  <li><strong>Android (Chrome):</strong> ⋮ menu → <em>Install app</em> (or <em>Add to Home screen</em>).</li>
+  <li><strong>Desktop (Chrome / Edge):</strong> the install icon at the right of the address bar.</li>
+</ul>
+<p>After your first visit the course works <strong>offline</strong>, so reviews work on a plane too.</p>
+<h3>Anchor it to something you already do</h3>
+<p>Habits stick best when tied to an existing cue: "after my morning coffee, I clear my reviews." Keep the bar low: <strong>just the due cards</strong>. Most days that's 2–5 minutes.</p>
+<h3>Your progress lives in this browser</h3>
+<p>Progress and cards are stored only on this device, with no account and no tracking. To move them to another device, use <strong>Export</strong> / <strong>Import</strong> on the Review page.</p>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back</div>
+  <p class="q-prompt">Why do the gaps between reviews keep growing, and what should you do when you blank on a card?</p>
+  <div class="model-answer"><strong>Model answer:</strong> Each successful recall makes the memory more stable, so it can safely wait longer before the next review. The best time to review is just before you'd forget. If you blank, tap <em>Again</em>: the card comes back soon and climbs the ladder from the bottom.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">You recalled a card, but only after 20 seconds of struggle. Which grade?</p>
+    <ol class="q-src">
+      <li>Again</li>
+      <li>Hard</li>
+      <li>Easy</li>
+      <li>Skip it</li>
+    </ol>
+    <div class="q-explain">You got it, so not "Again", but the struggle means it isn't stable yet. "Hard" keeps it on the same rung, a little sooner.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">Why are cards from different lessons mixed in one session?</p>
+    <ol class="q-src">
+      <li>To make sessions longer</li>
+      <li>Because sorting is hard</li>
+      <li>So you see newer cards first</li>
+      <li>Interleaving: you practise choosing the right idea, not just repeating one</li>
+    </ol>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">What does "Practise early" do to a card's schedule?</p>
+    <ol class="q-src">
+      <li>Nothing. Its next review date stays the same.</li>
+      <li>Pushes it a rung higher</li>
+      <li>Resets it to the bottom</li>
+      <li>Deletes it</li>
+    </ol>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Answer first, then reveal, then <strong>grade honestly</strong>. "Good" is the normal answer.</li>
+    <li>Gaps grow (≈1 → 3 → 7 → 16 → 35 days) as memories stabilise; <strong>Again</strong> restarts the climb.</li>
+    <li>Install the course as an app and tie reviews to a daily cue. It's usually under 5 minutes.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>You've finished Module 0. These cards (and the ones from the previous two lessons) will show up in your first review tomorrow.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"m0-3-a","front":"What do the four review grades mean?","back":"Again = couldn't recall (comes back in minutes, ladder restarts). Hard = recalled with a struggle (same rung, sooner). Good = recalled with some effort (next rung). Easy = instant (skip a rung)."},
+  {"id":"m0-3-b","front":"Why do review gaps grow over time?","back":"Each successful recall makes the memory more stable, so the ideal next review (just before forgetting) moves further away."},
+  {"id":"m0-3-c","front":"What should you do before revealing a card's answer?","back":"Commit to an answer: in your head, out loud or on paper. Retrieval only works if you actually try."},
+  {"id":"m0-3-d","front":"What's an easy way to make daily review a habit?","back":"Anchor it to an existing cue (e.g. after morning coffee) and keep the bar low: just the due cards."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/review-ladder.js"></script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+name: Deploy course to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["course/**", "tools/qa/**", ".github/workflows/pages.yml", ".github/scripts/**"]
+  pull_request:
+    paths: ["course/**", "tools/qa/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  # Fails on overlapping/clipped animation labels, stray dots or sideways scroll,
+  # at phone, iPad and desktop sizes, for every step of every animation.
+  layout-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install headless Chromium
+        working-directory: tools/qa
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright-core install --with-deps chromium
+      - name: Check every page and animation step
+        run: |
+          (cd course && python3 -m http.server 8123 >/dev/null 2>&1 &)
+          sleep 2
+          node tools/qa/check-layout.js http://localhost:8123/
+
+  build:
+    needs: layout-check
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Fetch and compress course images
+        run: |
+          pip install --quiet pillow
+          python .github/scripts/fetch_images.py course/assets/img
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: course
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

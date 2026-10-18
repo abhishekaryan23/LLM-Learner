@@ -1,0 +1,13 @@
+{
+  "_note": "OpenArt generations (GPT Image 2.5 Flare/Sunburst, low quality, 1K). The Pages build downloads any missing file and converts it to WebP. See .github/scripts/fetch_images.py.",
+  "hero.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-sunburst-1_1792292951440_91999d2d.png",
+  "cover-m0.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-sunburst-1_1792292951141_d557122c.png",
+  "cover-p2.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-sunburst-1_1792292950422_25edfdca.png",
+  "cover-m1.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-sunburst-1_1792292953555_d33edf88.png",
+  "eli5-leaky-bucket.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-flare-1_1792292953913_1514ec78.png",
+  "eli5-spaced-plant.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-flare-1_1792292953990_742f99b9.png",
+  "eli5-blind-hiker.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-flare-1_1792292956503_a743b63a.png",
+  "eli5-learning-rate.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-flare-1_1792292957911_2b3ba517.png",
+  "eli5-classroom-attention.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-flare-1_1792292959990_bd6da10c.png",
+  "eli5-qkv-library.webp": "https://cdn.openart.ai/openart-ai/production/2026-10/create-image/5JxM8X7kVkRCwOJkbSGn/gpt-image-2.5-flare-1_1792292961436_fb06529c.png"
+}
