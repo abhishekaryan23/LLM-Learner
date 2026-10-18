@@ -24,6 +24,7 @@
   var GS = [graph(LAYERS[0], 3), graph(LAYERS[1], 2), graph(LAYERS[2], 2)];
   function dq(i) { return d(P[i], Q); }
   // greedy search, layer by layer
+  // entry point is fixed in real HNSW; we take the farthest top-layer point so the hops are visible
   var entry = LAYERS[2].slice().sort(function (a, b) { return dq(b) - dq(a); })[0];
   var cur = entry, seen = {}, hops = [[], [], []], evalsAfter = [];
   seen[cur] = 1;

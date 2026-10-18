@@ -57,7 +57,7 @@
     var main = ["Prompting"];
     if (st.rag === 2) main.push("RAG");
     if (st.ft === 2) main.push("fine-tuning");
-    var title = main.length === 1 ? "Prompting" + (st.json === 2 ? " + structured output" : "") : main.join(" + ");
+    var title = main.join(" + ") + (st.json === 2 ? " + structured output" : "");
     if (st.rag === 2 && st.ft === 2) title += " (a combination)";
     return { st: st, title: title, why: why };
   }

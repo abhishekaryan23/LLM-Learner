@@ -183,7 +183,7 @@ $$\mathcal{L} = \lVert x - \hat{x} \rVert_2^2 + \lambda \sum_{i=1}^{m} |f_i|$$
   <p class="pg-readout" aria-live="polite"></p>
 </section>
 
-<p>With $\lambda = 0$ the SAE reconstructs almost perfectly but spreads every input over dozens of latents, and none of them matches a true feature. Moderate $\lambda$ recovers all 64 true directions. Very large $\lambda$ hurts reconstruction and starts losing features. Real SAEs face the same dial, just without an answer key.</p>
+<p>With $\lambda = 0$ the SAE reconstructs almost perfectly but spreads every input over nearly a hundred latents, and none of them matches a true feature. Moderate $\lambda$ recovers all 64 true directions. Very large $\lambda$ hurts reconstruction and starts losing features. Real SAEs face the same dial, just without an answer key.</p>
 
 <div class="why"><strong>Why this matters for LLMs:</strong> SAEs turned "the model has superposition" into a working method for listing millions of a production model's concepts, finding safety-relevant ones, and steering them directly. They have already been used, alongside behavioural evals (<a href="m4-1.html">M4</a>), in experiments that audit a model for a deliberately hidden objective (Marks et al., 2025). They are also a reminder of the field's honesty problem: an explanation is only as good as the share of the model it actually accounts for.</div>
 

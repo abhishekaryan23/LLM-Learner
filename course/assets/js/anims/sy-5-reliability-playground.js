@@ -38,7 +38,7 @@
       S("text", { x: 4, y: 16, class: "t t-sm t-muted", text: "↑ chance the whole task succeeds" }, svg);
       var lg = 38, lx = compact ? 8 : 44;
       S("path", { d: "M" + lx + " " + (lg - 4) + "h22", class: "s-orange" }, svg);
-      S("text", { x: lx + 28, y: lg, class: "t t-sm", text: "no checks: pⁿ" }, svg);
+      S("text", { x: lx + 28, y: lg, class: "t t-sm", text: "no checks: p^n" }, svg);
       P = { W: W, H: H, m: m, x: x, y: y };
       P.legR = S("g", {}, svg);
       S("path", { d: "M" + (lx + 136) + " " + (lg - 4) + "h22", class: "s-blue", "stroke-dasharray": "6 5", "stroke-width": 2.5 }, P.legR);

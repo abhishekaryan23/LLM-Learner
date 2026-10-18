@@ -89,7 +89,7 @@
 $$h \approx \sum_i f_i\, d_i$$
 <p>Here $d_i$ is the unit-length direction of feature $i$, and $f_i \ge 0$ is how active that feature is on this input (mostly zero). To <strong>read</strong> feature $i$, take a dot product (<a href="p1-1.html">P1.1</a>): $r_i = d_i \cdot h$. If the directions were all perpendicular, $r_i$ would recover $f_i$ exactly.</p>
 <p>The first hint came from word vectors. Mikolov et al. (2013) found that in word2vec embeddings, $\text{vec}(\text{king}) - \text{vec}(\text{man}) + \text{vec}(\text{woman})$ lands closest to $\text{vec}(\text{queen})$ (<a href="p3-4.html">P3.4</a>): "male → female" behaves like one direction you can add or subtract. In LLMs, simple linear classifiers can read sentiment, truth-value and even a place's latitude and longitude out of activations (Gurnee &amp; Tegmark, 2023), and Park, Choe &amp; Veitch (2023) gave the hypothesis a formal statement. It is a hypothesis, not a law: Engels et al. (2024) found some features that are genuinely <em>multi-dimensional</em>, such as days of the week and months arranged on circles.</p>
-<p>Notice what the hypothesis doesn't say: nothing forces a feature's direction to line up with a neuron. In the residual stream (<a href="m1-4.html">M1.4</a>) no activation function acts on single coordinates, so the neuron axes aren't special at all; directions can point anywhere. Inside an MLP, the activation function is applied neuron by neuron, which gives the neuron basis some meaning, and that's where monosemantic neurons are most often found.</p>
+<p>Notice what the hypothesis doesn't say: nothing forces a feature's direction to line up with a neuron. In the residual stream (<a href="m1-4.html">M1.4</a>) no activation function acts on single coordinates, so nothing in the architecture singles out the neuron axes; directions can point anywhere. (In practice the optimiser and LayerNorm give the axes a slight preference, Elhage et al., 2023, but not enough to make single neurons the unit of meaning.) Inside an MLP, the activation function is applied neuron by neuron, which gives the neuron basis some meaning, and that's where monosemantic neurons are most often found.</p>
 
 <figure class="anim wide" data-anim="in-1-directions"></figure>
 
@@ -166,7 +166,7 @@ for d in [2, 100, 10_000]:
     cos = (a * b).sum(1) / (np.linalg.norm(a, axis=1) * np.linalg.norm(b, axis=1))
     print(d, np.abs(cos).mean().round(3))</code></pre>
 <ol class="steps">
-  <li>$d = 2$: random directions are random angles in a plane, and the average $|\cos|$ is exactly $2/\pi \approx 0.64$. The code prints about 0.64 to 0.65.</li>
+  <li>$d = 2$: random directions are random angles in a plane, and the average $|\cos|$ is exactly $2/\pi \approx 0.64$. The code prints about 0.63 to 0.65.</li>
   <li>For large $d$, the average $|\cos|$ is close to $\sqrt{2/(\pi d)} \approx 0.80/\sqrt{d}$.</li>
   <li>So random directions in 2-D overlap a lot, and superposition there is costly. ✓</li>
 </ol>
@@ -230,7 +230,7 @@ for d in [2, 100, 10_000]:
       <li>In the softmax output, because probabilities sum to 1</li>
       <li>Inside the MLP's hidden layer, because its activation function acts on each neuron separately, which makes the neuron axes special</li>
     </ol>
-    <div class="q-explain">The residual stream is only ever added to and read by matrix multiplications, so any rotation of it works equally well and its axes mean nothing in particular. An elementwise nonlinearity gives each MLP neuron its own threshold, a reason for features to align with neurons, though superposition still makes many of them polysemantic.</div>
+    <div class="q-explain">The residual stream is only ever added to and read by matrix multiplications, so any rotation of it works equally well and its axes have no special meaning by design. An elementwise nonlinearity gives each MLP neuron its own threshold, a reason for features to align with neurons, though superposition still makes many of them polysemantic.</div>
   </div>
   <div class="q" data-answer="2">
     <p class="q-prompt">Interleaving with P1.1: you normalise all feature directions to unit length. What does the dot product of two of them equal?</p>

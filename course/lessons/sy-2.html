@@ -173,7 +173,7 @@ $$\cos(q, d) = \frac{q \cdot d}{\lVert q \rVert\,\lVert d \rVert}$$
   <li><strong>Fixed size:</strong> every 300 to 1,000 tokens, say. Simple and predictable, but it can cut a sentence or a table in half.</li>
   <li><strong>Overlap:</strong> repeat the last 10 to 20% of each chunk at the start of the next, so an idea that straddles a boundary appears whole in at least one chunk.</li>
   <li><strong>Structure-aware:</strong> split at headings, paragraphs, list items or code functions. Usually the best default for documents that have structure.</li>
-  <li><strong>Add context:</strong> a chunk saying “It rose 3% last quarter” is useless alone. Prepend the document title and section heading, or a one-sentence summary of where the chunk sits. Anthropic reported in September 2024 (“Contextual Retrieval”) that adding a short generated context to each chunk cut failed retrievals by 49% on its test sets, and by 67% together with reranking.</li>
+  <li><strong>Add context:</strong> a chunk saying “It rose 3% last quarter” is useless alone. Prepend the document title and section heading, or a one-sentence summary of where the chunk sits. Anthropic reported in September 2024 (“Contextual Retrieval”) that adding a short generated context to each chunk cut failed retrievals by 35% on its test sets, by 49% when combined with BM25 hybrid search, and by 67% with reranking added as well.</li>
 </ul>
 <p>Smaller chunks give sharper matches but less context per hit; larger chunks carry more context but blur the vector. Store metadata with every chunk (source, title, date, access rights) so you can filter and cite later.</p>
 

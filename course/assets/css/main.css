@@ -22,7 +22,7 @@
   --bad-soft: #FADCD9;
   /* animation palette (fills/strokes; differ in lightness, not hue alone) */
   --a-blue: #2F6FEB;
-  --a-orange: #E8772E;
+  --a-orange: #E8772E; --a-orange-text: #C2570F;
   --a-ink: #1B2A4A;
   --a-faint: #C9C2B3;
   --a-paper: #FFFDF8;
@@ -42,7 +42,7 @@
     --bg: #111317; --surface: #191C22; --surface-2: #22262E; --ink: #ECE9E2; --ink-2: #A8ADB9; --line: #2F343E;
     --accent: #86A9FF; --accent-soft: #1E2A47; --warm: #F29A62; --warm-soft: #3A2516;
     --good: #67CB95; --good-soft: #15301F; --bad: #F48A80; --bad-soft: #3A1714;
-    --a-blue: #6E9BFF; --a-orange: #F29A62; --a-ink: #E6E2D8; --a-faint: #3C424E; --a-paper: #171A20;
+    --a-blue: #6E9BFF; --a-orange: #F29A62; --a-orange-text: #F29A62; --a-ink: #E6E2D8; --a-faint: #3C424E; --a-paper: #171A20;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
     color-scheme: dark;
   }
@@ -51,7 +51,7 @@
   --bg: #111317; --surface: #191C22; --surface-2: #22262E; --ink: #ECE9E2; --ink-2: #A8ADB9; --line: #2F343E;
   --accent: #86A9FF; --accent-soft: #1E2A47; --warm: #F29A62; --warm-soft: #3A2516;
   --good: #67CB95; --good-soft: #15301F; --bad: #F48A80; --bad-soft: #3A1714;
-  --a-blue: #6E9BFF; --a-orange: #F29A62; --a-ink: #E6E2D8; --a-faint: #3C424E; --a-paper: #171A20;
+  --a-blue: #6E9BFF; --a-orange: #F29A62; --a-orange-text: #F29A62; --a-ink: #E6E2D8; --a-faint: #3C424E; --a-paper: #171A20;
   --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
   color-scheme: dark;
 }
@@ -235,7 +235,7 @@ figure.anim { margin: 28px 0; background: var(--a-paper); border: 1px solid var(
 .t-mono { font-family: var(--font-mono); }
 .t-muted { fill: var(--ink-2); }
 .t-blue { fill: var(--a-blue); }
-.t-orange { fill: var(--a-orange); }
+.t-orange { fill: var(--a-orange-text); }
 .t-mid { text-anchor: middle; }
 /* Halo: a background-coloured outline keeps labels readable where a line passes behind them.
    Text sitting on a coloured fill (heatmap cells, badges) opts out with .t-nohalo. */

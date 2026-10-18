@@ -78,7 +78,7 @@
 </section>
 
 <h2>From magic words to a clear brief</h2>
-<p>When GPT-3 appeared in 2020, it was a pure next-token predictor. Brown et al. (2020), “Language Models are Few-Shot Learners”, showed that you could steer it by writing the start of a document it would want to continue, often with a few worked examples. Getting good results felt like finding magic words, and “prompt engineering” became a job title. In 2022, Kojima et al. found that adding “Let's think step by step” sharply improved its maths answers.</p>
+<p>When GPT-3 appeared in 2020, it was a pure next-token predictor. Brown et al. (2020), “Language Models are Few-Shot Learners”, showed that you could steer it by writing the start of a document it would want to continue, often with a few worked examples. Getting good results felt like finding magic words, and “prompt engineering” became a job title. In 2022, Kojima et al. found that adding “Let's think step by step” sharply improved the maths answers of GPT-3-class models (their main results used InstructGPT, an instruction-tuned GPT-3).</p>
 <p>Instruction tuning and RLHF (<a href="m3-1.html">M3.1</a>) changed the game. Today's chat models are trained to follow plain instructions, so tricks matter far less than <strong>saying clearly what you want</strong>. The skill that remains is writing a good brief, the same thing you would give a smart new colleague on their first day.</p>
 <p>A good brief has five parts. You won't always need all of them, but check each one:</p>
 <table class="prompt-table">
@@ -86,7 +86,7 @@
   <tbody>
     <tr><td>Role &amp; context</td><td data-l="What">Who the answer is for, why, and what the model needs to know</td><td data-l="Example">“You triage app reviews for a product team that plans next month's fixes.”</td></tr>
     <tr><td>Task</td><td data-l="What">One clear verb and its object</td><td data-l="Example">“List each problem the user reports.”</td></tr>
-    <tr><td>Constraints</td><td data-l="What">Length, scope, tone, what to leave out, what to do when unsure</td><td data-l="Example">“At most 3 items. Skip praise. If there is no problem, return an empty list.”</td></tr>
+    <tr><td>Constraints</td><td data-l="What">Length, scope, tone, what to leave out, what to do when unsure</td><td data-l="Example">“At most 3 items. Skip praise. If unsure, say so.”</td></tr>
     <tr><td>Examples</td><td data-l="What">One to a few input → output pairs that show the style</td><td data-l="Example">“Nice app, but it keeps logging me out” → “Logs out often”</td></tr>
     <tr><td>Output format</td><td data-l="What">The exact shape of the answer</td><td data-l="Example">JSON with an <code>issues</code> list of strings</td></tr>
   </tbody>

@@ -10,7 +10,7 @@
     { role: "tool", c: "{\"rain_chance\": 0.8, \"temp_c\": 14}", w: "{\"rain_chance\": 0.8, \"temp_c\": 14}", mono: true },
     { role: "model", c: "Yes, take one: 80% chance of rain, 14 °C.", w: "Yes, take one: 80% chance of rain, 14 °C." }
   ];
-  var APP = ["waiting", "got a tool call", "✓ arguments valid", "calling the API…", "result → context", "done"];
+  var APP = ["waiting", "got a tool call", "✓ arguments valid", "calling the API…", "got the result", "result → context", "done"];
 
   LC.anims["sy-4-loop"] = {
     title: "One tool call, start to finish",
@@ -92,11 +92,12 @@
       app(3, "+=0.05");
       LC.drawIn(tl, toApi, { duration: 0.4 });
       tl.to(apiTxt, { opacity: 1, duration: 0.3 });
-      LC.drawIn(tl, fromApi, { duration: 0.4 }); tl.addLabel("s4");
-      app(4, "+=0.05");
+      LC.drawIn(tl, fromApi, { duration: 0.4 });
+      app(4, "+=0.05"); tl.addLabel("s4");
+      app(5, "+=0.05");
       LC.drawIn(tl, resA, { duration: 0.5 }); tl.to(resL, { opacity: 1, duration: 0.2 });
       tl.to(rows[3], { opacity: 1, duration: 0.4 }); tl.addLabel("s5");
-      app(5, "+=0.05");
+      app(6, "+=0.05");
       tl.to(rows[4], { opacity: 1, duration: 0.4 }); tl.addLabel("s6");
       return tl;
     }

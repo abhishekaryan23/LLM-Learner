@@ -115,8 +115,9 @@
 <figure class="anim wide" data-anim="sy-4-loop"></figure>
 
 <p>In code, the conversation becomes a list of messages that grows with each beat. A vendor-neutral sketch:</p>
-<pre><code>messages = [
-  {role: "system", content: "...", tools: [get_weather]},
+<pre><code>tools = [get_weather]          # sent as a separate request parameter
+messages = [
+  {role: "system", content: "..."},
   {role: "user", content: "Umbrella in Paris today?"},
   {role: "assistant", tool_calls: [
      {id: "call_1", name: "get_weather",

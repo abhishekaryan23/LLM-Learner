@@ -17,7 +17,7 @@
   var OUT = [
     { mono: false, l: ["The user has mixed feelings about the app. They", "like the design and the price, but mention some", "issues, and also talk about their old phone…"] },
     { mono: false, l: ["For the product team: users praise the design", "and price; there are login and sync complaints,", "and battery use is mentioned as well."] },
-    { mono: false, l: ["1. The app logs them out every day, so annoying", "2. Photo sync fails on Wi-Fi  3. Battery drains", "4. They love the new colours"] },
+    { mono: false, l: ["1. The app logs them out daily, so annoying", "2. Photo sync fails on Wi-Fi", "3. Battery drains", "4. They love the new colours"] },
     { mono: false, l: ["1. Logged out every day", "2. Photo sync fails on Wi-Fi", "3. Heavy battery drain"] },
     { mono: false, l: ["Logs out daily", "Photo sync fails on Wi-Fi", "Battery drains fast"] },
     { mono: true, l: ["{\"issues\": [\"Logs out daily\",", "  \"Photo sync fails on Wi-Fi\",", "  \"Battery drains fast\"]}"] }
@@ -35,7 +35,7 @@
       "Edit 4, <strong>an example</strong> (few-shot): one input → output pair shows the exact style. The items now read like the example.",
       "Edit 5, <strong>an output format</strong> your code can parse (better still, enforce it with a schema). All five checks pass on this review; on a real project you would confirm it on a <strong>test set</strong>, not one example."
     ],
-    size: function (layout) { return layout === "compact" ? { w: 360, h: 366 } : { w: 640, h: 408 }; },
+    size: function (layout) { return layout === "compact" ? { w: 360, h: 385 } : { w: 640, h: 408 }; },
     build: function (svg, ctx) {
       var S = LC.svg, W = ctx.w, compact = ctx.layout === "compact";
       var tl = gsap.timeline();
@@ -73,7 +73,7 @@
 
       // Output panel + checks
       var oy = pBottom + 28;
-      var ow = compact ? pw : 400, oh = compact ? 76 : 154;
+      var ow = compact ? pw : 400, oh = compact ? 95 : 154;
       S("text", { x: px, y: oy - 8, class: "t t-sm t-muted", "font-weight": 600, text: "OUTPUT (ILLUSTRATIVE)" }, g);
       S("rect", { x: px, y: oy, width: ow, height: oh, rx: 10, class: "f-surface", stroke: "var(--line)", "stroke-width": 1.5 }, g);
       var lineH = compact ? 19 : 22;

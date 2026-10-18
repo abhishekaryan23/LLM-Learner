@@ -34,7 +34,7 @@
     title: "A sparse autoencoder: dense activation in, a few features out",
     steps: [
       "One token's <strong>activation</strong> $x$ from inside an LLM (here just 8 numbers; in a real model thousands). It's <strong>dense</strong>: every neuron is non-zero, so no single number means much.",
-      "The <strong>encoder</strong> computes $f = \\mathrm{ReLU}(W_{\\text{enc}} x + b_{\\text{enc}})$: 32 latents, <strong>4× wider</strong> than $x$ (overcomplete). Thanks to the L1 penalty, almost all of them are exactly 0. Only 3 fire.",
+      "The <strong>encoder</strong> computes $f = \\mathrm{ReLU}(W_{\\text{enc}}(x - b_{\\text{dec}}) + b_{\\text{enc}})$: 32 latents, <strong>4× wider</strong> than $x$ (overcomplete). Thanks to the L1 penalty, almost all of them are exactly 0. Only 3 fire.",
       "Each latent is a candidate <strong>feature</strong>. Researchers name it by reading the texts that activate it most (names here are illustrative).",
       "The <strong>decoder</strong> rebuilds the activation as a weighted sum of the active features' directions: $\\hat{x} = W_{\\text{dec}} f + b_{\\text{dec}}$. Grey outlines show the original $x$.",
       "The leftover $x - \\hat{x}$ is the <strong>reconstruction error</strong>, here $\\lVert x - \\hat{x}\\rVert^2 = " + ERR.toFixed(3) + "$. Part is noise the dictionary can't explain (\"dark matter\"); part comes from L1 shrinking the active latents.",
@@ -47,7 +47,7 @@
       var L = compact
         ? { x: { x0: 60, y0: 38, w: 240, h: 84 }, xh: { x0: 60, y0: 290, w: 240, h: 84 }, f: { x0: 20, y0: 160, w: 320, h: 58 }, encY: 146, decY: 258, nameY: 238, lossY: [400, 422, 444] }
         : { x: { x0: 40, y0: 52, w: 210, h: 96 }, xh: { x0: 390, y0: 52, w: 210, h: 96 }, f: { x0: 40, y0: 196, w: 560, h: 62 }, encY: 178, decY: 178, nameY: 278, lossY: [310, 334, 352] };
-      var LIM = 1.25;
+      var LIM = 2.1;   // fits the clamped x̂ (down to -2.02) without clipping any bar
       var tl = gsap.timeline();
 
       function chart(box, title, cls) {
@@ -73,7 +73,7 @@
       tl.addLabel("s0", 0);
 
       // s1: encoder + latents
-      var encT = S("text", { x: compact ? 20 : 320, y: L.encY, class: "t t-sm t-blue" + (compact ? "" : " t-mid"), text: compact ? "↓ encoder: ReLU(W_enc x + b)" : "encoder ↓  ReLU(W_enc x + b)" }, svg);
+      var encT = S("text", { x: compact ? 20 : 320, y: L.encY, class: "t t-sm t-blue" + (compact ? "" : " t-mid"), text: compact ? "↓ encoder: ReLU(W_enc(x − b_dec) + b_enc)" : "ReLU(W_enc(x − b_dec) + b_enc) ↓" }, svg);
       var fbox = L.f, cw = fbox.w / NF, fBase = fbox.y0 + fbox.h;
       var fG = S("g", {}, svg);
       S("line", { x1: fbox.x0, x2: fbox.x0 + fbox.w, y1: fBase, y2: fBase, class: "s-axis" }, fG);
@@ -98,7 +98,7 @@
       tl.addLabel("s2");
 
       // s3: decoder + x̂
-      var decT = S("text", { x: compact ? 20 : 320, y: L.decY, class: "t t-sm t-blue" + (compact ? "" : " t-mid"), text: compact ? "↓ decoder: x̂ = W_dec f + b" : "decoder ↑  x̂ = W_dec f + b" }, svg);
+      var decT = S("text", { x: compact ? 20 : 320, y: L.decY, class: "t t-sm t-blue" + (compact ? "" : " t-mid"), text: compact ? "↓ decoder: x̂ = W_dec f + b_dec" : "decoder ↑  x̂ = W_dec f + b_dec" }, svg);
       if (!compact) { decT.setAttribute("x", 495); decT.setAttribute("y", L.decY); encT.setAttribute("x", 145); }
       var cxh = chart(L.xh, "reconstruction x̂", "f-blue");
       X.forEach(function (v, j) { setBar(cxh.outl[j], cxh, v); });

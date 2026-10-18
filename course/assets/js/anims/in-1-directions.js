@@ -91,8 +91,6 @@
       title1.style.opacity = 0; title2.style.opacity = 0;
       var zero = S("line", { x1: B.zx, x2: B.zx, y1: B.top - 6, y2: B.top + 5 * B.row - 8, class: "s-axis" }, svg);
       zero.style.opacity = 0;
-      var thr = S("line", { x1: B.zx + TH * B.sc, x2: B.zx + TH * B.sc, y1: B.top - 6, y2: B.top + 5 * B.row - 8, class: "s-grid", "stroke-dasharray": "3 3", style: "stroke:var(--a-orange)" }, svg);
-      thr.style.opacity = 0;
       var bars = NAMES.map(function (n, i) {
         var y = B.top + i * B.row;
         var g = S("g", {}, svg);
@@ -112,7 +110,6 @@
           if (Math.abs(x) < 0.005) { b.v.setAttribute("x", B.zx - 6); b.v.setAttribute("class", "t t-sm t-mono t-end"); }
           else {
             var end = x > 0 ? B.zx + w : B.zx;
-            if (thrOn) end = Math.max(end, B.zx + TH * B.sc);
             b.v.setAttribute("x", (end + 6).toFixed(1)); b.v.setAttribute("class", "t t-sm t-mono");
           }
         });
@@ -145,7 +142,7 @@
 
       // ---- s5: ReLU with bias
       tl.to(title1, { opacity: 0, duration: 0.2 }, "+=0.02");
-      tl.to([title2, thr], { opacity: 1, duration: 0.3 });
+      tl.to(title2, { opacity: 1, duration: 0.3 });
       SNAP[5] = R1r;
       tl.addLabel("s5");
 

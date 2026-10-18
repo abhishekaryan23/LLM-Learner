@@ -31,7 +31,7 @@
       "<strong>Clean run</strong>: “Eiffel Tower is in” → the model gives <strong>Paris</strong> probability 0.82. Each cell is the residual-stream state at one layer and one token position.",
       "<strong>Corrupted run</strong>: “Big Ben is in”, same length, different subject → Paris 0.01, London 0.79. Every state that depends on the subject has changed (orange).",
       "<strong>Patch one cell</strong>: rerun the corrupted prompt, but at layer 2 on the token “Tower/Ben” paste in the state from the clean run. Paris jumps back to " + O1.paris.toFixed(2) + ": that state carries the fact.",
-      "Patch a different cell, layer 2 on “is”, instead: Paris stays at " + O2.paris.toFixed(2) + ". This state isn't needed for the answer.",
+      "Patch a different cell, layer 2 on “is”, instead: Paris stays at " + O2.paris.toFixed(2) + ". This state doesn't carry the fact on its own.",
       "Repeat for <strong>every cell</strong>, one patch per run. Each number is the <strong>fraction of the clean answer recovered</strong>: $(p_{\\text{patched}} - p_{\\text{corrupt}}) / (p_{\\text{clean}} - p_{\\text{corrupt}})$.",
       "Two hot spots: the <strong>last subject token</strong> in early and middle layers, where the fact is looked up, and the <strong>last token</strong> in late layers, after attention has moved it there to be output. Meng et al. (2022) found this shape in GPT-2 XL. (Numbers here are illustrative.)"
     ],
@@ -70,6 +70,18 @@
         });
       }
 
+      // number colour from the cell's effective lightness (blue at alpha over surface-2), theme-aware
+      function rgb(h) { h = (h || "").trim().replace("#", ""); if (h.length === 3) h = h.replace(/./g, "$&$&"); var v = parseInt(h, 16); return isNaN(v) ? null : [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
+      function lum(c) { var u = c.map(function (x) { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); }); return 0.2126 * u[0] + 0.7152 * u[1] + 0.0722 * u[2]; }
+      function numInk(alpha) {
+        var cs = getComputedStyle(svg), fg = rgb(cs.getPropertyValue("--a-blue")), bg = rgb(cs.getPropertyValue("--surface-2"));
+        if (!fg || !bg) return "";
+        var mix = fg.map(function (x, i) { return x * alpha + bg[i] * (1 - alpha); }), L = lum(mix);
+        var dark = [16, 19, 26], white = [255, 255, 255];
+        var cw = 1.05 / (L + 0.05), cd = (L + 0.05) / (lum(dark) + 0.05);
+        return cd > cw ? "#10131a" : "#fff";
+      }
+
       // grid
       for (var l = 1; l <= NL; l++) S("text", { x: L.gx - 8, y: cy(l) + L.ch / 2 + 4, class: "t t-sm t-muted t-end", text: "L" + l }, svg);
       var cells = [], nums = [];
@@ -81,7 +93,6 @@
           cells[l2][p] = c;
           var r = REC[l2 - 1][p];
           var n = S("text", { x: cx(p) + L.cw / 2, y: cy(l2) + L.ch / 2 + 4, class: "t t-sm t-mono t-mid t-nohalo", text: r.toFixed(2) }, svg);
-          if (r >= 0.5) n.setAttribute("style", "fill:#fff");
           n.style.opacity = 0;
           nums[l2][p] = n;
         }
@@ -131,6 +142,7 @@
             c.setAttribute("class", "f-blue");
             c.setAttribute("fill-opacity", (0.06 + 0.94 * REC[l - 1][p]).toFixed(2));
             n.style.opacity = 1;
+            n.style.fill = numInk(0.06 + 0.94 * REC[l - 1][p]);
           }
         }
         var pt = k === 2 ? PATCH1 : k === 3 ? PATCH2 : null;

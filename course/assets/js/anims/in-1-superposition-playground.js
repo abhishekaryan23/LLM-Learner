@@ -117,7 +117,7 @@
           txt += "f1 and f2 are " + ang + "° apart" + (ang > 130 ? ", so together they largely cancel out. " : ang < 85 ? ", so each picks up the other's reading. " : ". ");
         }
       }
-      txt += "Test squared error: " + err.toFixed(3) + ".";
+      txt += "Test squared error (unweighted): " + err.toFixed(3) + ".";
       readout.textContent = txt;
     }
 
