@@ -1,0 +1,878 @@
+{
+ "generated": "2026-10-18",
+ "items": [
+  {
+   "title": "Waypoint-OPD: Transferring RL-Induced Policy Shifts via Gated On-Policy Distillation",
+   "summary": "Policy-shift distillation reuses the difference between a teacher's log probabilities before and after reinforcement learning (RL) as supervision on student-generated trajectories. However, this endpoint policy shift cannot reveal whether local action preferences evolved consistently during teacher training. The same endpoint shift can result from early and late shifts that reinforce or partially cancel each other. We investigate whether agreement between early and late teacher policy shifts can guide selective transfer. We introduce Waypoint-guided On-Policy Distillation (Waypoint-OPD), which",
+   "url": "https://arxiv.org/abs/2610.21601",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 666,
+   "lab": false,
+   "modules": [
+    "m5",
+    "rl"
+   ],
+   "matched": [
+    "distillation",
+    "reinforcement learning"
+   ],
+   "score": 70.6
+  },
+  {
+   "title": "MJev-Spatial: System One Spatial Intelligence via Native Attention Matching",
+   "summary": "Spatial intelligence lets an agent perceive and act in the physical world, and many of its judgments must be made at interaction rates: which spatial relation holds, how far an object is, or where to place it. Vision-language models (VLMs) produce these answers by free-form text generation, paying for autoregressive decoding and answer parsing even though the output space is compact: one of a few options, a scalar, or a 2D point. In light of this, we introduce MJev-Spatial, a System 1 multimodal decision model that tackles all three types of spatial understanding tasks within a unified classif",
+   "url": "https://arxiv.org/abs/2610.22276",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 352,
+   "lab": false,
+   "modules": [
+    "m1",
+    "mm",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "attention",
+    "multimodal",
+    "vision-language"
+   ],
+   "score": 43.2
+  },
+  {
+   "title": "OpenGCUA: Toward a Fully Open Stack for Generalist Computer Use",
+   "summary": "Computer use has reached a turning point: the focus is expanding from GUI-only interaction to systems that complete tasks on users' computers through visual and programmatic interfaces. We define a generalist computer-use agent (GCUA) as a system in which the model chooses how to observe, act, and organize its work across visual and programmatic interfaces. Yet frontier implementations, such as GPT-6 Astra's computer-use system, remain largely closed, limiting systematic study of their design. We introduce Open Generalist CUA (OpenGCUA), an ongoing project to develop and open the full stack fo",
+   "url": "https://arxiv.org/abs/2610.22200",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 315,
+   "lab": false,
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 33.5
+  },
+  {
+   "title": "FDE-Gym: The Last Mile of AI Delivery",
+   "summary": "Existing agent benchmarks typically evaluate agents on well-specified tasks defined by issue reports, specifications, or task tickets. Real-world customer delivery is different: forward-deployed engineers (FDEs) must clarify ambiguous requirements, work in live systems, and uncover unstated constraints. We introduce FDE-Gym, a benchmark of 95 end-to-end delivery tasks from 20 customer scenarios across 18 sectors, each adapted by industry experts from real-world delivery projects. In simulated customer environments with scripted stakeholders and modifiable customer systems, agents interact with",
+   "url": "https://arxiv.org/abs/2610.22350",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 285,
+   "lab": false,
+   "modules": [
+    "m4",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "benchmark"
+   ],
+   "score": 32.5
+  },
+  {
+   "title": "MAI-Gym: An Open All-in-One Platform for GUI Agent Evaluation and RL Training across Mobile and Computer Environments",
+   "summary": "Online reinforcement learning (RL) with verifiable rewards has driven rapid progress in mathematics, coding, and tool use, but scaling this success to GUI agents remains challenging due to the high cost of interactive environments and the scarcity of realistic training tasks. We introduce MAI-Gym, an open all-in-one platform that unifies GUI agent evaluation, data collection, and online RL training across mobile, computer, and web environments. Through a shared rollout pipeline, MAI-Gym ensures consistent agent behavior across evaluation and training, supports ten established benchmarks, and s",
+   "url": "https://arxiv.org/abs/2610.20939",
+   "date": "2026-10-13",
+   "upvotes": 153,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "m4",
+    "mm",
+    "rl",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "evaluation",
+    "gui agent",
+    "reinforcement learning",
+    "tool use"
+   ],
+   "score": 25.3
+  },
+  {
+   "title": "RoTA-Bench: Evaluating 3D Spatial Reasoning through Interactive Projection Alignment",
+   "summary": "Can vision-language models turn 2D observations into 3D understanding that supports precise action? This requires inferring object geometry, anticipating the effects of rotation, and refining actions through visual feedback. We introduce RoTA-Bench to evaluate these abilities through interactive 3D-to-2D projection alignment. Given a target silhouette, a model observes a rotated object and chooses successive rotations to recover the target projection within a limited action budget. Our automated pipeline constructs silhouette-preserving 3D objects from 2D icons and uses reversible initializati",
+   "url": "https://arxiv.org/abs/2610.17665",
+   "date": "2026-10-13",
+   "upvotes": 201,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "reasoning",
+    "vision-language"
+   ],
+   "score": 24.1
+  },
+  {
+   "title": "Self-Evolving Agent Harness",
+   "summary": "Harness self-evolution revises an agent's software scaffolding, including prompts, memory, workflows, and executable components, while keeping model weights fixed. We formalize a feedback-driven process in which accepted revisions persist across runs. The framework separates update targets from proposal and admission mechanisms. It distinguishes changes to interpreted state from revisions to tools and code, repository-level control logic, and plugin composition. We characterize search through evolutionary optimization and examine its reliability through continual PAC-learning. Under explicit a",
+   "url": "https://arxiv.org/abs/2610.18813",
+   "date": "2026-10-12",
+   "upvotes": 199,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 21.9
+  },
+  {
+   "title": "Behavioral Compositionality of Sparse Autoencoder Representations",
+   "summary": "Sparse autoencoders (SAEs) represent model activations with sparse, linearly decoded features, but the downstream effects of those features need not compose additively. We introduce SAE Additivity Residuals (SAR), which measure the behavioral variation left unexplained above a chosen interaction order. Under independent feature subset sampling, population SAR is exactly the normalized energy of interactions above that order and bounds coalition ordering error for the optimal low order approximation. To distinguish compositionality associated with the SAE representation from that induced by dow",
+   "url": "https://arxiv.org/abs/2610.21261",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 106,
+   "lab": false,
+   "modules": [
+    "in",
+    "m1",
+    "p6"
+   ],
+   "matched": [
+    "autoencoder",
+    "sampling",
+    "sparse autoencoder"
+   ],
+   "score": 16.6
+  },
+  {
+   "title": "Data-Efficient ConvNeXt Pretraining for High-Resolution Sentinel-1 GRD SAR Representation Learning",
+   "summary": "Labeled Sentinel-1 Ground Range Detected (S1GRD) datasets remain scarce, limiting supervised deep learning for land-surface remote sensing, while self-supervised pretraining for this domain has been dominated by Vision Transformer (ViT)-based masked image modeling requiring substantial data and compute. We propose SparK-SAR, a sparse convolutional masked pretraining framework built on SparK and ConvNeXt, designed to exploit convolutional inductive biases for S1GRD imagery under constrained compute. SparK-SAR makes three core technical contributions: (i) ConvNeXt-RS, a domain-adapted encoder th",
+   "url": "https://arxiv.org/abs/2610.21993",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m2",
+    "p6",
+    "v1"
+   ],
+   "matched": [
+    "convolutional",
+    "pretraining",
+    "self-supervised",
+    "transformer",
+    "vision transformer",
+    "vit"
+   ],
+   "score": 14.0
+  },
+  {
+   "title": "Decoupled Safety Control: A Safety-Control Algorithm for Training-Free Safety Guidance",
+   "summary": "Diffusion models achieve strong performance in text-to-image generation, but they can still produce unsafe content. Training-free safety guidance offers a practical inference-time alternative that intervenes during sampling without modifying model weights. However, many existing safeguards still rely on a coupled safety-control chain. In this chain, the same unsafe condition simultaneously specifies what should be avoided, indicates the current unsafe signal, constructs the intervention, and determines when that intervention remains active. This coupling can work when unsafe factors are explic",
+   "url": "https://arxiv.org/abs/2610.21569",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "diffusion",
+    "guidance",
+    "image generation",
+    "inference",
+    "sampling",
+    "text-to-image"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "VLA-$Δ$: Learning Physical State Transition for Vision-Language-Action Models",
+   "summary": "Vision-language-action (VLA) models transfer semantic knowledge acquired through vision-language pretraining to robot control, achieving strong performance across various benchmarks. However, most VLAs directly map observations to demonstrated actions without explicit supervision of intermediate physical state changes, making them prone to overfitting observation-action correspondences. Some methods introduce intermediate reasoning or future-state prediction in language, visual, or latent spaces to guide action generation, but do not explicitly supervise the physical state transition itself. W",
+   "url": "https://arxiv.org/abs/2610.21306",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 54,
+   "lab": false,
+   "modules": [
+    "m2",
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "pretraining",
+    "reasoning",
+    "vision-language"
+   ],
+   "score": 11.4
+  },
+  {
+   "title": "PINT: A Unified Model with Shared Predictive Intent for Robot Manipulation",
+   "summary": "Generalist robot manipulation can benefit from pretrained vision-language models (VLMs) for semantic reasoning and video generation models (VGMs) for world modeling. However, existing unified models that directly fuse them through shared attention at multiple layers can make it harder to draw on their specialized capabilities. We introduce PINT, a unified model that coordinates semantic reasoning, world modeling, and action generation through a shared chunk-level Predictive Intent while preserving expert-specific pathways. PINT inserts learnable Intent Tokens into the VLM sequence to form this",
+   "url": "https://arxiv.org/abs/2610.16355",
+   "date": "2026-10-11",
+   "upvotes": 2,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "m1",
+    "mm",
+    "rs",
+    "vd"
+   ],
+   "matched": [
+    "attention",
+    "reasoning",
+    "video generation",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 10.2
+  },
+  {
+   "title": "DK-VLM: Geometry as Position for Spatial Reasoning in Vision-Language Models",
+   "summary": "Vision-language models still struggle to understand 3D spatial relations across views and update spatial judgments as the observer moves. A common approach fuses 3D reconstruction features into visual tokens, but aligning these features with pretrained semantic representations remains challenging under limited spatial supervision. We propose DK-VLM with Dual-Kernel Attention, which computes attention from both a visual token's input position and its geometric position in the scene. A semantic kernel retains the pretrained model's native attention and positional encoding, while a separate geome",
+   "url": "https://arxiv.org/abs/2610.22356",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m1",
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "attention",
+    "positional encoding",
+    "reasoning",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "X-RIC: An Agentic RAN-Intelligent Controller Benchmark for Enhancing Reinforcement Learning",
+   "summary": "The O-RAN ALLIANCE introduces architectural flexibility through disaggregation and AI-driven control. While the RAN Intelligent Controller (RIC) enables centralized optimization, current AI approaches lack reasoning capabilities and explainability. We propose eXplainable RIC (X-RIC), a novel framework integrating agentic AI into O-RAN architectures. X-RIC combines reactive Reinforcement Learning (RL) with strategic agentic reasoning through: (i) automated Behavioral Cloning (BC) using domain heuristics for sample-efficient training, (ii) a Telecom Language Model (TLM), a transformer-based reas",
+   "url": "https://arxiv.org/abs/2610.22269",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m4",
+    "rl",
+    "rs"
+   ],
+   "matched": [
+    "benchmark",
+    "reasoning",
+    "reinforcement learning",
+    "transformer"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "SCOPE: Semantic Bounded Credit Optimization for Prompt Engineering in Text-to-image Generation",
+   "summary": "Reinforcement learning (RL) enables language models to improve text-to-image (T2I) generation by rewriting prompts for a frozen image generator. Existing methods typically apply a single signal derived from the image to individual subword tokens, although objects, counts, attributes, and relations form coherent semantic spans. We propose SCOPE, an objective based on Group Relative Policy Optimization (GRPO) that aligns update weighting with this structure. The rewriter jointly generates an enhanced prompt and its semantic partition. SCOPE pools shifts in policy log probabilities within each sp",
+   "url": "https://arxiv.org/abs/2610.22264",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m3",
+    "rl",
+    "sy"
+   ],
+   "matched": [
+    "grpo",
+    "image generation",
+    "prompt engineering",
+    "reinforcement learning",
+    "text-to-image"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "FastVLA: Task-Conditioned and Temporally Adaptive Visual Token Compression for Efficient Vision-Language-Action Models",
+   "summary": "Vision-Language-Action (VLA) models present a promising paradigm for general-purpose robot manipulation, but closed-loop deployment is often limited by inference efficiency: at each timestep, high-resolution, often multi-view images are encoded into hundreds of visual tokens that dominate transformer computation and latency. Token compression via attention is a natural solution but is challenging for VLA control because (1) decision-critical tokens are determined by the task, not generic visual saliency, and (2) the token budget varies substantially across steps, so static metrics and budgets ",
+   "url": "https://arxiv.org/abs/2610.22146",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m5",
+    "mm"
+   ],
+   "matched": [
+    "attention",
+    "inference",
+    "transformer",
+    "vision-language"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Dynamic ordering in sequence generation in Transformers: experiments on low-resource Tagging scenarios",
+   "summary": "This paper introduces TagInsert, a Transformer-based model that challenges the common left-to-right (L2R) generation paradigm in Transformers, for sequence labelling tasks where dependencies may not naturally align with a L2R order. TagInsert lifts the L2R constraint by removing the decoder-side attention mask and enabling the model to decide a preferred order of tag generation at inference time. We experiment on the common Part-of-Speech tagging and the more complex Combinatory Categorial Grammar (CCG) supertagging tasks on multiple languages and low-resource data settings. We show that, alth",
+   "url": "https://arxiv.org/abs/2610.21862",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "h1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "attention",
+    "inference",
+    "speech",
+    "transformer"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "SCMerge: Spatial-Consistency-Aware Token Pair Merging for Efficient Semantic Segmentation",
+   "summary": "Vision Transformer architectures have showcased impressive performance on semantic segmentation, yet their quadratic attention complexity hinders practical applications. Recent works have focused on merging tokens to reduce sequence length and thus improve transformer efficiency. However, existing token merging methods primarily rely on feature similarity to identify similar tokens, overlooking spatial consistency, which may introduce segmentation errors in semantic segmentation. In this work, we propose SCMerge, a training-free token merging method that jointly considers feature similarity an",
+   "url": "https://arxiv.org/abs/2610.21642",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "v1"
+   ],
+   "matched": [
+    "attention",
+    "segmentation",
+    "transformer",
+    "vision transformer"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "MYOPIA: Understanding the Limits of Tree-Based Reasoning in Vision-Language Models",
+   "summary": "Decision trees can make vision-language model (VLM) classification interpretable by replacing a single prediction with a sequence of root-to-leaf questions. However, the accuracy cost of this greedy, non-backtracking procedure remains unclear. We introduce \\textbf{MYOPIA}, a benchmark comprising four LLM-generated, human-refined decision trees for GTSRB, MNIST, CIFAR-10, and MSCOCO, together with matched prompts, diagnostic protocols, and an evaluation harness. Across GPT-4o, Qwen-VL Max, and LLaMA-3.2 11B Vision, tree traversal underperforms zero-shot prompting in all 12 dataset--model pairs;",
+   "url": "https://arxiv.org/abs/2610.21573",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m4",
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "benchmark",
+    "evaluation",
+    "reasoning",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Reinforcement Learning-driven Diffusion Models: Language, Vision, and Beyond",
+   "summary": "Diffusion models (DMs) have steadily demonstrated outstanding performance in high-fidelity, controllable generation across diverse scenarios, following the \"pretraining-finetuning\" paradigm established in LLMs. Despite these advances, conventional DMs still face critical limitations in sophisticated reasoning, autonomous exploration of generation pathways, and adaptability to complex, human-aligned objectives. Inspired by RLHF's success in LLMs, RL has recently emerged as a pivotal post-training mechanism to iteratively refine DMs through reward-driven trajectory optimization. This paper prese",
+   "url": "https://arxiv.org/abs/2610.21539",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m2",
+    "m3",
+    "rl",
+    "rs"
+   ],
+   "matched": [
+    "diffusion",
+    "pretraining",
+    "reasoning",
+    "reinforcement learning",
+    "rlhf"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Translation Circuit Discovery and Targeted Optimization for Low-Resource Multilingual Translation",
+   "summary": "Recent multilingual large language models achieve strong translation performance, yet the internal mechanisms responsible for low-resource multilingual translation remain insufficiently understood. In this paper, we study translation circuits in multilingual decoder-only LLMs for Hindi-to-Urdu and Hindi-to-Sindhi (Devanagari). We propose TITAN, a mechanistic framework that combines causal intervention, sparse feature decomposition, and targeted preference optimization to identify and optimize crucial translation components in the transformer. Unlike conventional full-parameter fine-tuning, TIT",
+   "url": "https://arxiv.org/abs/2610.21456",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "in",
+    "m1",
+    "m3"
+   ],
+   "matched": [
+    "circuits",
+    "fine-tuning",
+    "preference optimization",
+    "transformer"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "DocPilot: Interactive Agent Orchestration and Training for Long Visual Document Understanding",
+   "summary": "Multimodal long-document question answering requires models to seek sparse evidence across pages and modalities, understand heterogeneous document content, and reason over the collected evidence. Even advanced vision-language models (VLMs) can overlook sparse evidence and struggle with cross-modal reasoning in a single pass. Existing document agents further introduce multi-step interaction, but some still rely on predefined workflows or coarse-grained actions, limiting the flexibility and granularity of document reasoning. We introduce DocPilot, an agentic document framework that supports expr",
+   "url": "https://arxiv.org/abs/2610.21327",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "mm",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "document understanding",
+    "multimodal",
+    "reasoning",
+    "vision-language"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Constrained Multi-Agent Reinforcement Learning in Imagination",
+   "summary": "Predicting cost in a multi-agent world model moves most constrained policy updates into imagination: the stronger model-free baseline needs $10$ to $20$ times CA-MAMBA's interactions on the median SMAC configuration, and CA-MAMBA earns $2.8$ to $12$ times the baselines' MAMuJoCo reward at equal budget. In controlled tests on one task per benchmark, pricing the model's cost advantages at parity more than halves a cost-blind learner's cost and meets a tight continuous-control limit the learned multiplier misses, suggesting the model's cost estimates are not the bottleneck.",
+   "url": "https://arxiv.org/abs/2610.21319",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ar",
+    "m4",
+    "rl",
+    "sy",
+    "vd"
+   ],
+   "matched": [
+    "agent",
+    "benchmark",
+    "mamba",
+    "reinforcement learning",
+    "world model"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Automatic Sentence Completion Using Bengali Audio Speech with a Transformer-Based Early Speech Recognition System",
+   "summary": "Dementia severely impairs communication abilities and turns everyday conversations into challenging experiences. Individuals affected by dementia frequently struggle to express their thoughts or complete sentences, making it difficult for family members and caregivers to understand their needs. This study proposes a novel approach to assist dementia patients by developing an integrated system that detects signs of dementia through Bangla speech and text analysis and provides sentence auto-completion support during conversations. To achieve this, recorded voices from individuals with and withou",
+   "url": "https://arxiv.org/abs/2610.21164",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "h1",
+    "m1"
+   ],
+   "matched": [
+    "audio",
+    "speech",
+    "speech recognition",
+    "transformer"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Mosaic: Multi-Session Agentic Reinforcement Learning",
+   "summary": "Most existing agentic reinforcement learning methods assume single-session trajectories, where interaction proceeds within one continuously accumulated context. However, agentic techniques such as context compaction and subagent forking may produce trajectories spanning multiple sessions, creating a mismatch between the single-session training assumption and inference-time execution. Therefore, we introduce Multi-Session Agentic Reinforcement Learning, a more general setting that supports an arbitrary number of sessions within a trajectory. Under this setting, a widely adopted method is to bro",
+   "url": "https://arxiv.org/abs/2610.22174",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 54,
+   "lab": false,
+   "modules": [
+    "m5",
+    "rl"
+   ],
+   "matched": [
+    "inference",
+    "reinforcement learning"
+   ],
+   "score": 9.4
+  },
+  {
+   "title": "MMSearch-OPD: Easy Made Hard, Hard Made Learnable for Long-Horizon Multimodal Search Agents",
+   "summary": "Multimodal deep search is moving from short queries to long-horizon investigations that continually acquire evidence. However, training such agents remains constrained by limited challenging training questions and insufficient process feedback. We introduce MMSearch-OPD, combining controllable data refinement with joint reinforcement learning (RL) and on-policy distillation (OPD). Our Refine pipeline performs targeted expansion of reasoning chains derived from existing simple multimodal questions. Parameterized transformations control search depth and cross-modal evidence requirements while re",
+   "url": "https://arxiv.org/abs/2610.22240",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 5,
+   "lab": false,
+   "modules": [
+    "m5",
+    "mm",
+    "rl",
+    "rs"
+   ],
+   "matched": [
+    "distillation",
+    "multimodal",
+    "reasoning",
+    "reinforcement learning"
+   ],
+   "score": 8.5
+  },
+  {
+   "title": "CoWorld Reasoner: Agentic Multimodal Reasoning with the Evolving Video World Model-Driven Harness",
+   "summary": "As Vision-Language Models (VLMs) advance, they are increasingly expected to perform spatiotemporal reasoning over motion, actions, and view changes beyond what the input images show. Video World Models (VWMs) provide a natural unified engine for visual imagination by generating task-relevant visual content as additional evidence. However, existing approaches typically invoke a VWM through fixed pipelines centered on a predefined form of visual imagination, such as novel-view synthesis. To support flexible visual imagination for diverse reasoning tasks, we introduce CoWorld Reasoner, an agentic",
+   "url": "https://arxiv.org/abs/2610.21910",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 2,
+   "lab": false,
+   "modules": [
+    "mm",
+    "rs",
+    "vd"
+   ],
+   "matched": [
+    "multimodal",
+    "reasoning",
+    "vision-language",
+    "world model"
+   ],
+   "score": 8.2
+  },
+  {
+   "title": "Designing Transformers for Continuous Diffusion Language Models",
+   "summary": "Continuous diffusion language models (CDLMs) offer an alternative approach to parallel language generation; however, most existing studies directly use transformer architectures from either causal large language models (LLMs) or Diffusion Transformers (DiTs) for image generation, which were not optimized for CDLMs. In this paper, we conduct a systematic study on Transformer architectures for CDLMs and introduce Language Diffusion Transformer (LangDiT), combining feature and query-key normalization, wider noise conditioning, likelihood-shortcut gradient routing and calibration, and confidence-g",
+   "url": "https://arxiv.org/abs/2610.22330",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "h1",
+    "m1"
+   ],
+   "matched": [
+    "diffusion",
+    "image generation",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "AVC-Reward: Event-Centric Audio-Video Consistency Evaluation",
+   "summary": "As joint audio-video generation models become more capable, they can generate audio-visual scenes exhibiting three forms of complexity: multi-event composition, multi-layer audio mixture, and asymmetric cross-modal relations. However, current evaluations largely reuse metrics from earlier simple and unidirectional tasks. They typically evaluate an audio-video clip as a whole and rely on simple predefined relations, making them unsuitable for these increasingly complex scenes. We propose an event-centric evaluation framework that disentangles audio and visual events at the event level, analyzes",
+   "url": "https://arxiv.org/abs/2610.22321",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m4",
+    "v1",
+    "vd"
+   ],
+   "matched": [
+    "audio",
+    "clip",
+    "evaluation",
+    "video generation"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Routing Policy Optimization for Online Diffusion Reinforcement Learning",
+   "summary": "Reinforcement learning can align visual generators with reward signals beyond their pretraining objectives, but existing score-function methods typically introduce stochasticity by perturbing the reverse denoising trajectory, leading to costly rollout-based optimization. We instead ask whether stochastic exploration can be introduced inside the generator while preserving its original sampler. Routing Policy Optimization (RPO) answers this question by turning attention routing into a stochastic exploration action. At a few selected denoising levels, each query block keeps its own block and samp",
+   "url": "https://arxiv.org/abs/2610.22282",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1",
+    "m2",
+    "rl"
+   ],
+   "matched": [
+    "attention",
+    "diffusion",
+    "pretraining",
+    "reinforcement learning"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Beyond Pairwise Repulsion: Collective Diversity via Determinant Maximization in Diffusion Sampling",
+   "summary": "Strong guidance in text-to-image (T2I) diffusion models concentrates sampling toward high-density modes of the conditional distribution, collapsing independently sampled noise vectors onto nearly identical visual prototypes. This limits utility for tasks that demand distributional breadth, most critically synthetic data augmentation. Diversity, however, is a collective property of the whole batch: a set can preserve every pairwise distance yet still collapse onto a low-dimensional subspace. Existing sum-of-pairwise noise-optimization and repulsion objectives respond only weakly to this higher-",
+   "url": "https://arxiv.org/abs/2610.22267",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1"
+   ],
+   "matched": [
+    "diffusion",
+    "guidance",
+    "sampling",
+    "text-to-image"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Baselines and Score Centering in Policy Gradient Estimation",
+   "summary": "Reinforcement learning has become a widely used approach to post-training large language models. In a typical implementation, learning is off-policy: The policy generating the responses differs from the policy being trained because of training-inference mismatch or policy staleness in asynchronous training. This discrepancy is commonly addressed by importance sampling, whose ratio is usually regularized in practice through truncation, masking, or clipping. Under regularized importance sampling, the importance-weighted policy gradient is no longer invariant to constant shifts in the reward. Thi",
+   "url": "https://arxiv.org/abs/2610.22263",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m1",
+    "m5",
+    "rl"
+   ],
+   "matched": [
+    "inference",
+    "policy gradient",
+    "reinforcement learning",
+    "sampling"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "MOSS: Mode-Oriented Source Shaping for Robot Flow Matching Policies",
+   "summary": "In robotic manipulation, the same observation often admits multiple feasible actions. Generative policies such as diffusion and flow matching naturally capture such multimodal behaviors, yet which mode is executed is left to random sampling and cannot be actively controlled. We propose Mode-Oriented Source Shaping (MOSS), which turns mode selection into an explicit choice of where generation starts. We first reveal, both empirically and theoretically, that deterministic flow transport induces mode-dependent structure in the source space. Under ideal deterministic ODE transport, distinct behavi",
+   "url": "https://arxiv.org/abs/2610.22193",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1",
+    "mm"
+   ],
+   "matched": [
+    "diffusion",
+    "flow matching",
+    "multimodal",
+    "sampling"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Motion- and Gravity-Aware Feedforward 3D Reconstruction",
+   "summary": "Feed-forward transformer models have recently achieved strong performance in multi-view 3D reconstruction, but they still rely primarily on appearance-based attention and often struggle in dynamic scenes with weak geometric cues. In this work, we introduce a motion- and gravity-aware framework under the Learning Using Privileged Information (LUPI) paradigm. During training, residual optical flow and gravity direction are provided as privileged signals to guide geometric representation learning; during inference, the model uses standard visual inputs only. We integrate these priors into transfo",
+   "url": "https://arxiv.org/abs/2610.22177",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "attention",
+    "inference",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "TIPS: A Tiny Inference-time Policy for Scaling in Diffusion Language Models",
+   "summary": "Masked diffusion language models expose an inference-time choice: which positions become visible after each denoising pass. Many existing decoding methods use hand-designed rules or require visibility to grow monotonically. We present a $\\textbf{T}$iny $\\textbf{I}$nference-time $\\textbf{P}$olicy for $\\textbf{S}$caling ($\\textbf{TIPS}$), an approximately $600$K-parameter controller that learns both unmasking and remasking while keeping the underlying language model frozen. TIPS uses visibility-aware confidence features and a shallow transformer to select which tokens should be visible, while a ",
+   "url": "https://arxiv.org/abs/2610.22099",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "h1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "diffusion",
+    "inference",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "SCCL-DT: Semantic-Conflict-Aware Contrastive Learning with Dual-Rule Teacher Distillation for Zero-Shot Chest X-Ray Diagnosis",
+   "summary": "Contrastive vision-language pre-training supports zero-shot chest X-ray diagnosis, but standard objectives treat every off-diagonal image-report pair in a batch as a negative. In radiology, recurring findings across patients mean that instance mismatch need not imply semantic incompatibility, creating false-negative supervision that we term a semantic conflict. A training-trace audit shows that pair-observations selected by the online mask used during training are enriched for report-derived finding agreement, although this proxy analysis does not establish clinical equivalence. Fixed threshol",
+   "url": "https://arxiv.org/abs/2610.22094",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m2",
+    "m5",
+    "mm",
+    "v1"
+   ],
+   "matched": [
+    "contrastive",
+    "distillation",
+    "pre-training",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Retrofitting Recurrent Vision-Language Models from Pretrained Backbones",
+   "summary": "Recent work shows that depth recurrence can be retrofitted into pretrained language models. In this work, we adapt this paradigm for visual understanding, using depth recurrence to reduce the parameter footprint of a pretrained vision-language model (VLM). To this end, we prune layers from the language backbone of the VLM and loop over a subset of the remaining layers. At each step of the loop, a linear adapter merges the block's output with the token representations from the preceding layers and projects the fused representation back into the block. As the pruning impacts the original model p",
+   "url": "https://arxiv.org/abs/2610.22075",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m5",
+    "mm",
+    "p6"
+   ],
+   "matched": [
+    "pruning",
+    "recurrent",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "ABNAT: Attention-Based Noise-Aware Training for Robust Transformers on Analog Compute-in-Memory Systems",
+   "summary": "Transformer-based models have become the backbone of a wide range of tasks, but their intensive computation and data movement incur substantial energy overhead. Analog compute-in-memory (CIM) offers an energy-efficient alternative, yet its inherent hardware non-idealities perturb stored weights and can significantly degrade model performance. Although existing noise-aware training (NAT) methods improve robustness by injecting noise during training, they largely overlook the critical role of attention mechanisms in Transformer inference.To bridge this gap, we analyze how CIM-induced noise resha",
+   "url": "https://arxiv.org/abs/2610.22065",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "attention",
+    "inference",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "FeaTok: Feature-Loss Tokenization for Image Generation",
+   "summary": "Discrete image generators learn the distribution of tokens produced by an image tokenizer. These token representations should be easy for generators to model, not merely enable faithful image reconstruction. Yet these tokenizers are commonly trained to reconstruct pixels, which prioritizes low-level fidelity and may disrupt representation structure useful for generation. Motivated by feature-predictive self-supervised learning, we introduce feature-loss tokenization (FeaTok), which trains discrete tokens by reconstructing pretrained features rather than pixels. Ablations across SigLIP, SigLIP2",
+   "url": "https://arxiv.org/abs/2610.22060",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "p3",
+    "v1"
+   ],
+   "matched": [
+    "image generation",
+    "self-supervised",
+    "tokenization",
+    "tokenizer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Decoding Naturalistic Speech from fMRI with Temporal Modeling and Multimodal Alignment",
+   "summary": "Reconstructing what a person perceives from their brain activity is a stringent test of whether neural recordings carry meaningful information. Naturalistic speech offers a rich testbed for this challenge: it unfolds over multiple timescales, but fMRI's noisy, temporally smeared measurements make this structure hard to recover. We introduce NOEMA, a temporal convolutional decoder that aligns windows of consecutive fMRI measurements with multimodal stimulus embeddings. These embeddings combine complementary text, audio, and speech representations of the same stimulus segment, enabling its retri",
+   "url": "https://arxiv.org/abs/2610.22049",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "mm",
+    "p6"
+   ],
+   "matched": [
+    "audio",
+    "convolutional",
+    "multimodal",
+    "speech"
+   ],
+   "score": 8.0
+  }
+ ]
+}
