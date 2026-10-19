@@ -1,6 +1,6 @@
 {
-  "name": "LLMs, Animated",
-  "short_name": "LLMs Animated",
+  "name": "LLMs From Basics",
+  "short_name": "LLMs",
   "description": "An animated course on LLM training, evaluation and optimization.",
   "start_url": "./index.html",
   "scope": "./",

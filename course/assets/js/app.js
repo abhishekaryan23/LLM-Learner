@@ -86,7 +86,7 @@
     var bar = el(
       '<header class="topbar">' +
         '<button class="btn btn-ghost icon-btn menu-btn" type="button" aria-label="Open lesson list" aria-expanded="false" aria-controls="sidebar">' + I.menu + '</button>' +
-        '<a class="brand" href="' + root + 'index.html">' + MARK + '<span>LLMs<span class="brand-name-long">, Animated</span></span></a>' +
+        '<a class="brand" href="' + root + 'index.html">' + MARK + '<span>LLMs<span class="brand-name-long"> From Basics</span></span></a>' +
         '<nav class="topnav" aria-label="Main">' +
           '<a class="navlink" href="' + root + 'index.html#map"' + (page === "home" ? ' aria-current="page"' : "") + '>' + I.map + '<span class="lbl">Course map</span></a>' +
           '<a class="navlink" href="' + root + 'whats-new.html"' + (page === "new" ? ' aria-current="page"' : "") + '>' + I.spark + '<span class="lbl">What\'s new</span></a>' +
@@ -189,7 +189,7 @@
   }
 
   function buildFooter() {
-    document.body.appendChild(el('<footer class="site-foot"><p>LLMs, Animated · Progress and review cards are saved only in this browser. ' +
+    document.body.appendChild(el('<footer class="site-foot"><p>LLMs From Basics · Progress and review cards are saved only in this browser. ' +
       '<a href="' + root + 'index.html#science">How this course is designed</a></p></footer>'));
   }
 

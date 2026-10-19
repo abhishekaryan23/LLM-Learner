@@ -13,7 +13,7 @@ LC.config = {
 };
 
 LC.course = {
-  title: "LLMs, Animated",
+  title: "LLMs From Basics",
   tracks: [
     {"id": "start", "title": "Start here", "note": "How to learn, and the story of how we got here.", "modules": ["m0", "h1"]},
     {"id": "prereq", "title": "Prerequisites", "note": "Already solid on a topic? Try its quiz first. If you ace it, move on.", "modules": ["p1", "p2", "p3", "p4", "p5", "p6"]},
