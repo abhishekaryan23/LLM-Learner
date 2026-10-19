@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ar-6">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Diffusion language models · LLMs From Basics</title>
+<meta name="description" content="Writing text by unmasking instead of left to right: masked (absorbing-state) diffusion from scratch, the 1/t-weighted training loss, confidence-ordered sampling, why committing tokens in parallel can produce incoherent text, what it costs (no plain KV cache, full-sequence passes), and the landscape: LLaDA, Mercury, Gemini Diffusion, DiffusionGemma and block diffusion.">
+<meta name="theme-color" content="#f7f4ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151412" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Diffusion language models</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 6 of Beyond the dense transformer</span></div>
+<p class="lede">Every chat model you have used writes one token per forward pass, strictly left to right. A different family writes text the way you fill in a crossword: start with a page of blanks, fill in the answers you are surest of, and repeat. Several tokens can land per pass, which is why vendors report speeds above 1,000 tokens per second. This lesson builds <strong>masked diffusion</strong> for text from scratch, shows exactly where the speed comes from, and shows why it can also write "New Francisco".</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how a masked diffusion LM is trained (random mask rate, bidirectional transformer, $1/t$-weighted cross-entropy) and how it samples (start all [MASK], commit the most confident tokens each step).</li>
+    <li>Say why committing several tokens in one pass breaks conditional independence, and how steps trade against quality.</li>
+    <li>Count forward passes and token positions for autoregressive versus diffusion decoding, and name the main models in the field as of late 2026.</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="m2-2.html">M2.2 The next-token objective</a> (cross-entropy on the next token) and <a href="m1-5.html">M1.5 KV cache &amp; sampling</a> (why decoding is sequential, what the cache saves). No Gaussian-diffusion background is assumed. See also, optional: <a href="g1-3.html">G1.3 Diffusion from scratch</a> for the image version of the story.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">An 8B-parameter model in bf16 (16 GB of weights) generates for one user on a GPU with 3.35 TB/s of memory bandwidth. Roughly what is the ceiling on tokens per second, from reading the weights once per token?</p>
+    <ol class="q-src">
+      <li>About 20</li>
+      <li>About 200</li>
+      <li>About 2,000</li>
+      <li>About 20,000</li>
+    </ol>
+    <div class="q-explain">$16\ \text{GB} / 3.35\ \text{TB/s} \approx 4.8$ ms per pass, so about 210 tokens per second, before attention and overheads. Decoding at batch size 1 is limited by memory, not arithmetic. Claims of 1,000+ tokens per second therefore need <em>more than one token per pass</em>.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">A model must fill in a two-word city name, and the answer is "New York" or "San Francisco" with equal probability. If it fills both blanks at once, each sampled from its own distribution, what can happen?</p>
+    <ol class="q-src">
+      <li>It always outputs a valid city, since each word is likely on its own</li>
+      <li>It always outputs "New York", the first option</li>
+      <li>It can output "New Francisco" or "San York": each word is plausible, the pair is not</li>
+      <li>It refuses to answer</li>
+    </ol>
+    <div class="q-explain">Each blank's distribution is half "New"/"San" and half "York"/"Francisco". Sampled independently, half the time the two words disagree. That is the central trap of parallel decoding, and this lesson is built around it.</div>
+  </div>
+</section>
+
+<h2>One token per pass is the bottleneck</h2>
+<p>An autoregressive model (<a href="m2-2.html">M2.2</a>) writes token $i$ after seeing tokens $1 \ldots i-1$. With a KV cache (<a href="m1-5.html">M1.5</a>) each pass handles a single new token, but it still has to stream <em>all</em> the weights from memory to do so. The worked numbers from the warm-up say it all: 16 GB of weights at 3.35 TB/s is about 4.8 ms, a hard floor of roughly 200 tokens per second for one user, however fast the arithmetic. Speculative decoding (<a href="m5-5.html">M5.5</a>) cheats by verifying several drafted tokens per pass. <strong>Diffusion language models</strong> change the generation order itself so that several tokens are produced per pass by design.</p>
+<p>The idea comes from images. Diffusion models (Sohl-Dickstein et al., 2015; Ho et al., 2020) generate a picture by starting from noise and denoising it in many steps. But you cannot add "a little Gaussian noise" to the word <em>cat</em>. Text needs a <strong>discrete</strong> corruption process:</p>
+<ul>
+  <li><strong>D3PM</strong> (Austin et al., 2021) defined discrete diffusion with several corruption types, including an <strong>absorbing state</strong>: a token can jump to a special <code>[MASK]</code> symbol and never leaves it.</li>
+  <li><strong>SEDD</strong> (Lou, Meng &amp; Ermon, 2023; ICML 2024 best paper) trained discrete diffusion with a score-entropy loss. The authors reported 25 to 75% lower perplexity than earlier discrete diffusion models, competitive with GPT-2-scale autoregressive models.</li>
+  <li><strong>MDLM</strong> (Sahoo et al., NeurIPS 2024) showed that the simplest version, plain masking, trains best, and that its loss reduces to a weighted mix of masked cross-entropies.</li>
+  <li><strong>LLaDA</strong> (Nie et al., 2025) scaled that recipe to 8B parameters and instruction tuning.</li>
+</ul>
+<p>Strip away the history and the idea is BERT-style masking with one change. BERT hides a fixed 15% of tokens. A masked diffusion model hides a <em>random fraction</em> anywhere from 0% to 100%. At 100% it has to produce the whole text from nothing, which makes it a generator.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In masked (absorbing-state) diffusion for text, what plays the role of the "noise"?</p>
+  <ol class="q-src">
+    <li>Gaussian noise added to the token embeddings</li>
+    <li>Tokens independently replaced by a special [MASK] token, more and more of them</li>
+    <li>Random typos in the characters of each word</li>
+    <li>Dropout applied to the transformer layers</li>
+  </ol>
+  <div class="q-explain">Corruption means "hide some tokens". Fully noised text is a row of [MASK]s; generation runs the process backwards, from all-[MASK] to a sentence.</div>
+</div></div>
+
+<h2>Training: mask a random fraction, predict the hidden tokens</h2>
+<p>Take a training sequence $x_0$ of $L$ tokens. Draw a <strong>mask rate</strong> $t$ uniformly from $(0, 1)$. Replace each token by <code>[MASK]</code> independently with probability $t$, giving the corrupted sequence $x_t$. A transformer reads $x_t$ and predicts the original token at every masked position. Unlike a GPT, it uses <strong>bidirectional</strong> attention (no causal mask), so a blank can use the words on both sides. The loss, used by LLaDA and derived by MDLM, is:</p>
+$$\mathcal{L}(\theta) = \mathbb{E}_{t,\,x_0,\,x_t}\left[\frac{1}{t}\sum_{i=1}^{L} \mathbf{1}[x_t^i = \texttt{[MASK]}]\;\big(-\log p_\theta(x_0^i \mid x_t)\big)\right]$$
+<p>In words: look only at the positions that were masked ($\mathbf{1}[\cdot]$ is 1 there and 0 elsewhere), take the usual cross-entropy of the true token at each, add them up, and multiply by $1/t$. $p_\theta(x_0^i \mid x_t)$ is the model's probability for the true token given the whole corrupted sequence. For chat models the prompt is never masked: only the response is corrupted.</p>
+<p>Why $1/t$? At mask rate $t$ about $tL$ positions are hidden, so the raw sum is roughly $tL$ times the average cross-entropy. Dividing by $t$ turns it into about $L$ times the average cross-entropy <em>at every mask rate</em>, so easy low-$t$ examples (few blanks, lots of context) and hard high-$t$ examples (few clues) count equally. This is not just a trick: the weighted loss is an upper bound on the true negative log-likelihood, $-\log p_\theta(x_0) \le \mathcal{L}$, i.e. the negative <strong>ELBO</strong> (evidence lower bound). As several papers have shown, it can also be read as an average of autoregressive-style losses over random fill-in orders. So the model learns to predict any token from any subset of the others, which is exactly what it needs at sampling time.</p>
+
+<h3>Worked example</h3>
+<ol class="steps">
+  <li>A sequence has $L = 8$ tokens and we draw $t = 0.25$. Two tokens are masked, with cross-entropies 1.2 and 0.8 nats. Their sum is $2.0$.</li>
+  <li>Weighted loss: $2.0 / 0.25 = 8.0$.</li>
+  <li>Check: the average cross-entropy per masked token is $1.0$, and $L \times 1.0 = 8.0$. The weighting normalizes away how many tokens happened to be masked.</li>
+</ol>
+<p>The training signal is thinner than for a GPT. An autoregressive model gets a loss on all $L$ positions of every sequence. Here only the masked positions count, about half on average, so a masked diffusion model needs more passes over the data to learn the same amount.</p>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>$L = 8$ and $t = 0.5$. Four tokens are masked, with cross-entropies 1.2, 0.9, 0.5 and 0.4.</p>
+  <ol class="steps">
+    <li>Sum of the cross-entropies over masked positions: <span class="blank" data-answer="3" data-tol="0.01" data-hint="1.2 + 0.9 + 0.5 + 0.4."></span></li>
+    <li>Weighted loss, $\text{sum} / t$: <span class="blank" data-answer="6" data-tol="0.01" data-hint="Divide the sum by 0.5."></span></li>
+    <li>Check: average cross-entropy per masked token times $L$: <span class="blank" data-answer="6" data-tol="0.01" data-hint="3.0 / 4 = 0.75 per token; times 8."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Why is the masked-position cross-entropy multiplied by $1/t$?</p>
+  <ol class="q-src">
+    <li>To make examples with few blanks count less than examples with many</li>
+    <li>It is the ELBO weight: the sum has about $tL$ terms, so $1/t$ makes every mask rate contribute comparably, and the total bounds the negative log-likelihood</li>
+    <li>To normalize for the length of the sequence only</li>
+    <li>To penalize confident wrong predictions more</li>
+  </ol>
+  <div class="q-explain">With small $t$ only a few tokens are hidden and the sum is small. Dividing by $t$ rescales, and the result upper-bounds $-\log p_\theta(x_0)$.</div>
+</div></div>
+
+<h2>Sampling: start all-[MASK], commit what you are sure of</h2>
+<p>To generate, pick an answer length $L$ in advance (models typically pad with end-of-text tokens) and a number of steps $N$. Start with $L$ copies of <code>[MASK]</code> after the prompt. Then repeat $N$ times:</p>
+<ol class="steps">
+  <li>Run the transformer once over the whole sequence. It outputs a probability distribution for <em>every</em> masked position.</li>
+  <li>Score each masked position by <strong>confidence</strong>, usually the probability of its top token (or low entropy).</li>
+  <li>Commit the $k = L/N$ most confident positions: sample or take the argmax token there. Leave every other position as <code>[MASK]</code>.</li>
+</ol>
+<p>The remaining blanks are predicted again on the next pass, now with more context. This is the "low-confidence remasking" rule used by LLaDA: predict everything, keep the best, hide the rest. Because the positions are chosen by confidence rather than left to right, formulaic tokens such as function words and the final full stop tend to land early, and the words that depend on them land later. The same confident-first parallel unmasking drives MaskGIT (Chang et al., 2022) for images (<a href="g1-6.html">G1.6</a>).</p>
+<p>Two practical consequences. First, <strong>quality improves with more steps</strong>: with $N = L$ you commit one token per pass (the slowest, most careful setting), and with $N = 1$ the model must produce everything from a single guess. Second, <strong>the length is fixed up front</strong>: you cannot simply keep generating until the model decides it is done, which is awkward for chat. Block diffusion (the last byte) addresses that.</p>
+<p>For a 256-token answer with $N = 32$ steps, $k = 256 / 32 = 8$ tokens are committed per pass. Compare 256 passes for an autoregressive model.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">A 256-token answer is sampled with $N = 32$ steps. How many tokens are committed per forward pass, on average?</p>
+  <ol class="q-src">
+    <li>1</li>
+    <li>8</li>
+    <li>32</li>
+    <li>256</li>
+  </ol>
+  <div class="q-explain">$256 / 32 = 8$. Fewer steps means more tokens per pass: $k = L/N$.</div>
+</div></div>
+
+<h2>Watch it fill, and watch it fail</h2>
+<p>Here is the same short sentence written both ways, followed by the failure that limits how aggressive you can be. Step through all seven steps.</p>
+
+<figure class="anim wide" data-anim="ar-6-fill"></figure>
+
+<p>The failure comes from what the network outputs. For each masked position it gives a distribution over the vocabulary, <em>independently of what the other masked positions will become</em>. Committing $k$ tokens in one pass samples from the <strong>product of marginals</strong>, $\prod_j p(x^j \mid x_t)$, instead of the true joint $p(x^1, \ldots, x^k \mid x_t)$. If the blanks are independent given the context, nothing is lost. If they are tied together, it breaks.</p>
+<p>Take "New York", "San Francisco" and "Los Angeles", equally likely. Blank 1 is New, San or Los with probability $1/3$ each; blank 2 is York, Francisco or Angeles. Sampled independently there are $3 \times 3 = 9$ pairs and only 3 are real cities, so the result is coherent with probability $1/3$. The information shared by the two blanks, their <strong>mutual information</strong> $\log_2 3 \approx 1.58$ bits, is exactly what a parallel commit throws away. Commit one blank first and the second becomes certain.</p>
+<p>So the sampler commits <em>confident</em> tokens together: a token with a 99% top probability is nearly determined, and guessing it in parallel with others costs almost nothing. Fast-dLLM (Wu et al., 2025; ICLR 2026) names the problem (breaking dependencies under conditional independence) and commits whatever clears a confidence threshold, rather than a fixed count.</p>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why is committing two <em>high-confidence</em> tokens in the same pass usually safe?</p>
+  <ol class="q-src">
+    <li>High-confidence tokens are always identical</li>
+    <li>The model is retrained after every pass</li>
+    <li>A token that is nearly certain barely depends on the other blanks, so the product of marginals is close to the true joint</li>
+    <li>Confidence guarantees that the pair also appears in the training data</li>
+  </ol>
+  <div class="q-explain">The loss from parallel commits is the information shared between the tokens. Near-deterministic tokens share almost none.</div>
+</div></div>
+
+<h2>Steps versus quality: a toy you can play with</h2>
+<p>Here is a toy with exact numbers: 4 two-word names (8 tokens), each one of 3 equally likely phrases (New York, San Francisco, Los Angeles style), a perfect model, and $k$ tokens committed per pass. Committing all 8 tokens in one pass gives 33% coherent names, 2 passes give 71%, 4 passes 85% and 8 passes 100%. (Tokens whose partner is already known are committed first, since they are certain; every other tie is broken at random.) Try your own $k$, and make the names more or less ambiguous.</p>
+
+<section class="playground" id="ar6-commit" aria-labelledby="ar6pg">
+  <h3 id="ar6pg">Playground: how many tokens per pass?</h3>
+  <p class="math-note" style="margin:0">Tiles show the 8 tokens grouped by the pass that commits them. The bars show passes used and how many names come out coherent.</p>
+  <div class="pg-stage"></div>
+  <div class="pg-controls">
+    <label><span>Tokens committed per pass $k$ = <output data-out="k">2</output></span>
+      <input type="range" data-in="k" min="1" max="8" step="1" value="2">
+    </label>
+    <label><span>Equally likely phrases per name = <output data-out="m">3</output></span>
+      <input type="range" data-in="m" min="1" max="4" step="1" value="3">
+    </label>
+  </div>
+  <p class="pg-readout" aria-live="polite"></p>
+</section>
+
+<p>Two lessons fall out. With one phrase per name (every token certain) you can commit everything in one pass at no cost. The more ambiguous the text, the more passes you must spend. Real text sits in between: much of it is highly predictable, which is why real diffusion LMs work at several tokens per pass, but open-ended or tightly constrained text (code, arithmetic, names that must agree) needs more care. The curve in a real model depends on the model, the task and the sampler; this toy only shows the shape.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">Two blanks must be "red car" or "blue sky", equally likely. Both are sampled independently in one pass. What is the probability that the result is a valid phrase?</p>
+  <ol class="q-src">
+    <li>1/4</li>
+    <li>1/2</li>
+    <li>3/4</li>
+    <li>1</li>
+  </ol>
+  <div class="q-explain">Each blank is 50/50 between the two options, so the pair agrees half of the time: red car, blue sky are 2 of the 4 equally likely combinations.</div>
+</div></div>
+
+<h2>What diffusion costs: no plain KV cache, full-sequence passes</h2>
+<p>Fewer passes is not free. A causal transformer can cache keys and values because a token never looks at later tokens: once computed, its K and V never change. A diffusion LM uses <strong>bidirectional</strong> attention, so every time a new token is committed, the hidden states, and hence the keys and values, of <em>every other position</em> change. A plain KV cache would be stale. So each pass reprocesses the whole sequence. Three costs follow:</p>
+<ul>
+  <li><strong>More compute per generated token.</strong> Autoregressive decoding with a cache processes about one new position per generated token. Diffusion processes all $L$ positions on every one of its $N$ passes.</li>
+  <li><strong>No simple caching.</strong> Workarounds exist (block-wise approximate caches such as Fast-dLLM's, or block diffusion's exact cache of finished blocks), but they add complexity.</li>
+  <li><strong>Training is data-hungry.</strong> Only masked positions give a loss, about half of each sequence on average, so diffusion needs many passes over the training data. The NCM authors (next lesson) report needing several times fewer training tokens than their diffusion baselines, and give this as one reason.</li>
+</ul>
+
+<h3>Worked example: a 256-token answer</h3>
+<ol class="steps">
+  <li><strong>Autoregressive with KV cache:</strong> 256 forward passes, each processing 1 new position: 256 positions of compute in total.</li>
+  <li><strong>Diffusion with $N = 64$ steps:</strong> 64 passes, each processing all 256 positions: $64 \times 256 = 16{,}384$ positions. That is $64\times$ the compute ($= N$), in $4\times$ fewer passes ($256/64$). It commits $256/64 = 4$ tokens per pass.</li>
+  <li><strong>Does fewer passes mean faster?</strong> At batch size 1 on an H100-class GPU (about 990 TFLOP/s bf16 and 3.35 TB/s), a pass costs about the larger of two times. Reading 16 GB of weights takes about 4.8 ms. The arithmetic for 256 positions of an 8B model, $2 \times 8\text{B} \times 256 \approx 4.1$ TFLOP, takes about 4.1 ms. They are close, so a 256-position pass takes about as long as a 1-token pass. Roughly: AR $\approx 256 \times 4.8$ ms $\approx 1.2$ s; diffusion at $N = 64$ $\approx 64 \times 4.8$ ms $\approx 0.31$ s, about $4\times$ faster.</li>
+  <li><strong>Serve 64 users at once:</strong> the extra arithmetic is no longer hidden. An autoregressive pass now carries 64 tokens and is still memory-bound, so all 64 users finish in about 1.2 s. A diffusion pass carries $64 \times 256 = 16{,}384$ positions, about 265 ms of arithmetic, times 64 passes $\approx 17$ s. (Back-of-envelope: ignores attention, overheads and the prompt.)</li>
+</ol>
+<p>That is why diffusion LM speed claims are about <strong>single-stream latency</strong>, and why batched serving, where autoregressive models already keep the GPU busy, is much less favourable. The gap shrinks as $N$ falls, which is exactly where quality suffers.</p>
+
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>A 512-token answer with a diffusion LM using $N = 128$ steps.</p>
+  <ol class="steps">
+    <li>Tokens committed per pass: <span class="blank" data-answer="4" data-tol="0.01" data-hint="512 / 128."></span></li>
+    <li>Positions processed in total (all 512 on each of the 128 passes): <span class="blank" data-answer="65536" data-tol="1" data-hint="128 × 512."></span></li>
+    <li>That is how many times the 512 positions an autoregressive model with a cache processes: <span class="blank" data-answer="128" data-tol="0.01" data-hint="65,536 / 512 = N."></span></li>
+    <li>If a pass costs the same either way (batch 1), how many times fewer passes: <span class="blank" data-answer="4" data-tol="0.01" data-hint="512 passes for AR, 128 for diffusion."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Why can't a bidirectional diffusion LM reuse a plain KV cache the way a GPT does?</p>
+  <ol class="q-src">
+    <li>Diffusion models have no attention layers</li>
+    <li>The cache would be too large to fit in memory</li>
+    <li>Each newly committed token changes the keys and values of every other position, so cached ones go stale</li>
+    <li>Keys and values are only defined for the prompt</li>
+  </ol>
+  <div class="q-explain">In a causal model an old token never sees new ones, so its K and V stay fixed. With bidirectional attention they depend on the whole sequence.</div>
+</div></div>
+
+<h2>Block diffusion and the landscape (as of October 2026)</h2>
+<p>If a full-sequence diffusion model is awkward (fixed length, no cache) and an autoregressive model is sequential, interpolate. <strong>Block diffusion</strong> (BD3-LM; Arriola et al., ICLR 2025 oral) generates the answer <em>block by block</em> left to right, and runs masked diffusion <em>inside</em> each block. Finished blocks never change, so their keys and values can be cached exactly; generation can continue block after block until the model emits an end token, so lengths are flexible. The block size $B$ is a dial: $B = 1$ is an ordinary autoregressive model, and $B = L$ is full masked diffusion. Where things stand, with vendor speeds marked as <strong>reported</strong>:</p>
+<ul>
+  <li><strong>LLaDA</strong> (Nie et al., 2025): an 8B masked diffusion model trained from scratch on 2.3 trillion tokens, which the authors report to be competitive with LLaMA3 8B on in-context learning. <strong>LLaDA 2.0</strong> (Ant Group's inclusionAI, Dec 2025) converts pretrained autoregressive models to block diffusion and released instruction-tuned 16B and 100B mixture-of-experts models (the 100B has about 6B active parameters).</li>
+  <li><strong>Mercury</strong> (Inception Labs): marketed as the first commercial-scale diffusion LM. The 2025 paper (Mercury Coder Mini and Small) reported, via the independent Artificial Analysis benchmark, 1,109 and 737 tokens per second on H100 GPUs. Mercury 2 (24 Feb 2026) is a reasoning model with a reported throughput of about 1,000 tokens per second, and Mercury 2.5 (preview 31 Aug, launched 8 Sep 2026) is reported at about 1,100 tokens per second with a 260K context window. These are the vendor's figures.</li>
+  <li><strong>Gemini Diffusion</strong> (Google DeepMind): an experimental text-diffusion model shown at Google I/O in May 2025 through a waitlist demo. Google reported about 1,479 tokens per second of sampling speed (excluding about 0.84 s of overhead).</li>
+  <li><strong>DiffusionGemma</strong> (Google DeepMind, 10 June 2026): an open-weights (Apache 2.0) 26B mixture-of-experts text-diffusion model with roughly 4B active parameters, built on Gemma 4. It is reported to refine blocks of 256 tokens in parallel. Google reports up to $4\times$ faster generation (1,000+ tokens per second on one H100), with the gain largest at small batch sizes, with lower overall quality than the autoregressive Gemma 4, which it still recommends when quality matters most.</li>
+  <li><strong>Newest:</strong> <strong>next-concept modeling</strong> (a preprint from October 2026, covered next) keeps parallel decoding but generates coarse to fine, so the number of passes is the number of levels rather than the number of diffusion steps.</li>
+</ul>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body">
+    <div>
+      <p>Imagine a sentence written on a whiteboard, with every word covered by a sticky note. One kind of writer lifts the first note and writes the first word, then the second, then the third: <strong>one word at a time</strong>, always left to right.</p>
+      <p>The other kind of writer looks at the whole board of sticky notes and says: "I'm <em>sure</em> this one is 'the', and I'm sure that one is a full stop." They write those <strong>all at once</strong>. Then they look at the board again, now with a few words showing, and write the next few they are sure about, until the board is full.</p>
+      <p>The second writer finishes in fewer rounds. But if two helpers each fill in a blank at the same moment without talking, one might write "New" and the other "Francisco".</p>
+      <p>Where it breaks: a real model fills all the blanks with one brain in one go, so it does not "talk" to itself about the other blanks until the next round. And every round it has to re-read the whole board, which is more work than adding one word to the end.</p>
+    </div>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters in practice:</strong> diffusion LMs attack the latency of one user at a time, which suits interactive uses such as coding assistants, autocomplete and voice agents. They also infill and edit naturally, since any position can be a blank. But as of late 2026 the strongest general-purpose models are still autoregressive, speed claims are mostly single-stream, and batched serving favours autoregressive decoding. Compare tokens per second <em>and</em> quality at the same load, and be careful with "reported" numbers.</div>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">In block diffusion (BD3-LM), what does a block size of 1 give you?</p>
+  <ol class="q-src">
+    <li>An ordinary autoregressive model: one token per step, left to right</li>
+    <li>Full masked diffusion over the whole sequence</li>
+    <li>A model with no cache</li>
+    <li>A model that can only write one block</li>
+  </ol>
+  <div class="q-explain">$B = 1$ means diffusion inside a block of one token, which is next-token prediction. At the other extreme $B = L$ is full masked diffusion; useful models sit in between.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">How does a masked diffusion LM generate text, and what do you give up when you commit more tokens per step?</p>
+  <div class="model-answer"><strong>Model answer:</strong> It starts with every answer position set to [MASK] and, on each step, runs a bidirectional transformer once to predict all the blanks, then commits the most confident positions and leaves the rest masked, so several tokens land per pass. It is trained by masking a random fraction $t$ of a sequence and minimizing the $1/t$-weighted cross-entropy on the masked tokens. Committing more tokens per step means sampling them independently from their own marginals, so dependent tokens can disagree ("New Francisco") and quality drops; fewer steps is faster but less coherent, and every pass also reprocesses the whole sequence.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">A 128-token answer is sampled with $N = 16$ diffusion steps. Compared with an autoregressive model with a KV cache, how many token positions are processed in total?</p>
+    <ol class="q-src">
+      <li>The same, 128</li>
+      <li>16</li>
+      <li>8 times fewer</li>
+      <li>$16 \times 128 = 2{,}048$, which is 16 times as many</li>
+    </ol>
+    <div class="q-explain">Each of the 16 passes reprocesses all 128 positions, while the cached autoregressive model processes 128 new positions in total. The price of 16 passes instead of 128 is $N = 16$ times the arithmetic.</div>
+  </div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">Interleaving with <a href="m1-5.html">M1.5</a>: at batch size 1, why can one diffusion pass over 256 positions take about as long as one autoregressive pass over 1 token?</p>
+    <ol class="q-src">
+      <li>Diffusion passes skip most of the layers</li>
+      <li>Both pass times are dominated by streaming the same weights from memory, and 256 positions' arithmetic fits in that time</li>
+      <li>The diffusion pass uses a smaller model</li>
+      <li>Both have the same number of attention heads</li>
+    </ol>
+    <div class="q-explain">Decoding at batch size 1 is memory-bound. Up to a few hundred positions per pass (the GPU's arithmetic-to-bandwidth ratio) extra positions are almost free; beyond that, or with many users batched, the arithmetic dominates.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">Why does the sampler commit the <em>most confident</em> positions first, rather than a random subset?</p>
+    <ol class="q-src">
+      <li>Confident tokens are cheaper to compute</li>
+      <li>It makes the answer shorter</li>
+      <li>Confident tokens are nearly determined, so committing them in parallel loses little, and they give context that makes the remaining blanks easier</li>
+      <li>It lets the model skip training</li>
+    </ol>
+    <div class="q-explain">Parallel commits cost the dependence between the committed tokens. Near-certain tokens carry almost none, and once they are filled in the other blanks become less ambiguous.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Which sentence about training masked diffusion LMs is correct?</p>
+    <ol class="q-src">
+      <li>The mask rate $t$ is drawn at random for each sequence, the transformer is bidirectional, and the loss counts only the masked positions, weighted by $1/t$</li>
+      <li>The mask rate is fixed at 15% and the transformer is causal</li>
+      <li>Gaussian noise is added to embeddings and the model predicts the noise</li>
+      <li>Every position gives a loss, as in next-token prediction</li>
+    </ol>
+    <div class="q-explain">Only hidden tokens are predicted, so each sequence gives less signal than in a GPT. Varying $t$ from 0 to 1 is what turns BERT-style masking into a generative model.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>Masked diffusion trains a bidirectional transformer to fill in tokens hidden at a random rate $t$, with loss $\tfrac1t\sum_{\text{masked}} -\log p_\theta$ (an ELBO).</li>
+    <li>Sampling starts all-[MASK] and commits the $k = L/N$ most confident positions per pass, so $N$ passes replace $L$.</li>
+    <li>Parallel commits sample from a product of marginals and lose the dependence between the tokens ("New Francisco"). More steps means higher quality, fewer steps means higher speed.</li>
+    <li>Costs: every pass reprocesses all $L$ positions (compute $\approx N\times$ an autoregressive model with a cache), there is no plain KV cache, and training needs many passes over the data. Speed gains are mostly single-stream.</li>
+    <li>As of late 2026: LLaDA and LLaDA 2.0, Mercury 2.5, Gemini Diffusion and DiffusionGemma (reported speeds), with block diffusion (BD3-LM) as the hybrid that restores caching and flexible length.</li>
+  </ul>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ar-6-a","front":"How is a masked diffusion LM trained?","back":"Draw a mask rate $t \\sim U(0,1)$, replace each token by [MASK] with probability $t$, and predict the originals with a bidirectional transformer. Loss: $\\frac{1}{t}\\sum_{i\\,\\text{masked}} -\\log p_\\theta(x_0^i \\mid x_t)$, an upper bound on negative log-likelihood (ELBO)."},
+  {"id":"ar-6-b","front":"Why the $1/t$ weight?","back":"About $tL$ tokens are masked, so the raw sum scales with $t$. Dividing by $t$ gives about $L \\times$ average cross-entropy at every mask rate, and the weighted loss upper-bounds $-\\log p_\\theta(x_0)$."},
+  {"id":"ar-6-c","front":"How does a masked diffusion LM sample?","back":"Start with $L$ [MASK]s. For $N$ steps: one forward pass predicts all blanks; commit the $L/N$ most confident positions; leave the rest masked. Length is fixed in advance."},
+  {"id":"ar-6-d","front":"Why does committing several tokens per pass hurt quality?","back":"Each blank gets its own distribution, so a parallel commit samples the product of marginals, not the joint. Dependent tokens can disagree: New York / San Francisco gives \"New Francisco\" half or more of the time. What is lost (the KL from joint to product of marginals) is exactly the mutual information between the tokens."},
+  {"id":"ar-6-e","front":"256-token answer: AR vs diffusion with $N = 64$?","back":"AR with cache: 256 passes, 256 positions. Diffusion: 64 passes $\\times$ 256 positions = 16,384 positions ($N\\times$ compute), 4 tokens per pass, about $4\\times$ fewer passes. Faster only if passes are memory-bound (batch size 1)."},
+  {"id":"ar-6-f","front":"What is block diffusion (BD3-LM) and who is in the field?","back":"Autoregressive over blocks, masked diffusion inside each block (Arriola et al., 2025); block size 1 is AR, block size $L$ is full diffusion; finished blocks can be cached. Field: LLaDA (8B, 2025), Mercury 2.5, Gemini Diffusion, DiffusionGemma (open, 2026)."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ar-6-fill.js"></script>
+<script src="../assets/js/anims/ar-6-commit-playground.js"></script>
+</body>
+</html>
