@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en" data-root="../" data-lesson="ar-7">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Next-concept modeling (NCM) · LLMs From Basics</title>
+<meta name="description" content="Generating text coarse to fine: a multiscale residual-VQ tokenizer turns text into a hierarchy of discrete codes, and a transformer writes it one level at a time, with all positions of a level in parallel. What the October 2026 NCM preprint reports against diffusion language models, what it does not show, and how it relates to Large Concept Models, VAR and residual codes.">
+<meta name="theme-color" content="#f7f4ee" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#151412" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../assets/icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/icons/icon-180.png">
+<link rel="stylesheet" href="../assets/vendor/katex/katex.min.css">
+<link rel="stylesheet" href="../assets/css/main.css">
+<script>try{var t=JSON.parse(localStorage.getItem("llmc:v1:theme"));if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+</head>
+<body>
+<div class="page"><div class="lesson-layout">
+<nav class="sidebar" id="sidebar" aria-label="All lessons"></nav>
+<main class="content" id="main">
+
+<p class="kicker" data-kicker></p>
+<h1>Next-concept modeling (NCM)</h1>
+<div class="lesson-meta"><span data-mins></span><span>Lesson 7 of Beyond the dense transformer</span></div>
+<p class="lede">Autoregressive models need one pass per token. Diffusion language models need many passes over the whole sequence, and still trip over parallel commits. In October 2026 a Stanford group (Hazy Research) proposed a third way: write a sentence the way a painter paints, as a rough sketch first and details last, so that generation takes about one pass per <em>level</em>, around a dozen, however many tokens there are. This lesson explains the mechanism from the released code and the authors' own numbers, and is careful about what a two-week-old preprint can and cannot tell you.</p>
+
+<section class="objectives" aria-labelledby="obj">
+  <h2 id="obj">By the end you can</h2>
+  <ul>
+    <li>Explain how a multiscale residual-VQ tokenizer turns text into a hierarchy of discrete codes, and how a transformer generates it level by level, with all positions of a level in parallel.</li>
+    <li>Count forward passes and positions for autoregressive, diffusion and next-concept generation, and say why coarse-to-fine parallel commits conflict less than diffusion's.</li>
+    <li>State exactly what the NCM results compare against (diffusion LMs, not GPT-class models), and name the open questions and relatives (Large Concept Models, VAR, residual codes).</li>
+  </ul>
+</section>
+
+<div class="why"><strong>Prerequisites:</strong> <a href="ar-6.html">AR.6 Diffusion language models</a> (parallel commits, steps versus quality, the cost of full-sequence passes) and <a href="p6-4.html">P6.4 Autoencoders &amp; representation learning</a> (an encoder, a compressed code and a decoder). Helpful but optional: <a href="g1-6.html">G1.6 Diffusion transformers &amp; autoregressive images</a> (VAR's next-scale prediction is the image-world cousin) and <a href="a1-3.html">A1.3 Neural audio codecs</a> (residual vector quantization).</div>
+
+<div class="why"><strong>Status check:</strong> NCM is a preprint (arXiv:2610.14162, October 2026; blog post 12 October 2026) from Hazy Research at Stanford with collaborators including Together AI. Code and checkpoints are public under the MIT license. All numbers below are the authors' own, measured against diffusion language models on academic benchmarks. As of this writing (October 2026) they have not been independently replicated.</div>
+
+<section class="card" data-pretest aria-labelledby="pt">
+  <div class="card-label" id="pt">Warm-up · guess before you learn</div>
+  <p>Take your best guess. Being wrong now helps the right answer stick later.</p>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">A model writes a 128-token text in 12 levels, coarse to fine, and generates all positions of a level at once. How many sequential forward passes does one sample take?</p>
+    <ol class="q-src">
+      <li>1</li>
+      <li>12</li>
+      <li>128</li>
+      <li>1,536</li>
+    </ol>
+    <div class="q-explain">One pass per level: 12, not 128. The number of passes is set by the number of levels, not by the length of the text.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In <em>residual</em> quantization, what does the second codebook encode?</p>
+    <ol class="q-src">
+      <li>The next token after the one the first codebook encoded</li>
+      <li>A second, independent copy of the same vector</li>
+      <li>What is left over (the residual) after the first codebook's approximation is subtracted</li>
+      <li>The prompt</li>
+    </ol>
+    <div class="q-explain">Each stage quantizes the error of the stages before it, so the codes refine each other. Audio codecs use this (A1.3). NCM uses a version that also changes the resolution at each stage.</div>
+  </div>
+</section>
+
+<h2>From many steps to a few levels</h2>
+<p>An autoregressive model (<a href="m2-2.html">M2.2</a>) writes token $i$ after tokens $1 \ldots i-1$: $L$ tokens, $L$ sequential passes. Masked diffusion (<a href="ar-6.html">AR.6</a>) commits several tokens per pass, but needs $N$ steps (often tens to a hundred or more), reprocesses all $L$ positions on each, and loses quality when the tokens committed together depend on each other ("New Francisco"). Both walk in the same direction, through the <em>positions</em> of the text.</p>
+<p>Images faced the same problem first. Early autoregressive image models (DALL·E, 2021) generated a 32 &times; 32 grid of tokens in raster order: 1,024 sequential passes. <strong>VAR</strong> (Tian et al., 2024, "Visual Autoregressive Modeling", NeurIPS 2024 best paper; see <a href="g1-6.html">G1.6</a>) changed what "next" means. It predicts a $1 \times 1$ token map, then $2 \times 2$, then $3 \times 3$ and so on up to full resolution, each whole map in one pass, conditioned on all coarser maps. About ten passes instead of a thousand, with the global layout fixed before the fine details.</p>
+<p><strong>Next-concept modeling</strong> (NCM; Kumbong, Khare, Mlauzi, Woen, Ding, Buchanan, Arora, Mirhoseini and R&eacute;, 2026) asks the same question for text. Its answer has two parts, taken from the authors' README and code:</p>
+<ol>
+  <li>A learned <strong>tokenizer</strong> turns a token sequence into a hierarchy of discrete codes, from a handful of coarse codes at the top to one code per token at the bottom. The authors call these codes <strong>concepts</strong> when they are coarse.</li>
+  <li>A <strong>transformer</strong> then predicts the hierarchy from coarse to fine. All positions inside one level are generated in parallel, so generation takes <strong>one forward pass per level</strong>.</li>
+</ol>
+<p>The word "concept" invites over-reading. The codes are learned by an autoencoder, not defined by people, and nothing in the method promises that a coarse code means "this is about a boat". What the hierarchy does guarantee, by construction, is that each level is a refinement of the one above.</p>
+
+<div class="byte-check"><div class="q" data-answer="0">
+  <p class="q-prompt">What does VAR's "next-scale prediction" predict at each step?</p>
+  <ol class="q-src">
+    <li>A whole token map at the next higher resolution, all positions in parallel, conditioned on the coarser maps</li>
+    <li>The next token in raster order</li>
+    <li>The noise to remove from the image</li>
+    <li>A single pixel</li>
+  </ol>
+  <div class="q-explain">That is why VAR needs about ten passes instead of a thousand. NCM applies the same coarse-to-fine idea to text.</div>
+</div></div>
+
+<h2>The tokenizer: a hierarchy of codes</h2>
+<p>Take a sequence of $L$ tokens. An <strong>encoder</strong> (a small transformer, the "autoencoder" of <a href="p6-4.html">P6.4</a>) maps it to a continuous vector for each position, $z \in \mathbb{R}^{L \times d}$. The released NCM tokenizers then apply <strong>multiscale residual vector quantization</strong>, the construction VAR introduced for images, here on a 1D sequence. Pick level lengths $\ell_1 < \ell_2 < \dots < \ell_K = L$. Start with the residual $r_1 = z$. For each level $k$:</p>
+$$q_k = \text{Quantize}_k\big(\text{down}_{\ell_k}(r_k)\big), \qquad r_{k+1} = r_k - \text{up}_L(q_k), \qquad \hat z = \sum_{k=1}^{K} \text{up}_L(q_k)$$
+<p>In words: shrink the current residual to $\ell_k$ positions by averaging neighbours ($\text{down}$), snap each of the $\ell_k$ vectors to its nearest entry in that level's codebook ($\text{Quantize}_k$; the entry's index is the <strong>code</strong>), stretch the result back to $L$ positions by interpolation ($\text{up}$), and subtract it from the residual so the next level encodes only what is still missing. The sum $\hat z$ is the reconstruction so far. A <strong>decoder</strong> turns the final $\hat z$ into tokens, and the tokenizer is trained so that this round trip reproduces the text. It is then frozen.</p>
+<p>Compared with the residual quantization of audio codecs (<a href="a1-3.html">A1.3</a>), where every level has the same time resolution, here the early levels are also <em>short</em>: level 1 summarizes the whole sequence with a few positions. To make the early levels carry real information (and not just wait for the fine ones to fix everything), the tokenizer is trained so that the reconstruction from only the first few levels must already be reasonable. The released code randomly truncates the cumulative reconstruction to a prefix of the levels during training (a form of nested dropout).</p>
+<p>Concretely, from the released configuration files: for 128-token samples (the LM1B and TinyStories settings) there are <strong>12 levels</strong> with 1, 8, 16, 24, 32, 40, 52, 64, 76, 92, 108 and 128 positions, and codebooks of 4,096 to 8,192 entries per level. For XSum summaries of 48 tokens there are 9 levels with 4, 6, 10, 14, 20, 26, 32, 40 and 48 positions. These level sizes are chosen by hand in the config, not learned.</p>
+
+<h3>Worked example: counting codes</h3>
+<ol class="steps">
+  <li>LM1B levels: $1 + 8 + 16 + 24 + 32 + 40 + 52 + 64 + 76 + 92 + 108 + 128 = 641$ codes for a 128-token sample.</li>
+  <li>That is $641/128 \approx 5$ codes per token: the representation is <em>over-complete</em>, not a compression. The point is the schedule, not the size.</li>
+  <li>But it takes only 12 sequential passes, each covering a whole level at once.</li>
+</ol>
+
+<section class="card" aria-labelledby="ft1">
+  <div class="card-label" id="ft1">Your turn · faded example</div>
+  <p>XSum summaries: 48 tokens, levels of 4, 6, 10, 14, 20, 26, 32, 40 and 48 positions.</p>
+  <ol class="steps">
+    <li>Total number of codes in a sample: <span class="blank" data-answer="200" data-tol="0.5" data-hint="4 + 6 + 10 + 14 + 20 + 26 + 32 + 40 + 48."></span></li>
+    <li>Sequential forward passes (one per level): <span class="blank" data-answer="9" data-tol="0.01" data-hint="Count the levels."></span></li>
+    <li>Autoregressive passes divided by NCM passes (2 decimals): <span class="blank" data-answer="5.33" data-tol="0.02" data-hint="48 / 9."></span></li>
+    <li>Codes per token (2 decimals): <span class="blank" data-answer="4.17" data-tol="0.02" data-hint="200 / 48."></span></li>
+  </ol>
+</section>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">In multiscale residual quantization, what does level $k$ quantize?</p>
+  <ol class="q-src">
+    <li>The original encoder output $z$ again, at a different resolution</li>
+    <li>The residual: what is left of $z$ after subtracting the stretched-up reconstruction from levels $1 \ldots k-1$, shrunk to $\ell_k$ positions</li>
+    <li>The next token</li>
+    <li>A random subset of positions</li>
+  </ol>
+  <div class="q-explain">Each level adds detail the coarser levels could not express. The sum of the stretched-up levels is the reconstruction.</div>
+</div></div>
+
+<h2>The generator: one pass per level</h2>
+<p>Now a second transformer, the <strong>generator</strong>, learns to produce the hierarchy. In the released code, its configs describe an ordinary 12-layer, 768-wide transformer (GPT-2-small sized), with a prompt or prefix when the task needs one (for XSum, the 512-token article). Sampling goes level by level:</p>
+<ol class="steps">
+  <li>Start with an empty reconstruction. At level 1 the generator predicts the $\ell_1$ coarsest codes, all positions in one pass.</li>
+  <li>Look up each sampled code's codebook vector, stretch the level up to full length and add it to the running reconstruction $\hat z$.</li>
+  <li>That partial reconstruction (plus level and position encodings) is the generator's <strong>input</strong> for level 2. It predicts all $\ell_2$ codes at once, each conditioned on the whole plan so far. Repeat down to level $K$.</li>
+  <li>The frozen decoder turns the final reconstruction into tokens.</li>
+</ol>
+<p>Training is <strong>teacher-forced</strong>, as in VAR: the true coarse codes of a training sample build the input for each level, so every level can be trained in one pass over the sample (the released code uses a block-diagonal attention pattern over the levels). In several released configs the output heads are tied to the codebook, so the generator scores each entry by its closeness to a predicted vector. Positions inside a level attend to each other (no causal mask within a level), so a position can use its neighbours' <em>inputs</em>, though not their not-yet-sampled outputs.</p>
+<p>Compare the three ways of writing $L$ tokens. Autoregressive: $L$ passes, one new position each. Diffusion: $N$ passes over all $L$ positions. NCM: $K$ passes, each over only that level's $\ell_k$ positions. Step through the figure, including the last two steps.</p>
+
+<figure class="anim wide" data-anim="ar-7-levels"></figure>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">Within one level of NCM, in what order are the codes generated?</p>
+  <ol class="q-src">
+    <li>Left to right, one per pass</li>
+    <li>Most confident first, over several passes</li>
+    <li>All positions in parallel in a single pass, each conditioned on the coarser levels</li>
+    <li>In random order</li>
+  </ol>
+  <div class="q-explain">That is the whole speed argument: one pass per level. What keeps the parallel sampling coherent is the plan fixed by the levels above.</div>
+</div></div>
+
+<h2>Why coarse-to-fine helps where diffusion struggles</h2>
+<p>Two reasons, the first about <strong>cost</strong> and the second about <strong>quality</strong>.</p>
+<p><strong>Few passes, small passes.</strong> Diffusion pays $N$ passes over all $L$ positions and has no plain KV cache (<a href="ar-6.html">AR.6</a>). NCM pays $K$ passes, where $K$ is the number of levels (9 to 12 in the released configs), and each pass handles only that level's positions.</p>
+<h3>Worked example: one 128-token sample</h3>
+<ol class="steps">
+  <li><strong>Autoregressive with KV cache:</strong> 128 passes, 128 positions processed in total.</li>
+  <li><strong>Diffusion with $N = 64$ steps</strong> (an illustrative setting; real baselines use many settings): 64 passes, each over all 128 positions: $64 \times 128 = 8{,}192$ positions.</li>
+  <li><strong>NCM with the 12 LM1B levels:</strong> 12 passes over $641$ positions in total (the codes counted above), plus the prompt if there is one. That is $128/12 \approx 10.7\times$ fewer passes than autoregressive, $64/12 \approx 5.3\times$ fewer than this diffusion, and $8{,}192/641 \approx 12.8\times$ fewer positions processed than diffusion.</li>
+  <li>Wall-clock gains depend on the hardware: at small batch sizes a pass is mostly weight-reading, so fewer passes is what matters (AR.6).</li>
+</ol>
+<section class="card" aria-labelledby="ft2">
+  <div class="card-label" id="ft2">Your turn · faded example</div>
+  <p>A 48-token XSum-style summary: NCM with the 9 levels above (200 codes in total) against a diffusion model with $N = 24$ steps.</p>
+  <ol class="steps">
+    <li>Positions the diffusion model processes (every step reprocesses all 48): <span class="blank" data-answer="1152" data-tol="1" data-hint="24 × 48."></span></li>
+    <li>Positions NCM processes: <span class="blank" data-answer="200" data-tol="0.5" data-hint="The total number of codes, from the previous faded example."></span></li>
+    <li>Diffusion positions divided by NCM positions (2 decimals): <span class="blank" data-answer="5.76" data-tol="0.02" data-hint="1,152 / 200."></span></li>
+  </ol>
+</section>
+<p><strong>Fewer conflicts.</strong> Recall "New Francisco": two blanks that depend on each other, filled in the same pass, can disagree, and the cost is the information the blanks share. In NCM the blanks filled in one pass are the positions of one level, and each already sees the reconstruction from all coarser levels. By the time the model fills the fine levels, most of the sentence's big decisions (which city, which topic, which sentence structure) are already settled, so what remains is nearly independent from position to position given the plan. At level 1 there can be almost no conflict at all: it has a single position in the LM1B configuration. In diffusion the first pass must commit confident tokens with <em>no</em> plan, and the later ones are chosen by confidence, not by structure.</p>
+<p>This is an explanation of why the design should help, which the authors' results are consistent with. It is not a proof, and it only holds if the learned codes really do carry the dependencies. The toy in the notebook below lets you check the effect directly: with a hidden theme and a variant per half, one pass per level is coherent, and removing the level that carries the variants is not.</p>
+
+<div class="byte-check"><div class="q" data-answer="1">
+  <p class="q-prompt">For one 128-token sample, how many positions does an NCM with the 12 LM1B levels process, compared with a diffusion model using $N = 64$ steps?</p>
+  <ol class="q-src">
+    <li>About 5 times as many as diffusion</li>
+    <li>641 versus 8,192, about 13 times fewer</li>
+    <li>The same number</li>
+    <li>128 versus 64</li>
+  </ol>
+  <div class="q-explain">The levels' sizes sum to 641 positions; diffusion reprocesses all 128 positions on each of 64 steps. Passes: 12 versus 64.</div>
+</div></div>
+
+<h2>What the paper reports, and what it does not</h2>
+<p>Here is what the primary sources show: the authors' README, the released configuration files and the results figure shipped with the code. Speed is measured as wall-clock time on the authors' hardware.</p>
+<ul>
+  <li><strong>LM1B, unconditional generation</strong> (128-token samples, generative perplexity scored by GPT-2 large): at matched parameter scales NCM reaches a better generative perplexity than the strongest diffusion baseline while being reported <strong>21&times; faster</strong>. The figure also prints each method's unigram entropy (about 4.3 for every method), which matters: generative perplexity can be gamed by repetitive text, so entropy checks that the samples are comparably diverse.</li>
+  <li><strong>XSum, summarization</strong> (48-token summaries of 512-token articles): NCM matches the strongest diffusion LM's ROUGE-L while being reported <strong>31&times; faster</strong>.</li>
+  <li><strong>Sudoku (hard)</strong>, a small constraint-satisfaction task: in the authors' figure NCM solves 86.1% of boards with 12 function evaluations, against 81.3% for the closest baseline (16 evaluations), 58.4%, 44.5% and 30.2% for three other parallel-generation baselines (128 evaluations each), and 1.0% for an autoregressive baseline. Read that last number as "a fixed left-to-right order is a poor fit for puzzles", not as a statement about frontier LLMs.</li>
+  <li><strong>Also released:</strong> TinyStories, OpenWebText, and WMT14 German to English translation. Classifier-free guidance is used for some XSum and WMT14 rows.</li>
+  <li><strong>Headline summary:</strong> the README says NCM "beats or matches strong diffusion baselines" while generating "9&ndash;31&times; faster"; summaries of the announcement give roughly 10&ndash;31&times; across unconditional generation, translation, summarization and reasoning tasks, and several times fewer training tokens than diffusion models (reported as about 4&ndash;5&times; in one summary and 3&ndash;5&times; in the authors' own post). The ranges differ slightly between sources, so read them as &ldquo;roughly 10 to 30 times faster&rdquo; and &ldquo;several times fewer tokens&rdquo;.</li>
+</ul>
+<p><strong>What "31&times; faster" compares against.</strong> It is a comparison with <em>diffusion language models at a similar parameter count</em>, on downstream tasks such as XSum, at matched quality. It is not 31&times; faster than GPT-class or any other autoregressive chat model, and no such comparison is claimed. The models in the released configs are about GPT-2-small sized; the authors' scaling study goes up to a few hundred million parameters. The speed comparison also depends on how the baselines are run: the figure's curves trace each baseline over many step counts, and NCM sits far to the left of them.</p>
+<p><strong>Details worth noticing.</strong> The released sampler configs add repetition controls (frequency and adjacency penalties) for some tasks (LM1B and XSum), a sign that parallel sampling inside a level needs help to avoid repeated tokens. And every released model ships its own frozen tokenizer, trained on that task's data.</p>
+
+<div class="byte-check"><div class="q" data-answer="3">
+  <p class="q-prompt">A friend says: "NCM is 31&times; faster than GPT." What is the best correction?</p>
+  <ol class="q-src">
+    <li>"It is actually 3&times; faster than GPT."</li>
+    <li>"It is slower than GPT but cheaper."</li>
+    <li>"That is right, it replaces GPT."</li>
+    <li>"The 31&times; is against diffusion language models of similar size on a summarization task at matched ROUGE-L, in a two-week-old preprint; no comparison with strong autoregressive models is claimed."</li>
+  </ol>
+  <div class="q-explain">Baselines matter. The claim is about parallel text generation methods at small scale, and it has not yet been independently reproduced.</div>
+</div></div>
+
+<h2>Limits, open questions and relatives</h2>
+<p>Questions to ask before betting on NCM (these are the questions a reader should ask, not criticisms the authors have made):</p>
+<ul>
+  <li><strong>The tokenizer is a ceiling.</strong> Every output is the frozen decoder's rendering of the generated codes. Whatever the tokenizer cannot reconstruct, the generator cannot write. The released configs build a separate tokenizer per task and generate fixed lengths (48 or 128 tokens), so open-ended chat length, new domains and long documents are open.</li>
+  <li><strong>Code-length choices.</strong> The number of levels and each level's size are chosen by hand. More levels means more passes but fewer conflicts per pass. Nothing yet says how the best schedule changes with data, length or model scale.</li>
+  <li><strong>Strong baselines.</strong> In the results figure released with the code, the baselines are diffusion-style LMs, plus an autoregressive baseline on Sudoku only. Against a strong autoregressive model with speculative decoding (<a href="m5-5.html">M5.5</a>), which cuts passes while <em>exactly</em> preserving the large model's output distribution, the picture is unknown. NCM changes the distribution; it is not lossless.</li>
+  <li><strong>Scale and serving.</strong> The tested models are small. As in AR.6, speed claims at small batch sizes may not hold when many requests are batched.</li>
+  <li><strong>Replication.</strong> It is two weeks old.</li>
+</ul>
+<p>Three relatives help place it:</p>
+<ul>
+  <li><strong>Large Concept Models</strong> (LCM; Meta FAIR, December 2024). A concept there is a <em>sentence</em>, represented by a SONAR sentence embedding. The model generates a document autoregressively, one sentence embedding at a time, and was tested with MSE regression, diffusion-based variants and quantized embeddings (1.6B-parameter experiments, one version scaled to 7B). LCM goes <em>up</em> a level in granularity but keeps the left-to-right order; NCM keeps tokens as the final output and adds <em>levels of resolution</em> over the whole sequence.</li>
+  <li><strong>VAR</strong> (Tian et al., 2024) next-scale prediction for images, whose multiscale residual VQ is the direct ancestor of NCM's tokenizer (<a href="g1-6.html">G1.6</a>).</li>
+  <li><strong>Residual codes in audio</strong> (<a href="a1-3.html">A1.3</a>; <a href="a1-4.html">A1.4</a>): VALL-E predicts the first codec codebook autoregressively and codebooks 2 to 8 in parallel, one codebook per pass, each conditioned on the earlier ones. It is a coarse-to-fine, one-pass-per-level scheme too, with the levels coming from residual quantization at a fixed time resolution.</li>
+</ul>
+
+<details class="eli5">
+  <summary>Explain like I'm 5</summary>
+  <div class="eli5-body has-img">
+    <img src="../assets/img/eli5-ar-7.webp" alt="A painter's easel holding three canvases side by side: on the left a rough charcoal sketch of a house and a tree, in the middle the same scene blocked in with flat colour shapes, and on the right the finished, detailed painting." width="1200" height="900" loading="lazy">
+    <div>
+      <p>A painter doesn't start at the top-left corner and paint every tiny leaf in order. First she draws a <strong>rough charcoal sketch</strong> of the whole picture: a house here, a tree there. That's canvas one.</p>
+      <p>Then she <strong>blocks in flat colours</strong> across the whole canvas in one go: a red roof, a green blob of tree. That's canvas two. Finally she adds the <strong>details</strong> everywhere at once: windows, leaves, bricks. Canvas three is the finished painting.</p>
+      <p>Three rounds, and each round works on the whole picture. Because the sketch already decided where the house and tree go, nobody paints a window on the tree.</p>
+      <p>Where it breaks: a model's "sketch" is a short list of learned numbers, not a drawing a person would recognize, and nothing promises it means "house". It also has to write each round's pieces at the same moment without them talking to each other. That only works because the earlier round settled the big decisions, and the number of rounds is fixed ahead of time, not chosen by the painter.</p>
+    </div>
+  </div>
+</details>
+
+<div class="why"><strong>Why this matters in practice:</strong> NCM is a research direction, not a tool you can deploy in an application today (the released checkpoints are small, per-task models). Its lesson is about design: the number of sequential passes does not have to equal the number of tokens, and parallel generation works better when a coarse plan is fixed first. Keep an eye on three things: independent replication, comparisons with strong autoregressive models plus speculative decoding, and whether the same recipe scales to general-purpose, variable-length models.</div>
+
+<div class="byte-check"><div class="q" data-answer="2">
+  <p class="q-prompt">How do Meta's Large Concept Models and NCM differ?</p>
+  <ol class="q-src">
+    <li>They are the same method with different names</li>
+    <li>LCM works on bytes and NCM on sentences</li>
+    <li>LCM generates sentence embeddings one sentence at a time, left to right; NCM generates levels of resolution over the whole sequence, with all positions of a level in parallel</li>
+    <li>LCM uses diffusion and NCM uses autoregression</li>
+  </ol>
+  <div class="q-explain">LCM's "concept" is a sentence and its order is autoregressive over sentences (some variants add diffusion inside the embedding space). NCM's concepts are coarse codes, and its order is coarse to fine.</div>
+</div></div>
+
+<section class="card recall" data-id="explain" aria-labelledby="eb">
+  <div class="card-label" id="eb">Explain it back · in two or three sentences</div>
+  <p class="q-prompt">How does NCM generate text with about a dozen forward passes, and why does it conflict less than diffusion when committing tokens in parallel?</p>
+  <div class="model-answer"><strong>Model answer:</strong> A learned tokenizer (multiscale residual VQ) turns text into a hierarchy of discrete codes, from a few coarse codes to one per token; a transformer generates the hierarchy level by level, all positions of a level in parallel, so one forward pass per level (about 9 to 12 in the released configs), after which the frozen decoder renders tokens. Because each level is conditioned on the plan from the coarser levels, the shared decisions are already fixed, so the codes committed together in a pass are nearly independent and disagree less than the tokens diffusion commits with no plan. The cost is a tokenizer that caps quality, hand-chosen level schedules, and results so far only against diffusion models at small scale.</div>
+</section>
+
+<section class="card" data-quiz aria-labelledby="qz">
+  <div class="card-label" id="qz">Check yourself</div>
+  <div class="q" data-answer="1">
+    <p class="q-prompt">An XSum-style summary has 48 tokens and the generator uses 9 levels. How many sequential forward passes does NCM need, compared with autoregressive generation?</p>
+    <ol class="q-src">
+      <li>48 versus 48</li>
+      <li>9 versus 48</li>
+      <li>1 versus 48</li>
+      <li>9 versus 9</li>
+    </ol>
+    <div class="q-explain">One pass per level gives 9 passes, against one pass per token (48) for an autoregressive model: about $5.3\times$ fewer.</div>
+  </div>
+  <div class="q" data-answer="0">
+    <p class="q-prompt">Interleaving with <a href="ar-6.html">AR.6</a>: why can the codes of one NCM level be sampled in parallel with less damage than tokens committed together in one diffusion step?</p>
+    <ol class="q-src">
+      <li>The coarser levels have already fixed the shared decisions, so the codes in this level are close to independent given them</li>
+      <li>NCM trains with a different loss that removes all dependence between tokens</li>
+      <li>Parallel sampling is always exact if the model is large enough</li>
+      <li>NCM commits only one token per pass</li>
+    </ol>
+    <div class="q-explain">The cost of a parallel commit is the dependence between the committed pieces. A coarse plan absorbs most of it. This is the mechanism the design relies on, not a guarantee.</div>
+  </div>
+  <div class="q" data-answer="3">
+    <p class="q-prompt">What does the headline "31&times; faster" compare?</p>
+    <ol class="q-src">
+      <li>NCM against GPT-4-class autoregressive models on chat tasks</li>
+      <li>NCM against itself with fewer levels</li>
+      <li>Training time of NCM against diffusion models</li>
+      <li>Generation wall-clock time against diffusion language models of similar size, on XSum at matched ROUGE-L, as reported by the authors</li>
+    </ol>
+    <div class="q-explain">It is a comparison within the family of parallel text generators, in a preprint not yet replicated independently.</div>
+  </div>
+  <div class="q" data-answer="2">
+    <p class="q-prompt">In the multiscale tokenizer, the total number of codes per 128-token LM1B sample is 641. What does that tell you?</p>
+    <ol class="q-src">
+      <li>It compresses the text 5 times</li>
+      <li>It needs 641 sequential passes</li>
+      <li>The hierarchy has about 5 codes per token, so it is over-complete, but takes only 12 sequential passes because each level is generated at once</li>
+      <li>Each token is quantized 641 times</li>
+    </ol>
+    <div class="q-explain">The sizes of the 12 levels sum to 641. The saving is in sequential passes, not in the number of codes.</div>
+  </div>
+</section>
+
+<section class="takeaways" aria-labelledby="tk">
+  <h2 id="tk">Key takeaways</h2>
+  <ul>
+    <li>NCM represents text as a <strong>hierarchy of discrete codes</strong> from a multiscale residual-VQ tokenizer (VAR's construction on a 1D sequence), and a transformer generates it <strong>coarse to fine, one pass per level</strong>, all positions of a level in parallel.</li>
+    <li>Passes equal the number of levels (9 to 12 in the released configs), not the number of tokens: 12 for a 128-token sample, against 128 for autoregressive and $N$ for diffusion.</li>
+    <li>Coarse levels fix the plan first, so codes committed in parallel conflict less than diffusion's unplanned commits ("New Francisco").</li>
+    <li>Reported by the authors against <strong>diffusion language models</strong>: 21&times; faster on LM1B at better perplexity, 31&times; faster on XSum at matched ROUGE-L, with several times fewer training tokens. Not versus GPT-class models, and not yet independently replicated.</li>
+    <li>Open questions: tokenizer ceiling, level schedules and fixed lengths, comparison with strong autoregressive models plus speculative decoding, and scale. Relatives: Large Concept Models (sentence concepts), VAR (next-scale images), residual codes in audio.</li>
+  </ul>
+</section>
+
+<section class="card colab" aria-labelledby="cb">
+  <div>
+    <div class="card-label" id="cb">Optional · hands-on in Python</div>
+    <p>Build a tiny coarse-to-fine system in NumPy: learn a two-level code with k-means, fit and sample each level in parallel (3 passes per sequence), compare with an 8-pass autoregressive baseline, plot quality against passes for diffusion-style parallel commits, and see what happens when a level is missing. About 30 minutes, CPU only, runs in seconds, free in your browser.</p>
+  </div>
+  <a class="btn btn-primary" data-colab="ar-7-coarse-to-fine.ipynb">Open in Colab</a>
+</section>
+
+<section class="card" data-lockin aria-labelledby="li">
+  <div class="card-label" id="li">Lock it in</div>
+  <p>Add this lesson's cards to your spaced-review deck.</p>
+</section>
+<script type="application/json" id="cards">[
+  {"id":"ar-7-a","front":"How does NCM generate text?","back":"A learned multiscale residual-VQ tokenizer maps text to a hierarchy of discrete codes (coarse to one-per-token). A transformer predicts one level per forward pass, all positions of the level in parallel, conditioned on the reconstruction from coarser levels; a frozen decoder renders tokens."},
+  {"id":"ar-7-b","front":"Multiscale residual quantization: the equations?","back":"$r_1 = z$; $q_k = \\text{Quantize}_k(\\text{down}_{\\ell_k}(r_k))$; $r_{k+1} = r_k - \\text{up}_L(q_k)$; $\\hat z = \\sum_k \\text{up}_L(q_k)$. Each level encodes what the coarser ones missed (VAR's construction, on a 1D sequence)."},
+  {"id":"ar-7-c","front":"Passes and positions: 128 tokens, AR vs diffusion ($N=64$) vs NCM (12 levels)?","back":"AR: 128 passes, 128 positions (KV cache). Diffusion: 64 passes, $64 \\times 128 = 8{,}192$ positions. NCM: 12 passes, $1+8+16+\\dots+128 = 641$ positions."},
+  {"id":"ar-7-d","front":"Why do coarse-to-fine parallel commits conflict less than diffusion's?","back":"Parallel commits lose the dependence between the pieces committed together. Coarse levels fix the shared decisions first, so the codes in a level are nearly independent given the plan. (Mechanism the design relies on, consistent with the results, not a proof.)"},
+  {"id":"ar-7-e","front":"What do NCM's headline numbers compare, and how reliable are they?","back":"Reported by the authors: 21x faster on LM1B at better perplexity, 31x on XSum at matched ROUGE-L, vs diffusion LMs of similar size (not GPT-class models). Oct 2026 preprint, not yet independently replicated; small, GPT-2-sized models."},
+  {"id":"ar-7-f","front":"NCM vs Large Concept Models vs VAR?","back":"LCM (Meta, 2024): concepts are sentence embeddings, generated sentence by sentence. VAR (2024): next-scale prediction for images, NCM's ancestor. NCM: levels of resolution over the whole text, one pass per level."}
+]</script>
+
+</main></div></div>
+<script src="../assets/vendor/gsap.min.js"></script>
+<script src="../assets/vendor/katex/katex.min.js"></script>
+<script src="../assets/vendor/katex/auto-render.min.js"></script>
+<script src="../assets/js/course-data.js"></script>
+<script src="../assets/js/app.js"></script>
+<script src="../assets/js/learn.js"></script>
+<script src="../assets/js/stepper.js"></script>
+<script src="../assets/js/anims/ar-7-levels.js"></script>
+</body>
+</html>

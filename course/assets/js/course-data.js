@@ -127,12 +127,14 @@ LC.course = {
       { id: "m5-5", title: "Speculative decoding", mins: 10, pre: ["m1-5", "m5-4"], ready: true, colab: "m5-5-speculative-decoding.ipynb" },
       { id: "m5-6", title: "Batching & serving metrics", mins: 10, pre: ["m1-5", "m5-4", "m5-5"], ready: true }
     ]},
-    ar: { code: "AR", title: "Beyond the dense transformer", cover: "cover-ar.webp", tags: ["mixture of experts", "moe", "state space model", "mamba", "linear attention", "long context", "hybrid architecture"], lessons: [
+    ar: { code: "AR", title: "Beyond the dense transformer", cover: "cover-ar.webp", tags: ["mixture of experts", "moe", "state space model", "mamba", "linear attention", "long context", "hybrid architecture", "diffusion language model", "next-concept modeling", "parallel decoding"], lessons: [
       { id: "ar-1", title: "MoE deep dive: routing & expert design", mins: 12, pre: ["m5-3"], ready: true, colab: "ar-1-moe-routing.ipynb" },
       { id: "ar-2", title: "Training & serving MoE at scale", mins: 10, pre: ["ar-1", "m2-5"], ready: true },
       { id: "ar-3", title: "State-space models & Mamba", mins: 12, pre: ["p6-3", "m1-4"], ready: true, colab: "ar-3-ssm-scan.ipynb" },
       { id: "ar-4", title: "Hybrid & linear-attention models", mins: 10, pre: ["ar-3"], ready: true },
-      { id: "ar-5", title: "Long context", mins: 12, pre: ["m1-3", "m5-4"], ready: true }
+      { id: "ar-5", title: "Long context", mins: 12, pre: ["m1-3", "m5-4"], ready: true },
+      { id: "ar-6", title: "Diffusion language models", mins: 12, pre: ["m2-2", "m1-5"], ready: true },
+      { id: "ar-7", title: "Next-concept modeling (NCM)", mins: 12, pre: ["ar-6", "p6-4"], ready: true, colab: "ar-7-coarse-to-fine.ipynb" }
     ]},
     cap: { code: "★", title: "Capstone: build an LLM pipeline", cover: "cover-cap.webp", tags: [], lessons: [
       { id: "cap-1", title: "Fine-tune → evaluate → optimize", mins: 30, pre: ["m3-7", "m4-6", "m5-1"], ready: true, colab: "cap-1-capstone-starter.ipynb" }
