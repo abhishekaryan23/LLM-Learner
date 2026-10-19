@@ -88,7 +88,7 @@
       tl.addLabel("s3");
 
       // ---------- panel B: IsoFLOP profiles ----------
-      var PB = panel({ id: "b", m: compact ? { l: 34, r: 14, t: 48, b: 46 } : { l: 44, r: 24, t: 48, b: 46 },
+      var PB = panel({ id: "b", m: compact ? { l: 34, r: 26, t: 48, b: 46 } : { l: 44, r: 24, t: 48, b: 46 },
         x0: 7.5, x1: 11, y0: 1.85, y1: 3.4, logY: false, yt: [2, 2.5, 3],
         xt: [[8, "100M"], [9, "1B"], [10, "10B"], [11, "100B"]],
         xTitle: "parameters N (log scale) →" });

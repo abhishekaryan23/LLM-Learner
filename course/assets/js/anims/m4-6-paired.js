@@ -25,7 +25,7 @@
         ? { x0: 28, tile: 14, gap: 2.5, title: 16, ya: 28, yb: 48, sum: 84, right: W - 4 }
         : { x0: 30, tile: 13, gap: 2, title: 16, ya: 28, yb: 48, sum: 84, right: 328 };
       var A = compact
-        ? { l: 28, r: 344, title: 114, ya: 136, yb: 158, axis: 176, tick: 194 }
+        ? { l: 28, r: 330, title: 114, ya: 136, yb: 158, axis: 176, tick: 194 }
         : { l: 30, r: 328, title: 120, ya: 144, yb: 166, axis: 186, tick: 204 };
       var Dp = compact
         ? { l: 92, r: 344, title: 226, la: 248, ya: 258, lb: 280, yb: 290, axis: 304, tick: 322, lab: 4 }

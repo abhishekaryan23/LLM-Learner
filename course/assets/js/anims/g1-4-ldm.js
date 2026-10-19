@@ -98,7 +98,7 @@
         L.tenc = box(210, 264, 120, 44, "text encoder");
         L.xat = arrow("M330 286H343V138", 343, 138, "up");
         L.xatT = [txt(351, 222, "cross-attention")];
-        L.cfg = [txt(530, 240, "every step, two passes:", "t-mid"), txt(530, 260, "guided ε = ε_u + w (ε_c − ε_u)", "t-mid t-mono")];
+        L.cfg = [txt(508, 240, "every step, two passes:", "t-mid"), txt(508, 260, "guided ε = ε_u + w (ε_c − ε_u)", "t-mid t-mono")];
         L.dec = arrow("M422 102H482", 482, 102, "right");
         L.decT = [txt(452, 90, "VAE", "t-mid"), txt(452, 122, "decode", "t-mid t-muted")];
         L.out = landscape(494, 52, 100, true);
