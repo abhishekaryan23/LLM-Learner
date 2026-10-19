@@ -1,0 +1,1114 @@
+{
+ "generated": "2026-10-19",
+ "items": [
+  {
+   "title": "Has GPT-6-Astra Achieved Embodied Intelligence?",
+   "summary": "GPT-6-Astra demonstrates a level of competence in robotic manipulation and navigation that challenges the conventional paradigm of building specialized models for individual tasks and embodiments. In this report, we ask not only how capable GPT-6-Astra is, but what its capabilities imply for the field. First, we probe the limits of standalone GPT-6-Astra. We conduct a large-scale evaluation across 12 representative benchmarks spanning tabletop manipulation, humanoids, mobile platforms, and dexterous hands. Under a unified protocol that allows in-context learning (ICL) from training-set demonst",
+   "url": "https://arxiv.org/abs/2610.22471",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 143,
+   "lab": false,
+   "modules": [
+    "m4"
+   ],
+   "matched": [
+    "evaluation"
+   ],
+   "score": 16.3
+  },
+  {
+   "title": "BizBench: Unveiling Hidden Challenges in Deploying Long-Horizon Agents for Real-World Business",
+   "summary": "Existing long-horizon agent benchmarks often emphasize final task success while providing limited assessment of intermediate execution validity. Yet real-world business operations require agents to navigate extensive, potentially outdated or conflicting policies while satisfying critical constraints throughout execution. These requirements are particularly consequential in high-stakes domains such as payments, where intermediate violations can incur financial losses or regulatory consequences regardless of the final outcome. To bridge this evaluation gap, we introduce BizBench, a multi-turn be",
+   "url": "https://arxiv.org/abs/2610.20424",
+   "date": "2026-10-13",
+   "upvotes": 114,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "m4",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "evaluation"
+   ],
+   "score": 15.4
+  },
+  {
+   "title": "Into the Unknown: Benchmarking AI agents on open scientific research problems",
+   "summary": "Can AI agents carry out research on open scientific problems? We introduce Into the Unknown, a benchmark that provides an agent with a science paper along with a research direction to pursue and tasks it to write a follow-up paper. We work with scientists at US Department of Energy (DOE) national laboratories, who each contribute an unpublished follow-up direction from their own work together with the necessary conditions a submission must meet. While assessing the quality of a follow-up paper is challenging in general, using these conditions to form a rubric makes evaluation more tractable fo",
+   "url": "https://arxiv.org/abs/2610.19159",
+   "date": "2026-10-12",
+   "upvotes": 91,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "m4",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "benchmark",
+    "evaluation"
+   ],
+   "score": 15.1
+  },
+  {
+   "title": "HexaShell: A Thin Harness for Exploring the Limits of VLM Agents as Robot Coding Agents",
+   "summary": "Agents built on vision language models (VLMs) now compete with learned policies on robot manipulation leaderboards. We ask how far a coding agent can go when it controls a robot instead of a computer, and where it stops. Our system, HexaShell, keeps the harness thin: it only turns the agent's commands into robot motion. The agent drives a robot with two arms through one command line. It sees three RGB cameras and knows their calibration. After each failed attempt, the agent reads the log, finds the cause, and writes or fixes small programs called tools. In this way it keeps what it learns as c",
+   "url": "https://arxiv.org/abs/2610.23479",
+   "date": "2026-10-16",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 84,
+   "lab": false,
+   "modules": [
+    "ag",
+    "mm",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "coding agent",
+    "vlm"
+   ],
+   "score": 14.4
+  },
+  {
+   "title": "Interpreting SSL Representations for Spoof Detection: a WavLM Study",
+   "summary": "Self-supervised speech models such as WavLM achieve strong spoofing detection performance, yet which layers encode the most spoof-relevant information and what acoustic properties they capture remain opaque. We present a layer-wise interpretability study of WavLM using the ASVspoof 5 database, combining three complementary analyses: (i) per-layer linear probing with attack-level evaluation across speech synthesis, voice conversion, and adversarial attacks; (ii) a canonical correlation analysis (CCA) linking layer representations to spoofing-relevant acoustic features; (iii) an exhaustive grid ",
+   "url": "https://arxiv.org/abs/2610.23526",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "in",
+    "m4",
+    "v1"
+   ],
+   "matched": [
+    "evaluation",
+    "interpretability",
+    "probing",
+    "self-supervised",
+    "speech",
+    "voice"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "DIFFLET: A Fast Inference Engine for Diffusion Transformer Models on AWS Trainium",
+   "summary": "On AWS Trainium2, every component of a diffusion model runs as a program compiled ahead of time for fixed shapes, while pipelines differ across models, prompt lengths across requests, and caching decisions across denoising steps. We present Difflet, a serving engine in which five model pipelines share one compilation backend, joint attention is split across cores by attention head, and a host controller decides at each denoising step whether to run the denoiser or reuse its earlier output. A small probe program computes the caching signal on the device and returns one number per step, and a re",
+   "url": "https://arxiv.org/abs/2610.23047",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "h1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "attention",
+    "diffusion",
+    "inference",
+    "serving",
+    "transformer"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "Sink-Sparse Hybrid Attention for Efficient Inference in T2I/T2V Diffusion Transformers",
+   "summary": "Diffusion Transformers (DiTs) have become a common backbone for high-quality text-to-image and text-to-video generation, but repeated dense self-attention remains a major inference bottleneck as token sequences grow and the same operator is invoked across many denoising steps. Our study suggests that dense attention in pretrained DiTs contains reusable layer/head-specific high-mass structure that can be identified from a small offline calibration set and reused across future generations. This leads to Sink-Sparse Hybrid Attention, a train-free attention replacement that reuses static sink mask",
+   "url": "https://arxiv.org/abs/2610.22975",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1",
+    "m5",
+    "vd"
+   ],
+   "matched": [
+    "attention",
+    "diffusion",
+    "inference",
+    "text-to-image",
+    "text-to-video",
+    "video generation"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "ANCHOR: Audio-Visually Grounded Chain-of-Thought Reasoning Benchmark",
+   "summary": "Multimodal large language models (MLLMs) perform well on audio-visual question answering, but correct answers do not necessarily imply that their stated reasoning is grounded in relevant perceptual evidence. Existing benchmarks mainly evaluate final-answer accuracy, offering limited insight into whether model-generated rationales correctly identify visual regions, temporal intervals, and audio events supporting predictions. We introduce ANCHOR, a benchmark and evaluation framework for measuring grounded-rationale alignment in multimodal reasoning, comprising 2,319 videos and 8,272 question-ans",
+   "url": "https://arxiv.org/abs/2610.22964",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m4",
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "audio",
+    "benchmark",
+    "chain-of-thought",
+    "evaluation",
+    "multimodal",
+    "reasoning"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "DriftTTS: One-stage Single Step Text-to-Speech via Generative Drifting",
+   "summary": "Text-to-speech models built on score matching and flow matching produce natural speech, but only by calling the decoder many times, which makes synthesis slow. Existing ways to cut the number of calls either distill from a multi-step teacher or add a stage on top of a pretrained model, leaving single-step TTS without a pretrained TTS model unexplored. We question whether pretraining a TTS model is necessary, and propose DriftTTS, which adopts generative drifting, an objective that moves iterative sampling from inference into training. Drifting assumes samples of fixed shape, whereas speech has",
+   "url": "https://arxiv.org/abs/2610.22960",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "g1",
+    "m1",
+    "m2",
+    "m5"
+   ],
+   "matched": [
+    "flow matching",
+    "inference",
+    "pretraining",
+    "sampling",
+    "speech",
+    "text-to-speech"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "FlashControl: One-Step Controllable Generator via Distillation-Friendly Single-Stream Teachers",
+   "summary": "Diffusion models have become a leading approach in visual generative modeling, particularly effective in text-to-image and controllable generation. Their main drawback is slow inference as it requires many sampling steps. While recent distillation methods enable one-step text-to-image generation, extending these techniques to controllable generation is still challenging. Existing controllable models, such as ControlNet, rely on dual-branch design that make distillation difficult. In this work, we adopt a simpler strategy. Instead of adding extra conditional branches, we finetune a selected sub",
+   "url": "https://arxiv.org/abs/2610.22537",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "diffusion",
+    "distillation",
+    "image generation",
+    "inference",
+    "sampling",
+    "text-to-image"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "Learning to Think and Explore in 3D World",
+   "summary": "We study how vision-language models (VLMs) can learn to think and actively explore in 3D space. Instead of providing multi-view images, videos, or 3D representations to the model, we preserve the native visual encoding of VLMs, i.e., a single image, one at a time, just like humans, and treat the 3D representation only as an environment with which the model can interact through actions (e.g., move left) and observations (rendered images). Each rollout begins from an initial first-person view and a visual question. The model can then iteratively reason, navigate, and reorient its viewpoint befor",
+   "url": "https://arxiv.org/abs/2610.21783",
+   "date": "2026-10-14",
+   "upvotes": 95,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "mm"
+   ],
+   "matched": [
+    "vision-language"
+   ],
+   "score": 11.5
+  },
+  {
+   "title": "MOSS-Image Technical Report",
+   "summary": "Recent closed-source image generation systems can produce diverse visual content from simple compositions to information-dense graphics, yet open-weight text-to-image models still struggle with dense text and intricate layouts. To narrow this gap, we introduce MOSS-Image, an open generation system that combines high-fidelity visual synthesis with intent-aware composition. First, we pretrain a 5B single-stream diffusion transformer (DiT) from scratch with a carefully designed recipe, enabling bilingual long-form text rendering and precise layout control. Second, we develop an intention-aware ag",
+   "url": "https://arxiv.org/abs/2610.23374",
+   "date": "2026-10-16",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 13,
+   "lab": false,
+   "modules": [
+    "g1",
+    "h1",
+    "m1"
+   ],
+   "matched": [
+    "diffusion",
+    "image generation",
+    "text-to-image",
+    "transformer"
+   ],
+   "score": 11.3
+  },
+  {
+   "title": "Towards Looped Models Done Right, Part I: Topology, Input Injection, Recurrent-State Design",
+   "summary": "Looped language models reuse physical Transformer blocks across logical depth, but established architectures entangle recurrence placement, input injection, and recurrent state organization. We isolate these axes in models trained from scratch at matched parameter scale, logical depth, and token budgets, and then test whether the resulting design principles transfer to resident- and active-parameter-matched Mixture-of-Experts (MoE) models. The prelude-recurrent block-coda sandwich architecture consistently improves performance on context extraction and reasoning-intensive tasks. Input injectio",
+   "url": "https://arxiv.org/abs/2610.23036",
+   "date": "2026-10-16",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 7,
+   "lab": false,
+   "modules": [
+    "ar",
+    "h1",
+    "m1",
+    "p6",
+    "rs"
+   ],
+   "matched": [
+    "moe",
+    "reasoning",
+    "recurrent",
+    "transformer"
+   ],
+   "score": 10.7
+  },
+  {
+   "title": "Beyond Reward Scoring: Online Multi-Agent Preference Learning for Multimodal Response Generation",
+   "summary": "Multimodal preference alignment often follows a score-based RLHF pipeline: a reward model is first trained to learn human preferences, then used to score on-policy responses and optimize the response model's generation. This turns preference supervision into a scalar signal for generation: a model may learn to produce answers with higher preference scores, but is rarely trained explicitly to learn the reasons underlying human preferences. We therefore ask whether making preference understanding an internal capability of the response model can improve its generation. To investigate this questio",
+   "url": "https://arxiv.org/abs/2610.23256",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "m3",
+    "mm",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "multi-agent",
+    "multimodal",
+    "reward model",
+    "rlhf"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "MetaCurate: Evolving Curation Filters for High-Quality Agentic Coding Data",
+   "summary": "Supervised fine-tuning on agent trajectories is an effective way to improve coding agents, but selecting useful training examples requires more than identifying successful runs. A resolved patch may follow inefficient reasoning or unnecessary tool use, while a failed run may still contain useful intermediate steps. Training pipelines therefore rely on rules and qualitative assessments to filter trajectories, yet designing these filters typically requires substantial human expertise, and validating improvements through repeated training and evaluation is expensive. We introduce MetaCurate, a tr",
+   "url": "https://arxiv.org/abs/2610.23134",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m3",
+    "m4",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "evaluation",
+    "fine-tuning",
+    "reasoning",
+    "tool use"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Advancing Sentence-Level Dysarthric Audio-Visual Speech Recognition via Test-Time Adaptation",
+   "summary": "Dysarthric audio-visual speech recognition (DAVSR) enhances performance by integrating complementary visual cues. However, existing research is largely confined to word-level tasks with limited vocabularies, which severely restricts real-world communication for dysarthric speakers. Furthermore, performance remains heavily dependent on supervised fine-tuning with speaker-specific data; significant variations in age, etiology, and severity cause traditional methods to struggle with unseen speakers. To address these domain shifts and the scarcity of continuous multimodal resources, we first intro",
+   "url": "https://arxiv.org/abs/2610.23117",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m3",
+    "mm"
+   ],
+   "matched": [
+    "audio",
+    "fine-tuning",
+    "multimodal",
+    "speech",
+    "speech recognition"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "MambaAct: Efficient Mamba Action Experts for Flow-Matching Vision-Language-Action Models",
+   "summary": "Vision-language-action (VLA) models have shown strong promise for generalist robotic manipulation, but their inference cost remains a major bottleneck for real-time control. This limitation is especially pronounced in flow-matching VLAs such as $π_{0.5}$, where the action expert is evaluated repeatedly during iterative denoising. We introduce MambaAct, an efficient Mamba action expert for flow-matching VLA policies. MambaAct retains the pretrained visual-language prefix encoder of $π_{0.5}$, while replacing its transformer-based action expert with a compact Mamba-based action expert. Within th",
+   "url": "https://arxiv.org/abs/2610.22951",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ar",
+    "h1",
+    "m1",
+    "m5",
+    "mm"
+   ],
+   "matched": [
+    "inference",
+    "mamba",
+    "transformer",
+    "vision-language"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "DK-VLM: Geometry as Position for Spatial Reasoning in Vision-Language Models",
+   "summary": "Vision-language models still struggle to understand 3D spatial relations across views and update spatial judgments as the observer moves. A common approach fuses 3D reconstruction features into visual tokens, but aligning these features with pretrained semantic representations remains challenging under limited spatial supervision. We propose DK-VLM with Dual-Kernel Attention, which computes attention from both a visual token's input position and its geometric position in the scene. A semantic kernel retains the pretrained model's native attention and positional encoding, while a separate geome",
+   "url": "https://arxiv.org/abs/2610.22356",
+   "date": "2026-10-15",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m1",
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "attention",
+    "positional encoding",
+    "reasoning",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "AVC-Reward: Event-Centric Audio-Video Consistency Evaluation",
+   "summary": "As joint audio-video generation models become more capable, they can generate audio-visual scenes exhibiting three forms of complexity: multi-event composition, multi-layer audio mixture, and asymmetric cross-modal relations. However, current evaluations largely reuse metrics from earlier simple and unidirectional tasks. They typically evaluate an audio-video clip as a whole and rely on simple predefined relations, making them unsuitable for these increasingly complex scenes. We propose an event-centric evaluation framework that disentangles audio and visual events at the event level, analyzes",
+   "url": "https://arxiv.org/abs/2610.22321",
+   "date": "2026-10-15",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 8,
+   "lab": false,
+   "modules": [
+    "a1",
+    "m4",
+    "v1",
+    "vd"
+   ],
+   "matched": [
+    "audio",
+    "clip",
+    "evaluation",
+    "video generation"
+   ],
+   "score": 8.8
+  },
+  {
+   "title": "Tree-Aware Posterior Distillation for Long-Horizon Agentic Reinforcement Learning",
+   "summary": "Reinforcement learning with verifiable rewards has become a scalable post-training paradigm for large language models. However, training agents over long-horizon interactions presents two challenges: using only terminal rewards makes turn-level credit assignment sparse and high-variance, while sequential mini-batch updates on a fixed rollout batch introduce policy staleness as the current policy drifts from the behavior policy. Existing approaches obtain denser credit via learned critics, process reward models, or on-policy distillation, but they rely on a value network, step-level annotations",
+   "url": "https://arxiv.org/abs/2610.23181",
+   "date": "2026-10-16",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 27,
+   "lab": false,
+   "modules": [
+    "m5",
+    "rl",
+    "rs"
+   ],
+   "matched": [
+    "distillation",
+    "process reward",
+    "reinforcement learning"
+   ],
+   "score": 8.7
+  },
+  {
+   "title": "ReaDy: Recurrent States as Dynamic Context for Speculative Drafting in Hybrid Linear Attention Large Language Models",
+   "summary": "Speculative decoding accelerates autoregressive generation by drafting multiple tokens per step, yet feature-based drafters rely on target hidden features whose contextual emphasis may not align with the needs of subsequent draft positions. Hybrid linear attention (HLA) models maintain compact recurrent states that accumulate historical associations, offering an efficient source of complementary context for speculative drafting. We introduce ReaDy, the first speculative decoding method, to the best of our knowledge, to leverage HLA recurrent states for position-specific context retrieval durin",
+   "url": "https://arxiv.org/abs/2610.20503",
+   "date": "2026-10-13",
+   "upvotes": 7,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "ar",
+    "m1",
+    "m5",
+    "p6"
+   ],
+   "matched": [
+    "attention",
+    "linear attention",
+    "recurrent",
+    "speculative decoding"
+   ],
+   "score": 8.7
+  },
+  {
+   "title": "Persistent Planar Memory for Video World Models",
+   "summary": "Video world models that generate and explore environments at scale need a persistent 3D memory of what they have produced. Plane primitives offer a natural candidate: a compact set of oriented planes captures the dominant structural elements (e.g., walls, floors, facades) of indoor and outdoor scenes, while requiring only 7 parameters per primitive. We present PPMem, a video world model that adopts plane primitives as its persistent 3D memory. PPMem augments a video diffusion transformer with a planar prediction head and a Depth Token Fusion (DTF) module: each autoregressive chunk jointly prod",
+   "url": "https://arxiv.org/abs/2610.23795",
+   "date": "2026-10-16",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 3,
+   "lab": false,
+   "modules": [
+    "g1",
+    "h1",
+    "m1",
+    "vd"
+   ],
+   "matched": [
+    "diffusion",
+    "transformer",
+    "world model"
+   ],
+   "score": 8.3
+  },
+  {
+   "title": "Speculative Sampling in Interactive Video Generation",
+   "summary": "Interactive video generation commonly relies on small bidirectional chunks to reduce response latency. Yet our preliminary experiments show that larger chunks improve video quality and better utilize GPU parallelism, allowing more latents to be sampled with only a modest increase in sampling time. Motivated by these observations, we propose Speculative Sampling, a strategy that combines the modeling power of large bidirectional windows with the low-latency interaction of small ones. It expands the modeling window by appending noise latents as padding and caches the resulting predictions for re",
+   "url": "https://arxiv.org/abs/2610.20556",
+   "date": "2026-10-13",
+   "upvotes": 42,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "m1",
+    "vd"
+   ],
+   "matched": [
+    "sampling",
+    "video generation"
+   ],
+   "score": 8.2
+  },
+  {
+   "title": "Rethinking the design space of Vanilla Pixel Diffusion Transformers",
+   "summary": "Pixel-space diffusion models have recently re-emerged as a compelling alternative to latent diffusion, avoiding the lossy latent bottleneck and separately trained autoencoder. JiT shows that a vanilla diffusion transformer can generate directly in pixel space by replacing the commonly used velocity prediction ($\\boldsymbol{u}$-prediction) with clean image prediction ($\\boldsymbol{x_0}$-prediction). In this work, we revisit this choice and introduce MFlow, an adaptive parameterization that learns to interpolate between $\\boldsymbol{x_0}$- and $\\boldsymbol{u}$-prediction across principal directi",
+   "url": "https://arxiv.org/abs/2610.23854",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "h1",
+    "m1",
+    "p6"
+   ],
+   "matched": [
+    "autoencoder",
+    "diffusion",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Sampling the XY model with an attention-based neural network",
+   "summary": "We present a transformer-based variational autoregressive network for sampling lattice systems with continuous degrees of freedom and apply it to the two-dimensional XY model near the Berezinskii-Kosterlitz-Thouless transition. The architecture is combined with physics-informed ingredients: locality-informed attention and approximate probabilities. The resulting sampler significantly outperforms existing neural samplers. We train the model on lattices up to $96\\times96$, verify with a mode-dropping estimator that no parts of the configuration space are missed, and reproduce the energy, magneti",
+   "url": "https://arxiv.org/abs/2610.23783",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1"
+   ],
+   "matched": [
+    "attention",
+    "sampling",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "VocalGrad: Evaluating Acoustic Perception in Audio Language Models",
+   "summary": "Recent large audio language models (LALMs) have extended their capabilities beyond lexical speech understanding to tasks requiring paralinguistic and non-linguistic audio understanding, such as emotion recognition. However, these models still struggle to reliably utilize acoustic information, particularly when it co-occurs with spoken linguistic content. Existing benchmarks do not clearly distinguish acoustic perception from higher-level reasoning, making it difficult to identify the source of these failures. To address this issue, we introduce VocalGrad, a benchmark designed to evaluate LALMs",
+   "url": "https://arxiv.org/abs/2610.23745",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m4",
+    "rs"
+   ],
+   "matched": [
+    "audio",
+    "benchmark",
+    "reasoning",
+    "speech"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "From Trajectories to Differentiated Skills: Cognitive Differentiation for Self-Improving Agents",
+   "summary": "Large language model (LLM) agents tackle complex tasks through reasoning and interaction with external environments. Agent skills provide persistent, transferable capabilities that guide task planning, inform contextual decisions, support tool use, and enable executable procedures. Yet existing skill-evolution methods largely organize knowledge around skill artifacts, overlooking the functional heterogeneity within individual skills and its implications for knowledge maintenance and use. Inspired by cognitive science, we propose Cognitive Differentiation in Skill Evolution (CDSE), which evolve",
+   "url": "https://arxiv.org/abs/2610.23599",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "agent skills",
+    "reasoning",
+    "tool use"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Enhancing RAG-based Medical VQA with Gated Multimodal Representations",
+   "summary": "Medical Vision-Language Models (Med-LVLMs) have shown strong performance in Medical Visual Question Answering (MVQA), yet they may still produce factually inconsistent responses. Retrieval-Augmented Generation (RAG) can mitigate this issue by incorporating external clinical evidence; however, retrieval is often guided by a single modality, potentially overlooking the joint semantics of medical images and clinical questions. We introduce a multimodal RAG framework that learns a joint query representation through a Gated Multimodal Unit, enabling evidence retrieval to leverage information from b",
+   "url": "https://arxiv.org/abs/2610.23588",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "mm",
+    "sy"
+   ],
+   "matched": [
+    "multimodal",
+    "rag",
+    "retrieval-augmented",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "GatewayBench: Unified Capability and Security Evaluation Platform for MCP Gateways",
+   "summary": "AI agents have increasingly interacted with external environments by invoking tools, with Model Context Protocol (MCP) emerging as a standard interface for connecting agents to heterogeneous tools and services. As organizations deploy agents at scale, MCP gateways have become a critical middleware layer for aggregating, governing, and shaping the tool surface exposed to agents. Despite the growing importance of MCP gateways in agentic systems, no prior work has systematically studied how gateway design affects agent capability, efficiency, and security. To address this gap, we introduce Gatewa",
+   "url": "https://arxiv.org/abs/2610.23449",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "m4",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "evaluation",
+    "mcp",
+    "model context protocol"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "GeoReason: Bridging Logical Reasoning and Spatial Fidelity in Remote Sensing Segmentation",
+   "summary": "Multimodal Large Language Models (MLLMs) have significantly advanced instruction-driven perception through the \"Embedding-as-Mask\" paradigm. However, extending this capability to Remote Sensing (RS) reasoning segmentation remains exceptionally challenging under cluttered geographical contexts and extreme scale variations, often leading to Spatial Fidelity Degradation and Target Misidentification. We identify a critical yet underexplored bottleneck: the sequential alienation of the segmentation token [SEG] from its initial visual grounding within the autoregressive generation paradigm. Produced",
+   "url": "https://arxiv.org/abs/2610.23416",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "mm",
+    "p3",
+    "rs",
+    "v1"
+   ],
+   "matched": [
+    "embedding",
+    "multimodal",
+    "reasoning",
+    "segmentation"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "LAW: Unifying Language, Action, and World Modeling for Agentic Physical Intelligence",
+   "summary": "World-action models jointly predict actions and future world states, but long-horizon manipulation further requires language reasoning to plan subtask objectives, assess execution progress, and guide action selection. We present LAW, a closed-loop VLM--WAM framework that unifies language reasoning, action generation, and world modeling through semantic subtask progress. Within the LAW agent, a hybrid-expert vision-language model plans the remaining subtasks, estimates the values of and fuses actions proposed by a world-action model, and asynchronously assesses execution status to support conti",
+   "url": "https://arxiv.org/abs/2610.23334",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "mm",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "reasoning",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "CatchUp: Depth-Aware Re-Admission of Visual Tokens for Efficient Large Vision-Language Models",
+   "summary": "Large Vision-Language Models (LVLMs) repeatedly process hundreds of visual tokens across decoder layers, incurring substantial computation and memory costs. Existing inference-time visual token pruning methods often irreversibly remove low-ranked tokens, although the set of visual tokens receiving high query-conditioned attention can change across decoder depth. Recoverable routing preserves skipped tokens for later reconsideration, but re-admits them with stale representations after bypassing intermediate transformations. We further find that replacing stale re-admitted states with their curr",
+   "url": "https://arxiv.org/abs/2610.23324",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m1",
+    "m5",
+    "mm"
+   ],
+   "matched": [
+    "attention",
+    "inference",
+    "pruning",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "SCALE: Improving Guidance-Free Visual Generation via Self-Contrastive Alignment for Likelihood Estimation",
+   "summary": "Classifier-free guidance (CFG) is essential for improving sample quality in visual generation, but it incurs substantial sampling overhead. Existing guidance-free approaches halve this cost by approximating the CFG with a single model inference, but their performance is bounded by the CFG and inherits its limitations. In this paper, we propose self-contrastive guidance (SCG), which contrasts the model's prediction on real and self-generated samples to obtain a direct, model-based signal that pushes generation toward the true data manifold. Integrating SCG into the standard likelihood objective",
+   "url": "https://arxiv.org/abs/2610.23263",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1",
+    "m5",
+    "v1"
+   ],
+   "matched": [
+    "contrastive",
+    "guidance",
+    "inference",
+    "sampling"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "MultiAgent-OPD: End-to-End Training of Hierarchical Multi-Agent Systems with On-Policy Distillation",
+   "summary": "In a hierarchical multi-agent system, a Leader assigns tasks and subagents carry them out. Jointly training the Leader and the subagents is difficult because a final answer gives only indirect feedback to the subagents. An LLM judge can score the performance of the subagents, but these scores depend on the judge's own assessment of the quality of subagents' responses. We present MultiAgent-OPD, which combines on-policy distillation with reinforcement learning to jointly train a shared-parameter Leader-Searcher-Answerer team end to end. We first train a Teacher in a Searcher-Answerer workflow u",
+   "url": "https://arxiv.org/abs/2610.23234",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "m5",
+    "rl",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "distillation",
+    "multi-agent",
+    "reinforcement learning"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Path to Prior-Data Fitted Relational Models via Learned Latent Multi-table Representations",
+   "summary": "Prior-data fitted networks (PFNs) show that pretraining on large populations of synthetic tasks can enable generalization to unseen datasets with little or no downstream fine-tuning. This paradigm is effective for transformer-based tabular and relational foundation models such as RDB-PFN, but remains largely unexplored for graph-based relational models built on message passing. We pretrain the graph-based relational foundation model Griffin on large collections of synthetic relational databases and ask whether curriculum learning, which benefits transformer-based relational learners, also impr",
+   "url": "https://arxiv.org/abs/2610.23073",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m2",
+    "m3"
+   ],
+   "matched": [
+    "fine-tuning",
+    "pretraining",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "A100: A Hybrid Vision Foundation Model for Agricultural Plant Image Analysis",
+   "summary": "The use of accurate vision models for crop monitoring, disease diagnosis, and plant phenotyping in agriculture is hindered by the lack of expertly annotated data, especially in developing countries. We propose A100, an agricultural vision foundation model that is pre-trained using self-supervised learning on 3 million unlabeled images from fields covering more than 100 crop species. A100 uses a hybrid CNN-Transformer backbone that fuses MBConv stages for local feature extraction with Transformer stages for global contextual representation. A100 uses pre-training with the integration of DINO se",
+   "url": "https://arxiv.org/abs/2610.22991",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m2",
+    "v1"
+   ],
+   "matched": [
+    "pre-training",
+    "self-supervised",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "MUB: An Identity-Masked Benchmark for Music Understanding in Multimodal Language Models",
+   "summary": "Evaluating musical perception in multimodal language models requires separating audio evidence from answers recoverable through metadata or external tools. We present the Music Understanding Benchmark (MUB), a locally assembled collection of 500 identity-masked recordings with existing annotations for tempo, key, time signature, and structural intervals. The collection covers all 24 major/minor key combinations, tempos of 47--180 beats per minute, and 4,676 annotated intervals. Original titles, artists, and platform identifiers are excluded from evaluation inputs. Relative to recent music ques",
+   "url": "https://arxiv.org/abs/2610.22989",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m4",
+    "mm"
+   ],
+   "matched": [
+    "audio",
+    "benchmark",
+    "evaluation",
+    "multimodal"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Query-adaptive Recurrent Tokenization",
+   "summary": "Visual information worth extracting from an image and the token budget it warrants depend on the text query. Yet modern vision and vision-language models largely encode images independently of the query and allocate a fixed visual token budget to every input. We introduce the Query-Adaptive Recurrent Tokenizer (QART), a backbone-agnostic module that makes visual representations both query-steerable and budget-adaptive. QART steers the visual representation toward query-relevant evidence while adapting its token budget to the amount of information required. Its key principle is simple. Addition",
+   "url": "https://arxiv.org/abs/2610.22957",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "mm",
+    "p3",
+    "p6"
+   ],
+   "matched": [
+    "recurrent",
+    "tokenization",
+    "tokenizer",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "FederatedBytes: Tokenizer-Free, Byte-Level Small Language Models for Efficient Multimodal Federated Learning",
+   "summary": "Federated Learning (FL) is a powerful machine learning framework that allows building a global model from the contributions of multiple, distributed clients, while ensuring the privacy of their local data. However, its heavy computational and communication overheads challenge its use for contemporary AI workloads such as natural language processing (NLP) and multimodal analysis. For this reason, this paper presents a novel small language model that leverages byte-level text and multimodal data processing, enhanced by a linear attention mechanism, to enable manageable Federated Learning of NLP ",
+   "url": "https://arxiv.org/abs/2610.22906",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ar",
+    "m1",
+    "mm",
+    "p3"
+   ],
+   "matched": [
+    "attention",
+    "linear attention",
+    "multimodal",
+    "tokenizer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "MS-Eval: Benchmarking Sub-Agent Delegation and Orchestration in MCP-Intensive Working Scenarios",
+   "summary": "LLM agents are increasingly integrated into real-world works, yet they must handle diverse domain-specific tools and complex multi-sub-task problems that sequential tool invocation resolves inefficiently and with severe context bloat. The Main-Agent Delegation and Sub-Agent Execution (MAD-SAE) paradigm addresses these issues by delegating sub-tasks to specialized sub-agents for parallel execution in isolated contexts, but its delegation and orchestration quality remains unquantified. We introduce MS-Eval, a unified evaluation kit comprising an MCP-intensive benchmark, a controlled execution ha",
+   "url": "https://arxiv.org/abs/2610.22869",
+   "date": "2026-10-16",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "m4",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "benchmark",
+    "evaluation",
+    "mcp"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "NVIDIA Nemotron 3.5 Super VL Powers Specialized Agents with Multimodal Reasoning",
+   "summary": "Always-on agents are taking on longer, more complex enterprise workflows. A single request can involve reading a document, checking information across sources,...",
+   "url": "https://developer.nvidia.com/blog/nvidia-nemotron-3-5-super-vl-powers-specialized-agents-with-multimodal-reasoning/",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "multimodal",
+    "reasoning"
+   ],
+   "score": 7.0
+  },
+  {
+   "title": "Stack Overflow for Agents triples signups with ChatGPT plugin",
+   "summary": "Two engineers shipped Stack Overflow for Agents in a few weeks with Codex, and its ChatGPT plugin helped drive up to 10× growth in agent creation.",
+   "url": "https://openai.com/index/stack-overflow-chatgpt-plugin",
+   "date": "2026-10-16",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Higgsfield takes AI video from 1 minute to over 10",
+   "summary": "Higgsfield brings creators longer videos with GPT-6 Astra, precise visuals with GPT-Image-2.5, and a path to voice filmmaking with GPT-Live.",
+   "url": "https://openai.com/index/higgsfield-longer-videos-voice",
+   "date": "2026-10-13",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "a1"
+   ],
+   "matched": [
+    "voice"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Scaling Indic Pretraining: 2.8 Trillion Tokens and an Open Data Generation Pipeline",
+   "summary": "",
+   "url": "https://huggingface.co/blog/nvidia/scaling-indic-pretraining",
+   "date": "2026-10-16",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "m2"
+   ],
+   "matched": [
+    "pretraining"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Granite Switch 4.1: Chat, Decisions, and Speech from One Endpoint",
+   "summary": "",
+   "url": "https://huggingface.co/blog/ibm-granite/granite-switch-4-1",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "a1"
+   ],
+   "matched": [
+    "speech"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Welcome Muse Spark Open: open-weight frontier multimodal mixture-of-experts model from Meta",
+   "summary": "",
+   "url": "https://huggingface.co/blog/meta-muse-spark-open",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "mm"
+   ],
+   "matched": [
+    "multimodal"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Scale Agentic Coding Workflows with Meta’s Muse Spark Open on NVIDIA GB300 NVL72",
+   "summary": "Meta launches Muse Spark Open, a coding-optimized 816B mixture-of-experts (MoE) model with 42B active parameters and a 1M token context window. Trained on...",
+   "url": "https://developer.nvidia.com/blog/scale-agentic-coding-workflows-with-metas-muse-spark-open-on-nvidia-gb300-nvl72/",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "ar"
+   ],
+   "matched": [
+    "moe"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Optimizing Agent Reliability and Tool Calling Efficiency for Chip Design Using NVIDIA NeMo Gym",
+   "summary": "AI agents offer remarkable productivity gains in complex chip design workflows, but their tendency to generate plausible yet incorrect artifacts makes...",
+   "url": "https://developer.nvidia.com/blog/optimizing-agent-reliability-and-tool-calling-efficiency-for-chip-design-using-nvidia-nemo-gym/",
+   "date": "2026-10-14",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "ReplaySSM: Rethinking State Storage for Faster Hybrid-Model Decoding",
+   "summary": "Hybrid models interleave state-space model (SSM) layers with a few attention layers. NVIDIA Nemotron 3, Qwen3.5 through Qwen3.8, Kimi-K3, and GLM-5.3-Flash are...",
+   "url": "https://developer.nvidia.com/blog/replayssm-rethinking-state-storage-for-faster-hybrid-model-decoding/",
+   "date": "2026-10-12",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "m1"
+   ],
+   "matched": [
+    "attention"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "How Itaú is building generative AI for its entire customer base",
+   "summary": "With ia.i, a conversational interface, and the IARA governance platform, Itaú is applying its AI First strategy to customers and employees — in one of Brazil’s most regulated sectors.",
+   "url": "https://openai.com/index/itau-generative-ai",
+   "date": "2026-10-16",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Benefit Street Partners answers questions faster with Codex",
+   "summary": "Anant Kumar builds tools to compare loan valuations and analyze credit agreements, using Codex for code review and faster follow-ups.",
+   "url": "https://openai.com/index/benefit-street-partners",
+   "date": "2026-10-16",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Bringing GPT-Rosalind to academic research labs",
+   "summary": "Introducing the Rosalind Academic Plan, offering eligible academic labs sponsored access to GPT-Rosalind and tools to advance life sciences research.",
+   "url": "https://openai.com/index/introducing-the-rosalind-academic-plan",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Teaching students to think and learn through questions",
+   "summary": "Celebrate Teachers’ Day with AI for Educators in Brazilian Portuguese and see how Study Mode can help teachers support active, step-by-step learning.",
+   "url": "https://openai.com/index/teaching-students-to-think-and-learn-through-questions",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Sullivan & Cromwell brings legal expertise into agreement review",
+   "summary": "In collaboration with OpenAI, Sullivan & Cromwell developed Agreement Analyzer, an AI tool for identifying issues in a draft agreement.",
+   "url": "https://openai.com/index/sullivan-cromwell",
+   "date": "2026-10-15",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Amp puts AI agents to work beyond code with OpenAI models",
+   "summary": "See how Amp pushes the frontier of what agents can do with GPT-6 Astra, Ultrafast, GPT-Live-1, and Sign in with ChatGPT.",
+   "url": "https://openai.com/index/amp-beyond-coding",
+   "date": "2026-10-14",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  }
+ ]
+}
