@@ -1,0 +1,1102 @@
+{
+ "generated": "2026-10-26",
+ "items": [
+  {
+   "title": "WeVisOne-VL: Unified Visual Perception from Objects to Pixels",
+   "summary": "Existing vision-language models (VLMs) remain unreliable for fine-grained visual perception. In this report, we present WeVisOne-VL (WeChat Vision All-in-One), a powerful VLM that unifies object-level and pixel-level perception through structured next-token prediction. It supports multiple visual tasks including object detection, referring localization, counting, OCR, segmentation, and matting, enabling localization at any user-specific granularity, from points and boxes to masks and alpha mattes. Architecturally, we integrate a lightweight pixel decoder into the VLM via a special token to gen",
+   "url": "https://arxiv.org/abs/2610.31329",
+   "date": "2026-10-21",
+   "upvotes": 244,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "mm",
+    "v1"
+   ],
+   "matched": [
+    "segmentation",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 30.4
+  },
+  {
+   "title": "IQuest-Q1: Advancing Foundation Capabilities for Agentic CLI Systems",
+   "summary": "We present IQuest-Q1, a sparse Mixture-of-Experts (MoE) agentic foundation model with 320B total parameters (15B activated). IQuest-Q1 is developed through a three-stage process: (1) stable and efficient pre-training, combining Stable SplitNorm, Muon, and muP with a two-stage curriculum whose second stage increases the coding-data mixture, preserving a wide stability margin between safe and optimal learning rates; (2) fine-grained mid-training, expanding the data mixture across domains and formats and progressively extending the context; and (3) multi-scaffold with multi-version post-training,",
+   "url": "https://arxiv.org/abs/2610.30949",
+   "date": "2026-10-21",
+   "upvotes": 101,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "ar",
+    "m2"
+   ],
+   "matched": [
+    "data mixture",
+    "moe",
+    "pre-training"
+   ],
+   "score": 16.1
+  },
+  {
+   "title": "MG-REPA: Multi-Granularity Representation Alignment for Generative Target Speaker Extraction",
+   "summary": "Generative target speaker extraction (TSE) models achieve high-quality extraction, but suffer from considerably slow training convergence. Representation Alignment (REPA) accelerates diffusion transformer training by aligning hidden states with a pre-trained Self-Supervised Learning (SSL) teacher. However, existing alignment in the speech and audio domain operates at a single granularity. For TSE, frame-level alignment leaves the global, time-invariant characteristics of the target speech implicit, whereas utterance-level alignment leaves the time-varying content implicit, even though extracti",
+   "url": "https://arxiv.org/abs/2610.32161",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "g1",
+    "h1",
+    "m1",
+    "v1"
+   ],
+   "matched": [
+    "audio",
+    "diffusion",
+    "self-supervised",
+    "speech",
+    "transformer"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "Nested Sparsity for Scalable Pretraining and Continual Learning",
+   "summary": "Mixture-of-experts (MoE) transformers, the standard backbone for modern large-scale deep learning, employ conditional computation: only a sparse subset of model weights is used in each forward pass. In MoE transformers, this sparsity arises in the MoE operator, which generalizes the multi-layer perceptron in the classical transformer. In this work, we explore an alternative mechanism for conditional computation that analogously generalizes the attention operator. The sparsity induced by this mechanism naturally nests (i.e., hierarchically composes) with the sparsity induced by the MoE operator",
+   "url": "https://arxiv.org/abs/2610.31818",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ar",
+    "h1",
+    "m1",
+    "m2"
+   ],
+   "matched": [
+    "attention",
+    "moe",
+    "perceptron",
+    "pretraining",
+    "transformer"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "Measuring the Verifier's Floor: How Much Apparent Rare-Word Text-to-Speech Error Is ASR Error?",
+   "summary": "Text-to-speech (TTS) is usually evaluated by transcribing its output with an automatic speech recognition (ASR) system, so the word error rate also counts recognizer errors. We measure these errors on human recordings of the test sentences. On LibriSpeech and FLEURS, the evaluation recognizer misses 33-67% of very rare words even in human speech, and all three recognizers miss 22-42%. Checking every word with two more recognizer families lowers the apparent TTS error on words that at least one recognizer hears two- to three-fold (very rare LibriSpeech words: from 10-13% to 3-5%), yet very rare",
+   "url": "https://arxiv.org/abs/2610.31470",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m4",
+    "rs"
+   ],
+   "matched": [
+    "asr",
+    "evaluation",
+    "speech",
+    "speech recognition",
+    "text-to-speech",
+    "verifier"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "SPOOK: Sparse Pixel Optimization for Off-Manifold Knowledge in Vision Encoders",
+   "summary": "Modern vision encoders are widely used as semantic representations, but the relationship between embedding similarity and human-visible semantics can become unclear far from the natural-image manifold. We probe this regime in a black-box setting by applying sparse pixel edits to blank canvases with a simple pixel-level hill-climbing procedure. Across ImageNet and Flickr30k, we evaluate whether these edited blank canvases can retrieve chosen targets in multimodal contrastive encoders and self-supervised visual encoders. On OpenCLIP, inputs optimized toward class prompts achieve strong top-1 and",
+   "url": "https://arxiv.org/abs/2610.32835",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "mm",
+    "p3",
+    "v1"
+   ],
+   "matched": [
+    "contrastive",
+    "embedding",
+    "imagenet",
+    "multimodal",
+    "self-supervised"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "AlphaAnything: Extending Pretrained RGB Generators to RGBA",
+   "summary": "Existing RGBA generation methods commonly learn a transparency-specific representation through reconstruction, introducing an additional training stage and potentially altering the RGB decoding function inherited from pretrained models. We present AlphaAnything, a lightweight framework that extends pretrained RGB generators to RGBA directly in their original latent space, without RGBA reconstruction pretraining. AlphaAnything inserts LoRA modules into the generative transformer and attaches an alpha branch to the frozen RGB VAE decoder. Unidirectional RGB-to-alpha feature sharing allows opacit",
+   "url": "https://arxiv.org/abs/2610.32413",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "h1",
+    "m1",
+    "m2",
+    "m3"
+   ],
+   "matched": [
+    "lora",
+    "pretraining",
+    "transformer",
+    "vae"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "TIE: Training-free CLIP Embedding Guidance for Compositional Text-to-Image Alignment",
+   "summary": "Text-to-image (T2I) diffusion models have advanced notably, but still fail to satisfy prompt conditions, resulting in attribute mismatches and missing objects. These errors normally fall into two categories: concept loss, when an object or attribute (i.e., concept) goes missing, and concept confusion, when an attribute is assigned to the wrong object or multiple objects blend together. Recent studies suggest that these challenges are caused by the limited capacity of CLIP text encoder to capture fine-grained semantic details. Although several methods have been proposed, concept loss and concep",
+   "url": "https://arxiv.org/abs/2610.32407",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "p3",
+    "v1"
+   ],
+   "matched": [
+    "clip",
+    "diffusion",
+    "embedding",
+    "guidance",
+    "text-to-image"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "TileShare: Training-Free Acceleration of Overlapping Tiled ViT Decoding",
+   "summary": "Fixed-window Vision Transformer (ViT) decoders run at deployment resolution as overlapping tiles: every token in an overlap band is processed by several full decoder instances. In the 2.4B-parameter MiniMax-H3 video decoder, about half of all per-token computation is duplicated. Removing the tiles fails because attention, global tokens and coordinates are bound to them. TileShare keeps each released tile's attention and computes every other operation once per token. The released computation changes at one kind of step only: an overlap token's per-tile results are blended into one shared state ",
+   "url": "https://arxiv.org/abs/2610.32233",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "v1"
+   ],
+   "matched": [
+    "attention",
+    "transformer",
+    "vision transformer",
+    "vit"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "DIAL-S2ST: Learning Latency Control for Simultaneous Speech-to-Speech Translation",
+   "summary": "We propose DIAL-S2ST, a post-training method for learning inference-time latency control in simultaneous speech-to-speech translation models. Our approach reuses pretrained translation capabilities through self-distillation from lookahead predictions, while limiting the influence of large text distillation losses to account for the imitation gap. This provides supervision for earlier emission without paired target data or reward computation. To make the learned timing adjustable at inference, we jointly train a single LoRA adapter across scales with matched lookahead guidance. Experiments on F",
+   "url": "https://arxiv.org/abs/2610.32214",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "g1",
+    "m3",
+    "m5"
+   ],
+   "matched": [
+    "distillation",
+    "guidance",
+    "inference",
+    "lora",
+    "speech"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Melody Guidance for Audio Diffusion Models Without Retraining",
+   "summary": "Controlling melody in audio generation normally requires training a conditional generative model on audio paired with pitch curves or MIDI notes. We instead guide an existing unconditional diffusion model, originally trained without melody inputs, to follow a target melody without retraining or modifying it. During inference, a differentiable pitch detector steers the sampled audio toward the desired pitches, while the diffusion model keeps it close to the distribution of realistic audio learned during training. Our main contribution is a sampling method that balances these two directions, pro",
+   "url": "https://arxiv.org/abs/2610.32211",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "g1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "audio",
+    "diffusion",
+    "guidance",
+    "inference",
+    "sampling"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "NUViT: Vision Transformers for Fourier Space Data",
+   "summary": "Vision Transformers (ViTs) have demonstrated strong performance in many computer vision tasks but do not naturally extend beyond the natural image domain. One important example is Fourier-space data, which is used to represent a rich and diverse set of modalities, including medical imaging and microscopy. Standard ViT tokenization partitions an image into square patches on a Cartesian grid, which poorly fit the frequency and phase structure of Fourier-space data. We introduce Non-Uniform ViT, a simple, general-purpose vision transformer that redesigns image tokenization, data representation, a",
+   "url": "https://arxiv.org/abs/2610.32041",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "p3",
+    "v1"
+   ],
+   "matched": [
+    "tokenization",
+    "transformer",
+    "vision transformer",
+    "vit"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Scaling Transformer Energy-based Models For High Quality Image Synthesis",
+   "summary": "Energy-Based Models (EBMs) are a flexible class of generative models that decouple probabilistic modeling from the generation process. This decoupling directly enables compositional generation and inference-time scaling, where sample quality can be refined simply by increasing sampling steps. However, severe challenges in high-dimensional sampling and training instabilities with deep architectures have restricted EBMs to low-dimensional regimes. To resolve these bottlenecks, we introduce the Transformer Energy-Based Model (TEM), a scalable transformer energy function operating entirely within ",
+   "url": "https://arxiv.org/abs/2610.31889",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m5",
+    "rs"
+   ],
+   "matched": [
+    "inference",
+    "inference-time scaling",
+    "sampling",
+    "transformer"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Aligning Large Language Models with Human Feedback: Mathematical Foundations and Algorithm Design",
+   "summary": "This article provides an introduction to the mathematical foundations and algorithmic frameworks used to align Large Language Models (LLMs) with human intentions, preferences, and values. We discuss standard alignment techniques, such as fine-tuning (SFT), reinforcement learning with human feedback (RLHF), and direct preference optimization (DPO). We also explore the theoretical underpinnings of learning from human preferences, drawing connections to inverse reinforcement learning (IRL) and discrete choice models. We present state-of-the-art algorithms in a tutorial style, discuss their advant",
+   "url": "https://arxiv.org/abs/2610.31862",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m3",
+    "rl"
+   ],
+   "matched": [
+    "dpo",
+    "fine-tuning",
+    "preference optimization",
+    "reinforcement learning",
+    "rlhf"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Speculative Diffusion is a Tale of Two Tradeoffs",
+   "summary": "Speculative decoding is a technique that accelerates the inference speed of autoregressive large language models (LLMs) by sampling from a faster, lower quality draft model. Traditionally, a fundamental characteristic of speculative decoding is that it is lossless with respect to the verifier distribution, guaranteeing speed without sacrificing quality. This differs from recently developed diffusion LLMs (dLLMs), which are notably able to achieve substantial speedups by degrading the quality of their outputs with less diffusion effort. Because diffusion models are able to sample faster than au",
+   "url": "https://arxiv.org/abs/2610.31819",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1",
+    "m5",
+    "rs"
+   ],
+   "matched": [
+    "diffusion",
+    "inference",
+    "sampling",
+    "speculative decoding",
+    "verifier"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "DRAMA-Eval: A Benchmark for Context-Aware, Multi-Turn, Multi-Speaker Speech Generation",
+   "summary": "Recent advances in speech generation are shifting toward context-aware, multi-turn, and multi-speaker synthesis. While these capabilities are in high demand for applications such as audiobook and audio drama production, evaluation has not kept pace with these advances. Beyond traditional zero-shot Text-to-Speech (TTS), modern systems in this domain primarily fall into three categories: instruction-controllable generation models, multi-turn dialogue models, and the audio branches of audio-visual generation models. However, existing benchmarks evaluate these paradigms in isolation, failing to pr",
+   "url": "https://arxiv.org/abs/2610.31796",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m4"
+   ],
+   "matched": [
+    "audio",
+    "benchmark",
+    "evaluation",
+    "speech",
+    "text-to-speech"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Evaluating the Applicability of LLM Inference Optimizations on Apple Silicon",
+   "summary": "Apple Silicon is among the most widely used platforms for local LLM inference, yet nearly all inference optimizations are designed and validated on server-class NVIDIA GPUs under batched serving workloads. Which optimizations retain their benefits when moved to Apple Silicon, and what determines their applicability? We evaluate four optimization families: KV-cache pruning, speculative decoding, ported GPU kernels, and post-training quantization. Experiments span four Apple machines under a common single-request decode workload, with matched RTX 4090 comparisons where possible. KV-cache pruning",
+   "url": "https://arxiv.org/abs/2610.31479",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m5"
+   ],
+   "matched": [
+    "inference",
+    "pruning",
+    "quantization",
+    "serving",
+    "speculative decoding"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Dual Exam: Controlled Evaluation of Multimodal Agents and World Models",
+   "summary": "World Models (WMs) can support Multimodal Agents (MAs) through simulated experience, while Agent trajectories can inform World Model refinement. Evaluating this interaction requires separate evidence about action selection and state evolution. We introduce Dual Exam, which tests Agents under fixed environment response mechanisms and World Models under fixed action interventions across physical, digital, social, and scientific domains. The Agent track compares 10 configurations on 1,088 items in 15 reporting categories. The World Model track contains 400 cases across eight scenarios; 15 configu",
+   "url": "https://arxiv.org/abs/2610.31066",
+   "date": "2026-10-21",
+   "upvotes": 13,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "m4",
+    "mm",
+    "sy",
+    "vd"
+   ],
+   "matched": [
+    "agent",
+    "evaluation",
+    "multimodal",
+    "world model"
+   ],
+   "score": 9.3
+  },
+  {
+   "title": "MultiAgent-OPD: End-to-End Training of Hierarchical Multi-Agent Systems with On-Policy Distillation",
+   "summary": "In a hierarchical multi-agent system, a Leader assigns tasks and subagents carry them out. Jointly training the Leader and the subagents is difficult because a final answer gives only indirect feedback to the subagents. An LLM judge can score the performance of the subagents, but these scores depend on the judge's own assessment of the quality of subagents' responses. We present MultiAgent-OPD, which combines on-policy distillation with reinforcement learning to jointly train a shared-parameter Leader-Searcher-Answerer team end to end. We first train a Teacher in a Searcher-Answerer workflow u",
+   "url": "https://arxiv.org/abs/2610.23234",
+   "date": "2026-10-19",
+   "upvotes": 6,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "ag",
+    "m5",
+    "rl",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "distillation",
+    "multi-agent",
+    "reinforcement learning"
+   ],
+   "score": 8.6
+  },
+  {
+   "title": "Different Tasks, Different Timesteps: Temporal Task-Aware Quantization for Diffusion Language Models",
+   "summary": "Diffusion Language Models (DLMs) introduce unique quantization challenges due to their iterative denoising process. In this work, we reveal that quantization sensitivity is both taskand time-dependent, with different downstream tasks exhibiting distinct precision requirements across denoising steps. We further show that these patterns can be predicted without groundtruth labels or task-specific evaluation metrics. Building on these findings, we introduce T 2Quant, a task and time-aware mixedprecision quantization framework that uses a label-free sensitivity signal to optimally allocate activat",
+   "url": "https://arxiv.org/abs/2610.31198",
+   "date": "2026-10-21",
+   "upvotes": 23,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "g1",
+    "m4",
+    "m5"
+   ],
+   "matched": [
+    "diffusion",
+    "evaluation",
+    "quantization"
+   ],
+   "score": 8.3
+  },
+  {
+   "title": "UserArena: Benchmarking Interactive User Simulation for Long-Horizon Shopping Agents",
+   "summary": "Agentic recommendation pursues shopper goals through sequences of context-dependent decisions. Developing and evaluating such policies requires faithful recommendation world models that capture both the interactive shopping environment and users' behavioral responses over long interactions. Existing resources rarely provide long-horizon, fine-grained real-user trajectories or support trajectory-level evaluation and offline validation against production A/B results. We introduce UserArena, a real-world e-commerce interactive benchmark containing 64,729 session trajectories from 11,010 users, sp",
+   "url": "https://arxiv.org/abs/2610.30932",
+   "date": "2026-10-21",
+   "upvotes": 41,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "m4"
+   ],
+   "matched": [
+    "benchmark",
+    "evaluation"
+   ],
+   "score": 8.1
+  },
+  {
+   "title": "Closing the Modality Gap via Simplex-Constrained Representations",
+   "summary": "While multimodal contrastive models like CLIP and CLAP successfully learn shared representations, their embeddings typically exhibit a persistent \\emph{modality gap}. We propose addressing this separation through a purely geometric approach: changing the embedding domain from the unit sphere, $S^{d-1}$, to the probability simplex, $Δ^{d-1}$. Although both manifolds share the same intrinsic dimension, the simplex acts as a structural prior; its nonnegative, unit-mass constraints serve as a cross-modal calibration that forces both modalities to ground themselves in the same coordinate system. By",
+   "url": "https://arxiv.org/abs/2610.32890",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "mm",
+    "p3",
+    "v1"
+   ],
+   "matched": [
+    "clip",
+    "contrastive",
+    "embedding",
+    "multimodal"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Consommé: Conditioned Token Merging for Split Inference",
+   "summary": "Split inference partitions a Vision Transformer between a resource-constrained edge device and a server. However, transmitting intermediate tokens across the communication channel is costly. Deploying fine-tuned backbones to every endpoint becomes expensive as well. We study token reduction for split inference under a frozen backbone, where only a small adapter is shipped. We observe that the CLS token plays a dual role: it acts as the global summary the receiver needs for classification, and it serves as a signal on which patches to keep. We propose Consommé, a method utilizing both character",
+   "url": "https://arxiv.org/abs/2610.32794",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m5",
+    "v1"
+   ],
+   "matched": [
+    "inference",
+    "transformer",
+    "vision transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Predictive Long-Horizon Progress Modeling with Action-Aware Quantification",
+   "summary": "Quantitative and dense task progress feedback is essential for robotic manipulation across data curation, policy evaluation, and reinforcement learning. Existing progress annotations often rely on sparse keyframe markings derived from subjective manual judgments, limiting their scalability and cross-task consistency, particularly in long-horizon manipulation. To overcome these challenges, we propose action-aware quantification, a unified progress specification that decomposes long-horizon trajectories into object-level subtasks via a vision-language model (VLM) and assigns weighted action cred",
+   "url": "https://arxiv.org/abs/2610.32776",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m4",
+    "mm",
+    "rl"
+   ],
+   "matched": [
+    "evaluation",
+    "reinforcement learning",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "SP-Guide: Enhancing Aerial Vision-Language Navigation with Spatial Priors",
+   "summary": "Aerial vision-language navigation (AVLN) requires a UAV to reach a language-described target from partial egocentric observations while reasoning over large outdoor scenes. Existing approaches typically fuse view-centered RGB observations and globally anchored history maps as generic visual embeddings, leaving cross-modal spatial alignment to be learned from sparse navigation supervision. We present SP-Guide, a transformer- based goal-prediction framework that addresses this weakness of alignment through a Spatial Prior Cross-Modal Encoder, an Instruction Enhanced Decoder, and a Goal Convergen",
+   "url": "https://arxiv.org/abs/2610.32697",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "reasoning",
+    "transformer",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Pseudo-Labels as Rewards, Not Targets: Group-Relative Policy Optimization for Semi-Supervised ASR",
+   "summary": "Adapting ASR to a domain with only untranscribed audio typically relies on pseudo-labeling, a strong teacher transcribes the audio and a student is fine-tuned on it. Because supervised fine-tuning (SFT) treats every pseudo-label token as a target, the student inherits the teacher's errors. We show that using the same pseudo-labels as a reward reference for Group Relative Policy Optimization (GRPO) is more robust to label noise. In the banking domain, GRPO yields 29.3% to 56.2% relative WER improvements over SFT on Whisper-generated labels, and the advantage holds across four Whisper sizes, fou",
+   "url": "https://arxiv.org/abs/2610.32572",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m3"
+   ],
+   "matched": [
+    "asr",
+    "audio",
+    "fine-tuning",
+    "grpo"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "UAV-SwarmAgent: Scalable Multi-UAV Reconnaissance and Task Allocation via Code Generation and Vision-Language Reasoning",
+   "summary": "Supervising a multi-UAV reconnaissance mission usually means plotting waypoints and watching every drone. We present UAV SwarmAgent, a hierarchical multi-agent system in which an operator states the mission in one natural-language sentence and a ground-station agent writes and executes code that turns it into per-UAV routes. The agent grounds inspection targets in an aerial map with a vision-language model, splits them among N UAVs by balancing route length, and dispatches worker agents that verify incidents with a compact onboard decision model. In simulation over 4 incident types and 3 found",
+   "url": "https://arxiv.org/abs/2610.32559",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "mm",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "multi-agent",
+    "reasoning",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Reading Between the Layers: Cross-Modal Alignment and Representational Hierarchy in Vision Transformers",
+   "summary": "While large vision-language models excel at optical character recognition, it remains unclear how their underlying vision encoders process text and its meaning, and whether they support anything resembling reading comprehension. We systematically study transformer-based vision encoders, using cross-modal alignment between rendered text and visual concepts together with probing and retrieval-based analyses as a controlled window into these broader capabilities. Our layer-wise analyses span orthographic, grammatical, and semantic organization, and reveal that strong cross-modal mapping emerges o",
+   "url": "https://arxiv.org/abs/2610.32463",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "in",
+    "m1",
+    "mm"
+   ],
+   "matched": [
+    "probing",
+    "transformer",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Can LLM Annotators Match Human Consistency? Benchmarking Human Agreement and Optimizing Multi-Agent with Contrastive Knowledge",
+   "summary": "LLM-based annotation has advanced rapidly, yet existing benchmarks remain misaligned with real-world practice. Actual annotation often involves lengthy, task-specific guidelines, and different annotators may produce divergent but reasonable judgments, especially on boundary cases, where single-labeled dataset fail to reflect this disagreement. This gap also limits existing single-agent and workflow-based annotation systems, which often lack adaptability to complex, evolving guidelines. To bridge this gap, we introduce ANT-A Benchmark, a real-world multi-annotator benchmark spanning 7 datasets ",
+   "url": "https://arxiv.org/abs/2610.32415",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "m4",
+    "sy",
+    "v1"
+   ],
+   "matched": [
+    "agent",
+    "benchmark",
+    "contrastive",
+    "multi-agent"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "PASTA: Prompt-Aware Annealed Diffusion Sampling",
+   "summary": "While Diffusion models produce high-quality images, real-world visual design requires intentionally preserving clean regions for headlines, logos, or UI elements. Existing layout-aware text-to-image methods struggle to strictly preserve reserved regions, often introducing unwanted content that complicates downstream editing. Existing approaches either manipulate attention to displace content or suppress conditioning via noise-level interventions. However, these methods sacrifice visual coherence, producing flat regions or noticeable style inconsistencies between reserved and non-reserved areas",
+   "url": "https://arxiv.org/abs/2610.32390",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1"
+   ],
+   "matched": [
+    "attention",
+    "diffusion",
+    "sampling",
+    "text-to-image"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Acoustic and Lexical Signals for Native Language Identification of Language Learners",
+   "summary": "Spoken native language (L1) identification for second language learners has traditionally relied on acoustic attributes of speech. Comparatively little attention has been paid to analysing speech transcripts for L1 traces. In this paper, we present a study of L1 identification using both speech and corresponding transcripts from a spoken learner English corpus. We compare a WavLM-based audio L1 classifier with a zero-shot GPT-4o classifier operating on transcripts and analyse their predictions across proficiency levels using a CEFR-balanced evaluation set. Our experiments show that the audio c",
+   "url": "https://arxiv.org/abs/2610.32382",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m1",
+    "m4"
+   ],
+   "matched": [
+    "attention",
+    "audio",
+    "evaluation",
+    "speech"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "TGR-EvoDAG: A DAG-based Multi-Agent Code Evolution Framework for Generative Recommendation on Tencent",
+   "summary": "Large Language Model (LLM) agents have enabled automated code evolution for algorithm discovery. However, current recursive self-improvement (RSI) research for sequential recommendation faces a dilemma: general-purpose frameworks lack domain-specific feedback, while recommender-specific frameworks rely on linear evolution. Crucially, naively integrating them fails when applied to Generative Recommendation (GR). Unlike end-to-end models, GR relies on a module-cascaded pipeline (tokenization, pre-training, and alignment). In this paradigm, existing evolution methods suffer from: i) cost blindnes",
+   "url": "https://arxiv.org/abs/2610.32326",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "m2",
+    "p3",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "multi-agent",
+    "pre-training",
+    "tokenization"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "GeoLEON-CLIP: Graph-Anchored Multimodal Contrastive Learning for Geographic Region Representation",
+   "summary": "Geographic regions are multimodal: satellite imagery captures visual morphology, text conveys human-interpretable semantics, and map structures describe urban context. Existing geospatial contrastive methods typically align image-text or image-location pairs, underusing structured map data. We introduce GeoLEON-CLIP, a graph-anchored contrastive framework that aligns three views of each H3-indexed region: an OpenStreetMap-derived graph embedding, a satellite image crop, and a textual description. Frozen pretrained LEON graph embeddings provide a semantic anchor between vision and language. Fro",
+   "url": "https://arxiv.org/abs/2610.32311",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "mm",
+    "p3",
+    "v1"
+   ],
+   "matched": [
+    "clip",
+    "contrastive",
+    "embedding",
+    "multimodal"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "RxnExBench: Benchmarking Vision-Language Models for Structured Chemical Reaction Extraction from Scientific Literature",
+   "summary": "Screen Tables and Substrate Scopes are information-dense figures widely used in synthetic chemistry literature, yet automated extraction of structured reaction data from them remains challenging. We introduce RxnExBench, a multimodal benchmark for fine-grained reaction-level evaluation. Built from high-impact chemistry journals, it contains 3,565 expert-annotated reactions and 2,361 molecular structures. The dataset adopts a unified schema with 15 reaction roles and 26 core fields, supporting downstream AI-for-Chemistry tasks such as retrosynthetic planning, yield prediction, and reaction cond",
+   "url": "https://arxiv.org/abs/2610.32221",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m4",
+    "mm"
+   ],
+   "matched": [
+    "benchmark",
+    "evaluation",
+    "multimodal",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "$Ψ$-0.6: Adaptive Streams of Thought in a Unified Vision-Language World Model",
+   "summary": "Humans reason about the physical world by flexibly combining different forms of inference as a problem unfolds. Achieving this flexibility is a major open challenge in AI: capabilities often remain separated across specialized models, limiting how they can be composed and jointly adapted to a task. We introduce $Ψ$-0.6, a unified vision-language world model that adaptively composes perception, language, geometry, and simulation within a shared reasoning process we call streams of thought. These streams interleave images, text, and explicit representations of geometry and motion, all of which t",
+   "url": "https://arxiv.org/abs/2610.32177",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m5",
+    "mm",
+    "rs",
+    "vd"
+   ],
+   "matched": [
+    "inference",
+    "reasoning",
+    "vision-language",
+    "world model"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "ImageRSI: Verification-Driven Recursive Self-Improvement for Agentic Image Generation",
+   "summary": "Complex text-to-image requests remain difficult to satisfy reliably. Verifying and repairing an image can fix an individual output, but a successful repair does not necessarily carry over to other requests. We present ImageRSI, a framework that keeps the image generator frozen and combines three components: five-dimensional verification and repair within each task, an experience library shared across tasks, and offline updating of the judge. Candidate experiences enter the library only after paired A/B validation, and the judge is updated with supervised fine-tuning and GRPO on accumulated ima",
+   "url": "https://arxiv.org/abs/2610.32120",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m3"
+   ],
+   "matched": [
+    "fine-tuning",
+    "grpo",
+    "image generation",
+    "text-to-image"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "MAGIC: Margin-gated Contrastive Debiasing with Evidence Restoration for VLM Test-time Robustness Scaling",
+   "summary": "This paper studies the problem of test-time robustness scaling for large vision-language models (LVLMs), which aims to mitigate language bias during inference. Existing approaches typically adopt test-time scaling techniques such as contrastive decoding to improve inference performance. Despite the progress, the performance of these approaches is far from satisfactory due to intentional evidence removal during perturbations and redundant inference cost. Towards this end, we propose a novel approach named Margin-gated Contrastive Debiasing with Evidence Restoration (MAGIC). The core of our MAGI",
+   "url": "https://arxiv.org/abs/2610.32013",
+   "date": "2026-10-23",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m5",
+    "mm",
+    "v1"
+   ],
+   "matched": [
+    "contrastive",
+    "inference",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Agentic AI Defense: Decode-Time Provenance Binding for MCP",
+   "summary": "Agentic AI systems using the Model Context Protocol (MCP) are vulnerable to indirect prompt injection through untrusted tool outputs. We demonstrate cross-modal trust laundering, in which instructions concealed in an email-signature image using least-significant-bit (LSB), discrete cosine transform (DCT), or metadata steganography bypass text scanners and enter a multi-agent workflow when decoded by a tool. To counter this threat, we propose decode-time provenance binding, which combines HMAC-authenticated trust labels with an MCP-maintained provenance ledger and context-taint tracking. The me",
+   "url": "https://arxiv.org/abs/2610.31974",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "mcp",
+    "model context protocol",
+    "multi-agent"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Kolibri: A Sovereign European Model on the Pareto Frontier",
+   "summary": "This report introduces Kolibri, an English-German mixture-of-experts transformer with 78.1B total parameters and 3.46B active parameters per token, released as open weights under the Apache 2.0 licence. We built Kolibri for sovereign and specialised deployment, with a particular focus on German and on regulated domains such as public administration, industry, and aerospace. To support these settings, we control the full model-development process, including data, architecture, training infrastructure, post-training, and evaluation. We train Kolibri on 24T tokens across pre-training, mid-trainin",
+   "url": "https://arxiv.org/abs/2610.31945",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m2",
+    "m4"
+   ],
+   "matched": [
+    "evaluation",
+    "pre-training",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "StateBridge: Phase- and Track-Grounded Reasoning for Synthetic-to-Real Traffic Video Captioning and VQA",
+   "summary": "Traffic safety videos provide rich evidence for understanding interactions between pedestrians and vehicles, but synthetic-to-real evaluation makes this setting challenging because models must learn from simulated scenes and generalize to real-world traffic. In this work, we present StateBridge, a traffic video-language framework designed to operate under this synthetic-only training protocol. Our approach uses phase-aware clip construction, pedestrian and vehicle track summaries, and structured prompts to ground vision-language models in stable traffic evidence rather than appearance alone. W",
+   "url": "https://arxiv.org/abs/2610.31898",
+   "date": "2026-10-22",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m4",
+    "mm",
+    "rs",
+    "v1"
+   ],
+   "matched": [
+    "clip",
+    "evaluation",
+    "reasoning",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Securing our frontier model training environment",
+   "summary": "OpenAI explains how we strengthened containment for frontier model training and evaluation, including offline environments and high-compute red-teaming.",
+   "url": "https://openai.com/index/securing-our-frontier-model-training-environment",
+   "date": "2026-10-23",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "m4"
+   ],
+   "matched": [
+    "evaluation"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Terminal X matches senior investor judgment 88.6% with GPT-6.1",
+   "summary": "Terminal X’s Eval Agent grades outputs against a 54-criterion rubric, catching 25% more deviances from a fund’s mandate with GPT-6.1 Sol.",
+   "url": "https://openai.com/index/terminal-x",
+   "date": "2026-10-20",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "How Specializing the Vocabulary of SLMs Can Cut Inference Cost by 77% in Real Applications",
+   "summary": "",
+   "url": "https://huggingface.co/blog/Dharma-AI/vocabx-vocabulary-specialization",
+   "date": "2026-10-21",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "m5"
+   ],
+   "matched": [
+    "inference"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Granite Speech 5.0: Transcribe, Translate, and Attribute more Accurately and Faster",
+   "summary": "",
+   "url": "https://huggingface.co/blog/ibm-granite/granite-speech-5",
+   "date": "2026-10-21",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "a1"
+   ],
+   "matched": [
+    "speech"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "MPS in PyTorch 2.15",
+   "summary": "",
+   "url": "https://huggingface.co/blog/mps-pytorch-2-15",
+   "date": "2026-10-20",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "p4"
+   ],
+   "matched": [
+    "pytorch"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Running Frontier-Class AI Models Across 8 NVIDIA DGX Spark Nodes",
+   "summary": "AI developers aren’t just running a single model anymore—they’re orchestrating multiple models in parallel, chaining inference calls, and experimenting...",
+   "url": "https://developer.nvidia.com/blog/running-frontier-class-ai-models-across-8-nvidia-dgx-spark-nodes/",
+   "date": "2026-10-22",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "m5"
+   ],
+   "matched": [
+    "inference"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Design Proteins with RFD4-Proteina Using Reward-Guided Inference-Time Search",
+   "summary": "Protein design is a search problem. Choose amino acids for an eight-residue protein sequence and more than 25 billion combinations are possible. Choose amino...",
+   "url": "https://developer.nvidia.com/blog/design-proteins-with-rfd4-proteina-using-reward-guided-inference-time-search/",
+   "date": "2026-10-21",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "m5"
+   ],
+   "matched": [
+    "inference"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Inside NVIDIA Sentry: Secure AI Agents at Runtime",
+   "summary": "An AI agent can complete its assignment and still cross a security boundary. Recent incidents show that agents can circumvent security controls while using...",
+   "url": "https://developer.nvidia.com/blog/inside-nvidia-sentry-secure-ai-agents-at-runtime/",
+   "date": "2026-10-21",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "How NVIDIA OpenShell Reference Architecture Secures and Governs AI Agent Workloads at Scale",
+   "summary": "Autonomous agents can work for hours on complex tasks, accessing files, tools, the internet, and spawning other agents to collaborate with. Executing complex...",
+   "url": "https://developer.nvidia.com/blog/how-nvidia-openshell-reference-architecture-secures-and-governs-ai-agent-workloads-at-scale/",
+   "date": "2026-10-21",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Developing an AI Factory Digital Twin with an Agent-Assisted Workflow",
+   "summary": "Building an AI factory digital twin requires developers to bring site plans, equipment assets, and engineering requirements into a consistent model that teams...",
+   "url": "https://developer.nvidia.com/blog/developing-an-ai-factory-digital-twin-with-an-agent-assisted-workflow/",
+   "date": "2026-10-21",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Accelerating Mamba-2 with High-Performance Forward Pass Kernels in NVIDIA CUDA Tile",
+   "summary": "NVIDIA CUDA Tile (cuTile) is a Python-based DSL and parallel programming model for NVIDIA GPUs that automatically leverages advanced hardware capabilities to...",
+   "url": "https://developer.nvidia.com/blog/accelerating-mamba-2-with-high-performance-forward-pass-kernels-in-nvidia-cuda-tile/",
+   "date": "2026-10-19",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "ar"
+   ],
+   "matched": [
+    "mamba"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Rapidly scaling online storage to serve over 1 billion ChatGPT users (Part II)",
+   "summary": "Learn how OpenAI scaled Habitat with reliable multi-tenancy, global caching, and Azure Cosmos DB to deliver 12× faster reads for ChatGPT.",
+   "url": "https://openai.com/index/scaling-storage-one-billion-users-part-two",
+   "date": "2026-10-23",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "OpenAI and Poland’s NASK partner to advance AI safety and security",
+   "summary": "OpenAI and Poland’s NASK are partnering on AI safety, security, and technical research to strengthen safeguards and support a more resilient digital ecosystem.",
+   "url": "https://openai.com/index/openai-nask-ai-safety-security-partnership",
+   "date": "2026-10-23",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Build more responsive apps with the Decisions API",
+   "summary": "Fast, focused, low-cost decisions for any application.",
+   "url": "https://openai.com/index/decisions-api",
+   "date": "2026-10-22",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "What FDE means at OpenAI",
+   "summary": "What forward deployed engineering means at OpenAI",
+   "url": "https://openai.com/index/forward-deployed-engineering-means",
+   "date": "2026-10-22",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  }
+ ]
+}
