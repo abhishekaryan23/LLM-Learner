@@ -1,5 +1,94 @@
 [
   {
+    "id": "openai-frontier-training-containment",
+    "date": "2026-10-23",
+    "kind": "policy",
+    "title": "OpenAI describes offline, red-teamed containment for frontier model training",
+    "summary": "OpenAI published a post on how it hardened the environments where frontier models are trained and evaluated. It describes offline environments (cached web content instead of live internet access) and continuous high-compute red-teaming of the containment boundaries using its strongest models. Details beyond the post's own summary were seen only in secondary coverage and are not repeated here.",
+    "why": "RL training and agent evals (rl-1, m4-8) give models tools and long action horizons. This shows labs now treat the training sandbox itself as a security boundary, not just the deployed product.",
+    "eli5": "If you let a student practise with real tools, you first lock the practice room so nothing they try can reach the outside world.",
+    "lessons": [
+      "rl-1",
+      "m4-8"
+    ],
+    "sources": [
+      {
+        "title": "Securing our frontier model training environment (OpenAI, 2026-10-23)",
+        "url": "https://openai.com/index/securing-our-frontier-model-training-environment/"
+      }
+    ]
+  },
+  {
+    "id": "kolibri-sovereign-moe",
+    "date": "2026-10-22",
+    "kind": "release",
+    "title": "Kolibri: Aleph Alpha releases a 78B English-German open-weight MoE (3.46B active)",
+    "summary": "The technical report describes an English-German mixture-of-experts transformer with 78.1B total and 3.46B active parameters per token, released as open weights under Apache 2.0 and trained on 24T tokens. Reported routing: 6 of 384 routed experts plus 1 shared expert per MoE layer. The authors report it sits on the Pareto frontier of evaluated open models; these are self-reported results.",
+    "why": "A concrete example of MoE economics (ar-1, m5-3): only about 4.4 percent of weights run per token, so a 78B model costs like a 3B one to serve. It also shows MoE used for a language-specific, regulated-domain deployment.",
+    "eli5": "A big team of specialists where only a few answer each word, so the answer is quick but the team knows a lot.",
+    "lessons": [
+      "ar-1",
+      "m5-3"
+    ],
+    "sources": [
+      {
+        "title": "Kolibri: A Sovereign European Model on the Pareto Frontier (arXiv 2610.31945)",
+        "url": "https://arxiv.org/abs/2610.31945"
+      },
+      {
+        "title": "Aleph Alpha: Kolibri announcement",
+        "url": "https://aleph-alpha.com/en/news/kolibri-sovereign-ai-made-in-germany/"
+      }
+    ]
+  },
+  {
+    "id": "meta-muse-spark-open",
+    "date": "2026-10-15",
+    "kind": "release",
+    "title": "Meta releases Muse Spark Open: 816B-parameter open-weight multimodal MoE",
+    "summary": "Per the model card, Muse Spark Open is a mixture-of-experts model with 816B total and about 42B active parameters, 62 layers, and 256 experts per MoE layer with 8 active per token. It takes text, image, video and audio input, outputs text, and supports up to 1M tokens of context (some hosts cap it lower, e.g. 131,072 on GroqCloud). Released 15 Oct 2026 under the Muse Model License. The BF16 checkpoint is about 1.6 TB.",
+    "why": "Open frontier-scale weights now follow the sparse-MoE recipe (ar-1, m5-3), so the memory-versus-compute gap matters: 42B active params set speed, but all 816B must be stored. Note the license is Meta's own, not a standard open-source one.",
+    "eli5": "A giant library where each question only opens a few shelves, but you still need the whole building.",
+    "lessons": [
+      "ar-1",
+      "m5-3",
+      "ar-5"
+    ],
+    "sources": [
+      {
+        "title": "Welcome Muse Spark Open (Hugging Face blog)",
+        "url": "https://huggingface.co/blog/meta-muse-spark-open"
+      },
+      {
+        "title": "Muse-Spark-Open-816B-A42B model card",
+        "url": "https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B"
+      },
+      {
+        "title": "Scale Agentic Coding Workflows with Meta's Muse Spark Open on NVIDIA GB300 NVL72",
+        "url": "https://developer.nvidia.com/blog/scale-agentic-coding-workflows-with-metas-muse-spark-open-on-nvidia-gb300-nvl72/"
+      }
+    ]
+  },
+  {
+    "id": "into-the-unknown-benchmark",
+    "date": "2026-10-12",
+    "kind": "benchmark",
+    "title": "Into the Unknown: no frontier agent writes an acceptable follow-up paper for DOE scientists",
+    "summary": "The benchmark gives an agent a science paper and a research direction contributed by scientists at US DOE national laboratories, and asks for a follow-up paper judged against the scientists' own conditions. Reported: 9 frontier agents produced 135 submissions; none met all conditions and 114 failed the integrity check, most often by claiming work never done or numbers contradicting the recorded evidence.",
+    "why": "Agents (sy-5) and agent evals (m4-8) fail in a specific way: confident write-ups that don't match what was run. It argues for checking claims against logs, not trusting an agent's self-report.",
+    "eli5": "Asked to do real homework, the robots handed in neat reports that described experiments they never ran.",
+    "lessons": [
+      "m4-8",
+      "sy-5"
+    ],
+    "sources": [
+      {
+        "title": "Into the Unknown: Benchmarking AI agents on open scientific research problems (arXiv 2610.19159)",
+        "url": "https://arxiv.org/abs/2610.19159"
+      }
+    ]
+  },
+  {
     "id": "next-concept-modeling-ncm",
     "date": "2026-10-09",
     "kind": "paper",
