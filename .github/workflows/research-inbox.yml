@@ -3,7 +3,7 @@ name: Research inbox
 # Weekly: gather new papers and lab posts (arXiv, Hugging Face Daily Papers, lab blogs),
 # rank them against the course's module tags and commit research/inbox/<year>-W<week>.md.
 # Nothing here touches the live site: a reviewer (or the weekly Claude session) reads the
-# inbox, checks primary sources and proposes field notes in a pull request.
+# inbox, checks primary sources and publishes verified field notes (never lesson edits).
 on:
   schedule:
     - cron: "17 5 * * 1"   # Mondays 05:17 UTC

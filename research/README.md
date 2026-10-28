@@ -14,9 +14,9 @@ Sources live in `tools/research/sources.json`. Items are ranked by how many modu
 
 Run it yourself: `python3 tools/research/fetch_inbox.py` (add `--out DIR` to write elsewhere, or `--offline items.json` to test without the network).
 
-## 2. Field notes (reviewed, weekly)
+## 2. Field notes (verified, weekly)
 
-A scheduled Claude session (or a person) reads the latest inbox, checks the primary source of each promising item (the paper, model card or official post, never a summary of a summary), and adds at most six notes to `course/field-notes/notes.json`. It opens a pull request; nothing goes live until a human merges it.
+A scheduled Claude session (or a person) reads the latest inbox, checks the primary source of each promising item (the paper, model card or official post, never a summary of a summary), and adds at most six notes to `course/field-notes/notes.json`. Once `python3 tools/research/validate_notes.py` and the layout guard pass, it commits the notes straight to `main`, so they appear on the What's new page the same day. It never edits lessons in that run.
 
 What earns a note: a result likely to change how people build or understand models (a new state of the art that holds up, a new method adopted by several labs, a major open release, a benchmark people now report, a policy that affects practice). Skip incremental results and anything that can't be verified.
 

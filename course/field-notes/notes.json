@@ -1,1 +1,29 @@
-[]
+[
+  {
+    "id": "next-concept-modeling-ncm",
+    "date": "2026-10-09",
+    "kind": "paper",
+    "title": "Next-Concept Modeling: parallel coarse-to-fine text generation (Stanford / Together AI)",
+    "summary": "A multiscale residual-VQ tokenizer turns text into a hierarchy of discrete codes (from a few coarse codes to one per token); a transformer predicts the hierarchy level by level, all positions of a level in parallel, so one forward pass per level (12 levels for 128-token LM1B and TinyStories samples). The authors report beating or matching diffusion LMs at similar scale while running roughly 10 to 31 times faster (21x on LM1B, 10x on OpenWebText, 31x on XSum) and training on 4 to 5 times fewer tokens, at GPT-2 sizes (about 100M to 700M parameters). Preprint, not yet independently replicated.",
+    "why": "It attacks the same cost as diffusion LMs (many full-sequence passes) with a different trick: few levels, and a coarse plan fixed before details. Tested against diffusion baselines on academic tasks, not against strong autoregressive chat models.",
+    "eli5": "Instead of writing a story word by word, draw a rough sketch of the whole story, then add detail in a few rounds.",
+    "lessons": [
+      "ar-6",
+      "ar-7"
+    ],
+    "sources": [
+      {
+        "title": "Next-Concept Modeling: Fast, Parallel Coarse-to-Fine Text Generation (Kumbong et al., 2026)",
+        "url": "https://arxiv.org/abs/2610.14162"
+      },
+      {
+        "title": "HazyResearch/ncm: code, checkpoints and README (MIT)",
+        "url": "https://github.com/HazyResearch/ncm"
+      },
+      {
+        "title": "Hazy Research blog post, 12 Oct 2026",
+        "url": "https://hazyresearch.stanford.edu/blog/2026-10-12-ncm"
+      }
+    ]
+  }
+]
