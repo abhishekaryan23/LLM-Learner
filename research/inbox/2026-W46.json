@@ -1,0 +1,1105 @@
+{
+ "generated": "2026-11-09",
+ "items": [
+  {
+   "title": "From Autonomous Agents to Cognitive Symbionts: Toward AI-Augmented Human Intelligence",
+   "summary": "For a decade, progress in artificial intelligence has been measured by how much a machine can do on its own. Large foundation models now write code and run multistep tasks, and personal agents act on a person's behalf. Yet people still forget what they once knew, miss what they are not looking at, fail to find the right words, and face hard choices without the benefit of their own history, because the machine that could help stands outside the situation. As AI moves into the physical world, attention has settled on one kind of intelligent individual, the embodied robot; we argue that the era o",
+   "url": "https://arxiv.org/abs/2611.05376",
+   "date": "2026-11-03",
+   "upvotes": 120,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "m1"
+   ],
+   "matched": [
+    "attention"
+   ],
+   "score": 14.0
+  },
+  {
+   "title": "SLA: Scaling Spatial-Language-Action Model via Continual Pre-training",
+   "summary": "Reliable robotic manipulation requires both semantic understanding and precise control in three-dimensional space. However, vision-language-action (VLA) foundations largely inherit visual representations from 2D vision-language pre-training, while spatial supervision is often introduced only during task-specific adaptation. Developing spatial understanding as a transferable foundation-model capability therefore calls for learning from broader robot experience. We present SLA, a Spatial-Language-Action Model that scales implicit spatial alignment to continual pre-training and maintains it durin",
+   "url": "https://arxiv.org/abs/2611.08373",
+   "date": "2026-11-05",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 96,
+   "lab": false,
+   "modules": [
+    "m2",
+    "mm"
+   ],
+   "matched": [
+    "pre-training",
+    "vision-language"
+   ],
+   "score": 13.6
+  },
+  {
+   "title": "VFlash: Fast, Accurate Visual Planning via Flash Primitive Decoding",
+   "summary": "Models for physical AI tasks, such as robotics and autonomous driving, need not reason solely in language. They can use visual plans--points, bounding boxes, and trajectories--to represent spatial goals and anticipate motion. However, autoregressive vision-language models generate these plans one coordinate token at a time, making richer predictions increasingly costly. We introduce VFlash, a method for fast, accurate visual planning through Flash Primitive Decoding. VFlash exploits the known structure of visual primitives to predict their coordinates jointly, using a lightweight drafter that ",
+   "url": "https://arxiv.org/abs/2611.08449",
+   "date": "2026-11-05",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 109,
+   "lab": false,
+   "modules": [
+    "mm"
+   ],
+   "matched": [
+    "vision-language"
+   ],
+   "score": 12.9
+  },
+  {
+   "title": "Benchmarking Speaker Embedders in the Sub-Second Regime for Real-Time Voice AI Agents",
+   "summary": "Real-time Voice AI agents must separate the active user from intelligible background speech that survives conventional noise suppression. Background sources include television audio, family members, and colleagues. Production denoisers remove non-stationary environmental noise effectively. Background speech shares the spectral characteristics of the target and passes through, causing false acceptances in downstream speaker verification (SV) and automatic speech recognition (ASR). We benchmark open-source speaker embedders TitaNet-Large, TitaNet-Small, ECAPA-TDNN, CAM++, and SpeakerNet under a ",
+   "url": "https://arxiv.org/abs/2611.09516",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "m4"
+   ],
+   "matched": [
+    "asr",
+    "audio",
+    "benchmark",
+    "speech",
+    "speech recognition",
+    "voice"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "Learning When to Think: Dual-Reference Offline Optimization for Adaptive VLM Reasoning",
+   "summary": "Reasoning traces improve vision-language models on complex multimodal tasks, but forcing every input to follow a long reasoning process leads to overthinking and unnecessary inference cost. We study adaptive fast/slow thinking for VLMs, where one model answers directly for simple inputs and reasons step by step when needed. Fast answers and slow traces often come from distinct behavior policies, making a single-reference offline objective misweight one mode. We propose DUAL-REFERENCE BOLT (DR-BOLT), which distinguishes the desired fast/slow mixture reference from the sampling distribution and ",
+   "url": "https://arxiv.org/abs/2611.09154",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m1",
+    "m5",
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "inference",
+    "multimodal",
+    "reasoning",
+    "sampling",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 12.0
+  },
+  {
+   "title": "Confucius4-R2T2: A Stable-Prefix Streaming ASR Model for Real Real-Time Transcription",
+   "summary": "Streaming speech recognition is increasingly consumed by machines, such as translators and voice agents, that act on each token as it appears. A token that is later revised costs wasted work or a wrong action. In this work, we present Confucius4-R2T2 (short for Real Real-Time Transcription), a stable-prefix streaming ASR model that never modifies its earlier output while maintaining high accuracy and low latency. R2T2 is obtained by post-training Qwen3-ASR-1.7B on 1,500 hours of Chinese and English audio while freezing its pre-trained audio encoder and projector. The adaptation is based on the",
+   "url": "https://arxiv.org/abs/2611.06043",
+   "date": "2026-11-04",
+   "upvotes": 11,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "a1"
+   ],
+   "matched": [
+    "asr",
+    "audio",
+    "speech",
+    "speech recognition",
+    "voice"
+   ],
+   "score": 11.1
+  },
+  {
+   "title": "LongBanana: An Expert-Verified Benchmark for Long-Context Multi-Reference Image Synthesis",
+   "summary": "We introduce LongBanana, to our knowledge the first expert-designed and expert-verified benchmark for long-context multi-reference image synthesis in the age of agent-driven image generation. The task requires retrieving dispersed visual evidence, rejecting distractors, binding entities and relations, and composing one coherent final image from multiple references. LongBanana contains 90 carefully designed tasks organized by a 3-by-3 taxonomy; each task includes about 32 reference images, 20 constraints, and 50 evaluation items, yielding 4,670 expert-specified atomic evaluation items in total.",
+   "url": "https://arxiv.org/abs/2611.06856",
+   "date": "2026-11-04",
+   "upvotes": 24,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "g1",
+    "m4",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "benchmark",
+    "evaluation",
+    "image generation"
+   ],
+   "score": 10.4
+  },
+  {
+   "title": "Test-Time Compute Scales Better with Parallel Agent Teams",
+   "summary": "Test-time scaling improves the performance of a fixed model by spending more computation at inference. There are two common ways to spend it on agents when a verifier can score every attempt. Best-of-N sampling runs many independent agents and keeps the best result but saturates quickly. One large team of collaborating agents can score higher but stops improving as it grows. Can we get the best of both? Our method, parallel agent teams, does so by sampling many small teams in parallel and keeping the best team's result. We test it on 12 long-horizon tasks from GPU kernels and formal proofs to ",
+   "url": "https://arxiv.org/abs/2611.09798",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m1",
+    "m5",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "inference",
+    "sampling",
+    "test-time compute",
+    "verifier"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "AudioSphere: Towards Self-Supervised Spatial Audio Representation Models",
+   "summary": "Recent audio embedding models learn representations that transfer across clip- and frame-level tasks, yet they operate almost exclusively on single-channel signals and are blind to spatial structure. Spatial audio models capture that structure but rely on clip-level supervision or contrastive objectives, yielding embeddings unsuitable for frame-level tasks like sound event detection and localization (SELD). We argue this dichotomy is not fundamental: patch-level spatial self-supervision can jointly learn acoustic and spatial features at both temporal granularities. We introduce AudioSphere, a ",
+   "url": "https://arxiv.org/abs/2611.09275",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "p3",
+    "v1"
+   ],
+   "matched": [
+    "audio",
+    "clip",
+    "contrastive",
+    "embedding",
+    "self-supervised"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "DUET: Dual-Sparse Inference for Block Diffusion Language Models",
+   "summary": "Diffusion language models (DLMs) enable parallel token generation through iterative denoising, yet their inference remains costly due to repeated attention over a growing historical prefix and repeated processing of the entire current generation block. Historical attention becomes increasingly expensive as generation progresses, while all current-block positions are propagated through the Transformer at every denoising step even though only a small fraction are typically resolved at that step. In this paper, we introduce Duet, a training-free dual-sparse inference framework that addresses thes",
+   "url": "https://arxiv.org/abs/2611.09239",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "h1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "attention",
+    "diffusion",
+    "inference",
+    "transformer"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Spectral and Subspace Dynamics of LoRA in Supervised Fine-Tuning and Reinforcement Learning",
+   "summary": "Low-rank adaptation (LoRA) is commonly used in both supervised fine-tuning (SFT) and reinforcement learning (RL), often under similar optimizer settings. Yet, how the different dynamics of the two stages manifest in the low-rank increment that LoRA optimizes remains unclear. Tracking the singular spectrum and subspaces of LoRA updates on mathematical reasoning tasks, we find that RL concentrates the spectrum at every learning rate, while SFT expands it at moderate learning rates; moreover, RL rotates the singular subspaces much faster than SFT at small learning rates. Interpolating between SFT",
+   "url": "https://arxiv.org/abs/2611.08414",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m2",
+    "m3",
+    "rl",
+    "rs"
+   ],
+   "matched": [
+    "fine-tuning",
+    "lora",
+    "optimizer",
+    "reasoning",
+    "reinforcement learning"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "GPWM: Modeling the World as 3D Particle Motion",
+   "summary": "We introduce GPWM, a Generative Particle World Model that predicts how 3D scenes evolve by generating the motion of particles and rigid bodies over time. Unlike video world models that generate scene appearance, GPWM operates directly in 3D physical space. A single representation and architecture cover rigid, deformable, cloth, and granular materials, in both passive physics and robotic interaction. GPWM is an object-aware multi-resolution transformer that combines flow matching with diffusion forcing to generate coherent physical trajectories far beyond its training horizon. We train and eval",
+   "url": "https://arxiv.org/abs/2611.08338",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "h1",
+    "m1",
+    "vd"
+   ],
+   "matched": [
+    "diffusion",
+    "flow matching",
+    "transformer",
+    "world model"
+   ],
+   "score": 10.0
+  },
+  {
+   "title": "Signed but Steerable: Measuring and Closing the Text-Vector Integrity Gap in Offline Retrieval-Augmented Generation",
+   "summary": "Offline retrieval-augmented generation (RAG) on edge devices is updated through signed knowledge packs that carry text and precomputed embedding vectors. A signature proves who published a pack, not that its vectors encode its text. We study this text-vector integrity gap. A verifier that recomputes vectors and accepts them within a cosine tolerance concedes a predictable share of queries to an attacker who controls the vectors: the hijack rate equals the distribution of angular retrieval margins at the tolerance (the margin law). Margins are small in five corpora and two embedding models, so ",
+   "url": "https://arxiv.org/abs/2611.06498",
+   "date": "2026-11-04",
+   "upvotes": 4,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "p3",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "embedding",
+    "rag",
+    "retrieval-augmented",
+    "verifier"
+   ],
+   "score": 8.4
+  },
+  {
+   "title": "StepX-OPD: Rethinking Multi-Teacher On-Policy Distillation in Diffusion Models",
+   "summary": "A deployable text-to-image diffusion model must hold several capabilities at once, such as instruction following, text rendering and human preference, and must sample in a few steps. Capabilities and few-step sampling are built in separate stages: a full-step model first consolidates capabilities through multi-teacher on-policy distillation, then serves as a fixed teacher for step distillation. Every full-step model we evaluate scores lower once compressed, and the second stage cannot begin until the first finishes. We introduce StepX-OPD, which merges the two stages: one student acquires ever",
+   "url": "https://arxiv.org/abs/2611.04386",
+   "date": "2026-11-02",
+   "upvotes": 4,
+   "sources": [
+    "HF Daily Papers"
+   ],
+   "modules": [
+    "g1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "diffusion",
+    "distillation",
+    "sampling",
+    "text-to-image"
+   ],
+   "score": 8.4
+  },
+  {
+   "title": "BitDecoding-FP4: Native FP4 KV Cache Decoding via Algorithm-System Co-Design",
+   "summary": "The key-value (KV) cache dominates memory capacity and bandwidth in long-context LLM serving. While 4-bit microscaling formats (NVFP4, MXFP4) shrink the cache and run attention on FP4 Tensor Cores, a fundamental gap remains between algorithmic quantization and system-aware acceleration: existing FP4 KV systems use vanilla quantization that causes severe accuracy drops, whereas accuracy-oriented 4-bit algorithms rely on vector codebooks whose lookup overhead degrades decoding throughput. We present BitDecoding-FP4, an algorithm--system co-design for accurate and efficient native FP4 KV decoding",
+   "url": "https://arxiv.org/abs/2611.09825",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "attention",
+    "kv cache",
+    "quantization",
+    "serving"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Assessing the Impact of Retrieval-Augmented Generation on Algorithmic Problem-Solving",
+   "summary": "Competitive programming problems pose distinctive challenges for Large Language Models, as they demand not only proficient code generation but also advanced algorithmic reasoning. This study presents a Retrieval-Augmented Generation approach specifically designed to enhance the capacity of Large Language Models to address such problems. Our approach integrates an embedding-based retrieval mechanism and a similarity search algorithm to identify analogous problems within a knowledge database, employing a dynamically adjusted threshold to mitigate retrieval noise. We conducted an evaluation using",
+   "url": "https://arxiv.org/abs/2611.09791",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m4",
+    "p3",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "embedding",
+    "evaluation",
+    "reasoning",
+    "retrieval-augmented"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "A Tight Hierarchy for Chain of Thought",
+   "summary": "Chain-of-thought (CoT) reasoning has emerged as a powerful paradigm for extending the computational capabilities of transformer-based models. A growing body of recent work has begun to uncover the fine-grained computational power of transformers augmented with CoT, as well as their connections to classical complexity theory. In this work, we advance this line of research by establishing the first hierarchy theorem for CoT-based computation. Our main result shows that for any reasonable resource bound $r(n) \\geq n$ and any $\\varepsilon > 0$, \\[ \\mathrm{CoT}(r(n)) \\subsetneq \\mathrm{CoT}(r(n)^{1",
+   "url": "https://arxiv.org/abs/2611.09759",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "rs"
+   ],
+   "matched": [
+    "chain-of-thought",
+    "reasoning",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "PoseRieFlow: Riemannian Flow Matching for Whole-Body Text-to-Pose Generation",
+   "summary": "We present PoseRieFlow, a compact flow-matching framework for text-conditioned generation of whole-body 3D human poses. Prior text-to-pose methods either neglect articulated hands or model rotations in Euclidean space despite their non-Euclidean geometry. PoseRieFlow instead formulates generation directly on the product manifold of SMPL-H joint rotations, learning a text-conditioned vector field that transports samples from an isotropic $\\mathrm{SO}(3)$ Gaussian prior to the data distribution along Riemannian geodesics. A part-tokenized Diffusion Transformer aggregates the 52 joints into eight",
+   "url": "https://arxiv.org/abs/2611.09692",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "h1",
+    "m1"
+   ],
+   "matched": [
+    "diffusion",
+    "flow matching",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Dual Architecture Fusion Vehicle Lidar 3D Target Detection",
+   "summary": "In this paper, a 3D backbone network (SpconvTransformer) based on the fusion of convolutional architecture branch and Transformer architecture branch is proposed. The convolution branch uses 3D sparse convolution and submanifold convolution to learn local voxel features and semantic information, and the Transformer branch uses the self-attention mechanism to model the remote relationship between voxels, uses the broad receptive field to capture rich context information, and complementing the advantages of the two architectures by fusing the local features extracted from the two branches and th",
+   "url": "https://arxiv.org/abs/2611.09664",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "p6"
+   ],
+   "matched": [
+    "attention",
+    "convolutional",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Alignment by Confident Debate: Preference Learning from Multi-Agent Debate",
+   "summary": "Post-training language models for reasoning typically rely on gold answers, task-specific verifiers, or learned reward models, limiting scalability when such signals are scarce. Multi-agent debate offers a self-supervised alternative, but converting debate into reliable training supervision remains challenging: majority voting weights agreeing responses equally, lacks a principled tie-breaking rule, and is ill-defined for open-ended tasks without a canonical answer; likelihood-based scoring can conflate fluency with correctness; and homogeneous committees may reinforce correlated errors. We in",
+   "url": "https://arxiv.org/abs/2611.09568",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "rs",
+    "sy",
+    "v1"
+   ],
+   "matched": [
+    "agent",
+    "multi-agent",
+    "reasoning",
+    "self-supervised"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Atik: A Shared-Mesh Transformer Accelerator for RISC-V",
+   "summary": "Transformer inference repeatedly invokes dense matrix multiplication and attention, including its data-dependent softmax normalization. We present Atik, an open-source RoCC accelerator for RocketChip that executes matrix multiplication and dense attention through one shared fixed-point MAC mesh. Atik accepts and returns BF16 tensors, uses a streaming online-softmax schedule that never materializes the full score matrix, and is invoked through a small descriptor-based ABI. We evaluate three meshes cycle-by-cycle on FireSim and report standalone Sky130 physical-design area. Across 137 logged Fir",
+   "url": "https://arxiv.org/abs/2611.09522",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "attention",
+    "inference",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "FusionCLIP: Multimodal Contrastive Pretraining for Fusion Plasma Diagnostics",
+   "summary": "Visible-light videos and multivariate diagnostic signals provide complementary observations of tokamak discharges. However, existing fusion pretraining methods, primarily learn representations by reconstructing or predicting observations, leaving the correspondence between these modalities underexplored. Representation learning is further challenged by the fact that plasma-related regions occupy only part of each video frame and diagnostic variables have substantially different sampling rates. We propose FusionCLIP, a multimodal contrastive pretraining framework. Spatiotemporal Stability Selec",
+   "url": "https://arxiv.org/abs/2611.09493",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m1",
+    "m2",
+    "mm",
+    "v1"
+   ],
+   "matched": [
+    "contrastive",
+    "multimodal",
+    "pretraining",
+    "sampling"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "T2I Models Rarely Invert Negation but Often Fail to Suppress Negated Concepts: Benchmarking Negation Suppression in Text-to-Image Generation",
+   "summary": "Text-to-image diffusion models often fail to suppress explicitly negated concepts, such as a lamp for \"a desk without a lamp.\" We introduce T2I-NSI, a benchmark and metric for measuring negation sensitivity in text-to-image generation. It pairs each negated prompt with a canonical positive counterpart and factorizes negation by linguistic form (lexical/semantic, morphological, syntactic) and target type (objects, attributes, relations, compositions, and nested cases). The benchmark contains 759,869 paired prompt atoms over a 5,082-object catalog, with 916,272 images (911,982 open-weights, 4,29",
+   "url": "https://arxiv.org/abs/2611.09304",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m4"
+   ],
+   "matched": [
+    "benchmark",
+    "diffusion",
+    "image generation",
+    "text-to-image"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Towards an Autonomous AI Steward for Large-Scale Physics Experiments: Integrating Causal Diagnostics, RAG, and Conformal Prediction",
+   "summary": "Long-term particle physics experiments face critical operational challenges: monitoring non-stationary machine data streams and preserving tacit expert knowledge. We present the \"Helmholtz Co-Pilot,\" a hybrid Multi-Agent System (MAS) acting as an autonomous experiment steward. The system can be triggered interactively by human operators or autonomously by an asynchronous causal diagnostics engine that runs independently of the MAS reasoning core. Continuously monitoring live hardware streams such as data acquisition and slow control, this engine performs dynamic causal discovery to trace casca",
+   "url": "https://arxiv.org/abs/2611.09298",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ag",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "multi-agent",
+    "rag",
+    "reasoning"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Improving Large Audio-Language Model Embedding Baselines for Instruction-Aware Speech Retrieval",
+   "summary": "Speech retrieval finds relevant spoken documents given a spoken query. The spoken query alone may not reveal the retrieval goal, such as finding an answer or matching speaker identity. Instruction-aware speech retrieval expresses this goal through a natural-language text instruction. Large audio-language models (LALMs) effectively process speech and text, and our analysis shows that different retrieval requirements favor hidden states from different audio-encoder layers. We introduce IRIS-Embed, which adapts LALMs into embedding models through contrastive training and instruction-aware audio l",
+   "url": "https://arxiv.org/abs/2611.09122",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "a1",
+    "p3",
+    "v1"
+   ],
+   "matched": [
+    "audio",
+    "contrastive",
+    "embedding",
+    "speech"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "PhoPunct: A Large-Scale Benchmark of Transformer Architectures for Vietnamese Punctuation Restoration",
+   "summary": "Vietnamese punctuation restoration is often evaluated on relatively small benchmarks, limiting conclusions about how architectural choices scale with data volume. We present a controlled benchmark on News and Novels corpora containing 22.1 million labeled tokens (19.9M News and 2.2M Novels). We evaluate 17 architectures formed from four pretrained Transformer backbones and optional bidirectional long short-term memory (Bi-LSTM) and conditional random field (CRF) layers, together with a PhoBERT-large-Bi-LSTM-CRF model, PhoPunct. Every model is trained for eight epochs with the same learning rat",
+   "url": "https://arxiv.org/abs/2611.09107",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m4",
+    "p6"
+   ],
+   "matched": [
+    "benchmark",
+    "lstm",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Grounding-Aware Judge Reward Reinforcement Learning for Out-of-Domain Face Anti-Spoofing",
+   "summary": "Face Anti-Spoofing (FAS) must distinguish genuine faces from presentation attacks. A unified Multimodal Large Language Model (MLLM) is an attractive solution: it detects physical attacks (print, replay, mask) in one model and produces interpretable forensic evidence via Chain-of-Thought (CoT). A central obstacle to post-training such a model with reinforcement learning is that FAS reasoning has no rule-verifiable ground truth: only the binary verdict is checkable, while the reasoning chain cannot be verified by any hand-crafted rule. Optimizing the verdict alone is therefore a sparse, hackable",
+   "url": "https://arxiv.org/abs/2611.09047",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "mm",
+    "rl",
+    "rs"
+   ],
+   "matched": [
+    "chain-of-thought",
+    "multimodal",
+    "reasoning",
+    "reinforcement learning"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "PhysioWave-T: Token-Efficient Wavelet Foundation Models for Biosignals",
+   "summary": "We present PhysioWave-T, a token-efficient wavelet foundation model family for EEG, ECG, and sEMG. Dynamic scale folding recombines J+1 wavelet subbands prior to tokenization, compressing sequence length from (J+1)CS to CS tokens for J levels, C channels, and S temporal patches. Route-specific front ends and learned channel-name embeddings allow one Transformer per modality to handle diverse montages and sampling rates, while unseen setups reuse the backbone via lightweight adapters. We pre-train a 30M-parameter EEG model on over 15M windows (19--128 channels), alongside ECG (30M) and sEMG (12",
+   "url": "https://arxiv.org/abs/2611.08969",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "p3"
+   ],
+   "matched": [
+    "sampling",
+    "tokenization",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "HomeLoop: A Simulation Framework and Benchmark for Robot-IoT Coordination in Everyday Domestic Assistance and Safety",
+   "summary": "Recent progress in embodied robotics is bringing robots closer to deployment in homes, as vision-language models (VLMs) are demonstrating significant advances in reasoning, making VLM-driven robots promising home assistant agents. These agents will often be introduced into homes that already have cameras, Internet of Things (IoT) devices, and residents with wearables. To fulfill their potential, they need to integrate with existing smart infrastructure and reason through ambiguous scenarios: a smoke alarm may come from a pan about to ignite, a pan already on fire, a resident cooking or a fault",
+   "url": "https://arxiv.org/abs/2611.08914",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m4",
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "benchmark",
+    "reasoning",
+    "vision-language",
+    "vlm"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "ActPrune: Action-Grounded Visual Token Pruning for Efficient Vision-Language-Action Models",
+   "summary": "Vision-language-action (VLA) models perform versatile manipulation tasks from language instructions, but their inference cost limits how fast a robot can respond in closed-loop control. Visual token pruning reduces this cost; however, prior methods estimate token redundancy from encoded visual embeddings or attention, only after the visual encoder has processed the entire observation. We propose \\ours, a training-free token pruning method that moves the pruning decision ahead of the vision encoder by grounding it in a geometric prior derived from the robot's own action. The action chunk predic",
+   "url": "https://arxiv.org/abs/2611.08827",
+   "date": "2026-11-06",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m1",
+    "m5",
+    "mm"
+   ],
+   "matched": [
+    "attention",
+    "inference",
+    "pruning",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Scale as a Modality: Multi-Scale Pixel-Space Diffusion Transformers",
+   "summary": "Latent diffusion models rely on pretrained autoencoders that introduce lossy compression and constrain spatial granularity. Pixel-space diffusion avoids this bottleneck and enables flexible tokenization at multiple spatial scales, yet existing approaches largely adopt two-level coarse-to-fine architectures with limited cross-scale interaction. We introduce MS-pDiT, a multi-scale pixel-space diffusion transformer that treats spatial scale as a modality. MS-pDiT tokenizes the same noisy image at multiple patch sizes, processes each scale in a dedicated transformer stream, and enables bidirection",
+   "url": "https://arxiv.org/abs/2611.08802",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "h1",
+    "m1",
+    "p3"
+   ],
+   "matched": [
+    "diffusion",
+    "tokenization",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "AtariBench: Evaluating Spatiotemporal Reasoning of Vision-Language Models in Atari Gameplay",
+   "summary": "Vision-Language Models (VLMs) have achieved strong performance on static visual understanding benchmarks, yet their ability to act in dynamic environments remains less well understood. We introduce AtariBench, a controlled benchmark that evaluates VLMs across 20 Atari 2600 games, requiring models to make sequential decisions from high-temporal-resolution gameplay streams. By decoupling fast in-game dynamics from wall-clock inference speed, AtariBench focuses on whether models can perceive rapid visual state changes, reason over spatiotemporal dynamics, and ground actions in the current observa",
+   "url": "https://arxiv.org/abs/2611.08755",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m4",
+    "m5",
+    "mm",
+    "rs"
+   ],
+   "matched": [
+    "benchmark",
+    "inference",
+    "reasoning",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "ChainFlow: Few-Step Latent Flow Matching for Speculative Decoding",
+   "summary": "Speculative decoding has become a standard way to accelerate LLM inference: a lightweight drafter proposes tokens that the target verifies in one parallel pass. Existing drafters face trade-offs that limits their speedups: autoregressive drafters generate tokens one at a time, so drafting cost grows with draft length, while diffusion drafters generate tokens in parallel but predict each position independently, ignoring inter-token dependencies. We introduce ChainFlow, a new speculative decoding paradigm and the first flow-matching drafter conditioned on the target's hidden states. ChainFlow tr",
+   "url": "https://arxiv.org/abs/2611.08669",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m5"
+   ],
+   "matched": [
+    "diffusion",
+    "flow matching",
+    "inference",
+    "speculative decoding"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Higher Order Component Attribution via Learned Surrogates in High Energy Physics",
+   "summary": "Experimental High Energy Physics (HEP) has adopted the transformer architecture for identification of jets, particularly the state-of-the-art Particle Transformer (ParT) which injects explicit information about particle correlations into the attention mechanism. While able to achieve state-of-the-art results in accuracy, interpretability to its effectiveness has been limited. In this paper we propose component attribution methods using Kolmogorov-Arnold Networks (KANs) that directly tie back to the physical descriptors of jets, to probe whether mechanisms such as Multi-Head Attention (MHA), or",
+   "url": "https://arxiv.org/abs/2611.08656",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "in",
+    "m1"
+   ],
+   "matched": [
+    "attention",
+    "interpretability",
+    "transformer"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "InstaGen: Group-Shared Importance Sampling for Fast Video Generation",
+   "summary": "Diffusion Transformers (DiTs) are the dominant architecture for video generation, but their quadratic attention complexity results in substantial computational cost and latency. Permuted block-sparse attention (PBSA) offers a promising approach to reducing this cost by selectively computing blocks of a semantically permuted attention matrix. However, existing approaches typically select only the top few key blocks for each query block, following a top-$p$ paradigm. We find that top-$p$ selection can be highly sample inefficient in high-entropy attention regimes, which are common in video gener",
+   "url": "https://arxiv.org/abs/2611.08610",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "g1",
+    "m1",
+    "vd"
+   ],
+   "matched": [
+    "attention",
+    "diffusion",
+    "sampling",
+    "video generation"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Meituan-Robotics-0: A Vision-Language-Action Foundation Model for Desktop Manipulation",
+   "summary": "We present Meituan-Robotics-0 (MR0), a vision-language-action foundation model and embodied-agent system for stationary-base desktop manipulation. MR0 combines 147 million vision-language samples with 15,060 hours of curated robot trajectories spanning 12 embodiments. A three-stage training recipe aligns multimodal representations with robot behavior through discrete action-token pre-training, transfers these priors to continuous cross-embodiment control through flow-matching mid-training, and adapts the policy through real-world post-training. We introduce Rollback, which pairs replaced polic",
+   "url": "https://arxiv.org/abs/2611.08577",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m2",
+    "mm",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "multimodal",
+    "pre-training",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "SpecCTMC: Exact Speculative Simulation of Diffusion Language Model Continuous-Time Markov Chains",
+   "summary": "Masked diffusion language models offer parallel text generation, but independently sampling multiple tokens can disrupt their dependencies and change the output distribution. Exact continuous-time sampling avoids this approximation, yet typically requires one sequential model evaluation per token. We introduce SpecCTMC, a training-free speculative sampler that reduces this sequential bottleneck without a separate draft model. SpecCTMC proposes successive token updates using previously computed model predictions, evaluates their intermediate states in parallel, and applies an exact acceptance-a",
+   "url": "https://arxiv.org/abs/2611.08362",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "ar",
+    "g1",
+    "m1",
+    "m4"
+   ],
+   "matched": [
+    "diffusion",
+    "diffusion language model",
+    "evaluation",
+    "sampling"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Agent-R$^2$: Scaling Agents for Realistic Productivity Work via Real-Source Data Synthesis",
+   "summary": "Large language models have made rapid progress in agentic reasoning and tool use, raising expectations for agents that can take over realistic productivity work from humans. However, current agents still struggle to finish such tasks, where success requires following long-horizon professional workflows, understanding heterogeneous file contexts, and producing usable deliverables under fine-grained requirements. A key bottleneck is the lack of scalable post-training data that reflects real work intent, authentic file environments, and deliverable-level evaluation. To close this gap, we introduc",
+   "url": "https://arxiv.org/abs/2611.08219",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "m4",
+    "rs",
+    "sy"
+   ],
+   "matched": [
+    "agent",
+    "evaluation",
+    "reasoning",
+    "tool use"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "La-JEPA: Compact Robot Policies with Latent World Modeling",
+   "summary": "World-action models adapt pretrained video generators, and vision-language-action models build on pretrained vision-language backbones; both tie policy architecture and inference cost to large transformers designed for generation rather than control. It remains unclear how much these generation-oriented choices affect control. In this work, we introduce Latent Action JEPA (La-JEPA), a compact world-action model whose policy transformer is trained from scratch in the feature space of a pretrained V-JEPA 2.1 encoder. Following Fast-WAM, La-JEPA learns to predict future features jointly with acti",
+   "url": "https://arxiv.org/abs/2611.08156",
+   "date": "2026-11-05",
+   "sources": [
+    "arXiv"
+   ],
+   "modules": [
+    "h1",
+    "m1",
+    "m5",
+    "mm"
+   ],
+   "matched": [
+    "inference",
+    "transformer",
+    "vision-language"
+   ],
+   "score": 8.0
+  },
+  {
+   "title": "Muir: Linear Attention with Sensitivity-Allocated Gating and Matched-Filter Readout",
+   "summary": "Linear attention compresses context into a fixed-size key-value state for linear-time training and constant-memory inference. Gated delta-rule models decay this state and erase its prediction for an incoming key before writing a new value; Gated DeltaNet-2 (GDN-2) generalizes this with channel-wise decay and decoupled, full-rank erase and write gates. However, we show that state updates are far less sensitive to erasure than to writes: key activation and unit normalization concentrate key energy onto a sparse subset of channels, whereas value writes scale all channels, so the erase gate can be",
+   "url": "https://arxiv.org/abs/2611.08376",
+   "date": "2026-11-05",
+   "sources": [
+    "HF Daily Papers",
+    "arXiv"
+   ],
+   "upvotes": 13,
+   "lab": false,
+   "modules": [
+    "ar",
+    "m1",
+    "m5"
+   ],
+   "matched": [
+    "attention",
+    "inference",
+    "linear attention"
+   ],
+   "score": 7.3
+  },
+  {
+   "title": "Speed Up Image Generation with FLUX 3 Image Klein on NVIDIA Blackwell GPUs",
+   "summary": "When deploying diffusion models in design tools, image editors, and visual production workflows, developers must account for inference latency. Generating an...",
+   "url": "https://developer.nvidia.com/blog/speed-up-image-generation-with-flux-3-image-klein-on-nvidia-blackwell-gpus/",
+   "date": "2026-11-06",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "g1",
+    "m5"
+   ],
+   "matched": [
+    "diffusion",
+    "image generation",
+    "inference"
+   ],
+   "score": 9.0
+  },
+  {
+   "title": "Egyptian and Nigerian English join the Open ASR Leaderboard",
+   "summary": "",
+   "url": "https://huggingface.co/blog/open-asr-leaderboard-liva",
+   "date": "2026-11-06",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "a1",
+    "m4"
+   ],
+   "matched": [
+    "asr",
+    "leaderboard"
+   ],
+   "score": 7.0
+  },
+  {
+   "title": "Accelerating Reinforcement Learning Weight Refit with the Reshard Collective",
+   "summary": "During reinforcement learning (RL) post-training, training trajectories are generated on the fly by running inference with the current policy model. For...",
+   "url": "https://developer.nvidia.com/blog/accelerating-reinforcement-learning-weight-refit-with-the-reshard-collective/",
+   "date": "2026-11-06",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "m5",
+    "rl"
+   ],
+   "matched": [
+    "inference",
+    "reinforcement learning"
+   ],
+   "score": 7.0
+  },
+  {
+   "title": "Measuring how AI agents handle everyday wet-lab science",
+   "summary": "OpenAI introduces BioBasicsBench, a 100-task benchmark measuring how well AI agents interpret raw experimental data and handle everyday wet-lab science.",
+   "url": "https://openai.com/index/measuring-how-ai-agents-handle-wet-lab-science",
+   "date": "2026-11-06",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "m4"
+   ],
+   "matched": [
+    "benchmark"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Introducing Images 2.6",
+   "summary": "Images 2.6 brings faster image generation, GIF creation, more precise editing, and new API controls across ChatGPT, Codex, and the API.",
+   "url": "https://openai.com/index/introducing-images-2-6",
+   "date": "2026-11-04",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "g1"
+   ],
+   "matched": [
+    "image generation"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "DevRev delivers autonomous self-service with GPT-6.1 Sol",
+   "summary": "DevRev uses GPT-6.1 Sol to power Computer and Operator, balancing reasoning, speed, and cost for enterprise service.",
+   "url": "https://openai.com/index/devrev-enterprise-self-service",
+   "date": "2026-11-04",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "rs"
+   ],
+   "matched": [
+    "reasoning"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "LifeVal",
+   "summary": "Introducing LifeVal, a benchmark measuring how well AI helps people complete everyday tasks, from finding childcare to managing finances and government paperwork.",
+   "url": "https://openai.com/index/lifeval",
+   "date": "2026-11-02",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [
+    "m4"
+   ],
+   "matched": [
+    "benchmark"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "ToyBlocks: A controlled world for robot learning and evaluation",
+   "summary": "",
+   "url": "https://huggingface.co/blog/allenai/toyblocks",
+   "date": "2026-11-06",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "m4"
+   ],
+   "matched": [
+    "evaluation"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "A Closer Look at Phonon TTS. Launching High-Quality On-Device Speech That Tops the Benchmarks.",
+   "summary": "",
+   "url": "https://huggingface.co/blog/phonon-tts",
+   "date": "2026-11-05",
+   "lab": true,
+   "sources": [
+    "Hugging Face"
+   ],
+   "modules": [
+    "a1"
+   ],
+   "matched": [
+    "speech"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Formally verifying agent-written full-stack web apps with PDD Kit",
+   "summary": "AI agents can generate code at a scale that’s hard for humans to review line-by-line. PDD Kit helps ensure the code is doing what the developer intended by creating formal specifications and testing against them. It converts developer intent into a Verus specification, proves AI-generated code meets it for every input, and uses tests where proofs aren't practical. Developers review intent, not every line. The post Formally verifying agent-written full-stack web apps with PDD Kit appeared first on Microsoft Research .",
+   "url": "https://www.microsoft.com/en-us/research/blog/formally-verifying-agent-written-full-stack-web-apps-with-pdd-kit/",
+   "date": "2026-11-05",
+   "lab": true,
+   "sources": [
+    "Microsoft Research"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Configure, Certify, and Operate Kubernetes GPU Clusters with NVIDIA DSX OS",
+   "summary": "One underperforming GPU can slow an entire distributed training job. The node may pass basic health checks and show normal utilization, leaving operators to...",
+   "url": "https://developer.nvidia.com/blog/configure-certify-and-operate-kubernetes-gpu-clusters-with-nvidia-dsx-os/",
+   "date": "2026-11-05",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "m2"
+   ],
+   "matched": [
+    "distributed training"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Use NVIDIA NeMo to Turn Agent Failures into Tests and Harness Fixes",
+   "summary": "Turn production evidence into prioritized issues and custom evaluations that help you improve prompts, tools, models, memory, skills, and harness code. When you...",
+   "url": "https://developer.nvidia.com/blog/use-nvidia-nemo-to-turn-agent-failures-into-tests-and-harness-fixes/",
+   "date": "2026-11-04",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "sy"
+   ],
+   "matched": [
+    "agent"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Keep Distributed Training Running with Automated Workload Recovery",
+   "summary": "As distributed AI training scales, failures across hardware and software dependencies increasingly disrupt training progress, making fast, reliable recovery...",
+   "url": "https://developer.nvidia.com/blog/keep-distributed-training-running-with-automated-workload-recovery/",
+   "date": "2026-11-02",
+   "lab": true,
+   "sources": [
+    "NVIDIA Technical Blog"
+   ],
+   "modules": [
+    "m2"
+   ],
+   "matched": [
+    "distributed training"
+   ],
+   "score": 5.0
+  },
+  {
+   "title": "Partnering with Hacktron to find vulnerabilities in OpenAI’s systems",
+   "summary": "OpenAI is partnering with Hacktron to find vulnerabilities, test connections with third-party services, and strengthen defenses with frontier AI.",
+   "url": "https://openai.com/index/partnering-with-hacktron",
+   "date": "2026-11-06",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  },
+  {
+   "title": "Australian universities are creating AI-native graduates",
+   "summary": "Australian universities are expanding access to ChatGPT and bringing AI into teaching and learning to prepare students for an AI-enabled workforce.",
+   "url": "https://openai.com/index/australian-universities-ai-native-graduates",
+   "date": "2026-11-05",
+   "lab": true,
+   "sources": [
+    "OpenAI"
+   ],
+   "modules": [],
+   "matched": [],
+   "score": 3.0
+  }
+ ]
+}
