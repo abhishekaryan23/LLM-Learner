@@ -1,5 +1,28 @@
 [
   {
+    "id": "byod-ar-to-diffusion-lora",
+    "date": "2026-10-30",
+    "kind": "paper",
+    "title": "BYOD: turning an autoregressive LLM into a diffusion LM with LoRA adapters only",
+    "summary": "Reported: a LoRA-only recipe converts pretrained autoregressive models into diffusion language models by swapping the causal attention mask for a bidirectional one while keeping the backbone, embeddings, LM head and norm layers frozen. The authors say it works without architecture-specific tuning on four 7B to 9B models (Gemma 2 9B, Llama 3.1 8B, Qwen2.5 7B, Ministral 8B). Open-ended generation is the main weakness. Preprint, not yet independently replicated.",
+    "why": "Diffusion LMs (ar-6) usually need costly pretraining or full fine-tuning. This suggests an existing checkpoint can be adapted cheaply with the LoRA tools from m3-7, so a diffusion decoder becomes something you can try rather than only read about.",
+    "eli5": "Instead of building a new kind of writer from scratch, give a normal writer a small add-on that lets it look at the whole page at once.",
+    "lessons": [
+      "ar-6",
+      "m3-7"
+    ],
+    "sources": [
+      {
+        "title": "BYOD: Build Your Own DLM (Kuiper and Bagheri, 2026)",
+        "url": "https://arxiv.org/abs/2610.41574"
+      },
+      {
+        "title": "RuurdKuiper/BYOD: code",
+        "url": "https://github.com/RuurdKuiper/BYOD"
+      }
+    ]
+  },
+  {
     "id": "mistral-large-4-open-weights",
     "date": "2026-10-29",
     "kind": "release",
