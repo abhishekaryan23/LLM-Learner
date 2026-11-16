@@ -1,5 +1,49 @@
 [
   {
+    "id": "parallel-agent-teams-test-time-compute",
+    "date": "2026-11-06",
+    "kind": "paper",
+    "title": "Parallel agent teams: spending test-time compute on many small teams beats many solo agents",
+    "summary": "Reported: instead of sampling many independent agents and keeping the best, the authors sample many small teams in parallel and keep the best team's result. On 12 long-horizon tasks (GPU kernels, formal proofs and others), with a 27B model and a budget of 100 agents, teams of 10 beat parallel single agents on 10 of the 12 tasks, and at equal dollar cost the teams beat a frontier model on half the tasks. They explain it with a best-of-N model: gains depend on the spread of scores across samples. Preprint.",
+    "why": "Extends best-of-N and voting (rs-2) from single answers to multi-step agent work (sy-5, ag-7): the unit you sample can be a whole team. It also shows a cheaper model with more sampled attempts can compete with a bigger one, though not on every task.",
+    "eli5": "Rather than sending 100 kids to solve a puzzle alone, send 10 teams of 10 and take the best team's answer.",
+    "lessons": [
+      "rs-2",
+      "sy-5",
+      "ag-7"
+    ],
+    "sources": [
+      {
+        "title": "Test-Time Compute Scales Better with Parallel Agent Teams (Wang et al., 2026)",
+        "url": "https://arxiv.org/abs/2611.09798"
+      },
+      {
+        "title": "modal-projects/parallel-agent-teams-scaling: code",
+        "url": "https://github.com/modal-projects/parallel-agent-teams-scaling"
+      }
+    ]
+  },
+  {
+    "id": "biobasicsbench-wet-lab-agents",
+    "date": "2026-11-06",
+    "kind": "benchmark",
+    "title": "BioBasicsBench: OpenAI and Ligo test AI agents on routine wet-lab data analysis",
+    "summary": "Reported: a 100-task benchmark built from real experiments, covering protein methods, imaging and cytometry, quantification and assays, nucleic acid methods, and molecular cloning. Tasks use raw gel images, colony plates, microscopy, sequencing files and instrument exports. OpenAI evaluated seven of its models in 37 model-and-effort settings with five attempts per task (18,500 results). The top model, GPT-6 Astra, scored 66.7 percent, so about a third of tasks still failed; weak spots were reading images, checking controls and over-interpreting.",
+    "why": "A concrete agent and multimodal eval (m4-8, mm-4): the tasks use raw files rather than clean text, and results are averaged over repeated attempts (m4-6). Note it is run and reported by a model vendor on its own models, and one report says the tasks are not public.",
+    "eli5": "A pop quiz for lab robots: look at a messy photo from a real experiment and say what went right or wrong.",
+    "lessons": [
+      "m4-8",
+      "mm-4",
+      "m4-6"
+    ],
+    "sources": [
+      {
+        "title": "Measuring how AI agents handle everyday wet-lab science (OpenAI, 2026-11-06)",
+        "url": "https://openai.com/index/measuring-how-ai-agents-handle-wet-lab-science/"
+      }
+    ]
+  },
+  {
     "id": "byod-ar-to-diffusion-lora",
     "date": "2026-10-30",
     "kind": "paper",
