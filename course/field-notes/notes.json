@@ -1,5 +1,45 @@
 [
   {
+    "id": "more-agents-vs-more-samples",
+    "date": "2026-11-13",
+    "kind": "paper",
+    "title": "More agents, more samples or more thinking? Multi-agent LLMs rarely beat compute-matched single agents",
+    "summary": "Reported: a meta-analysis of 9 studies and 516 multi-agent configurations finds no consistent multi-agent advantage once the single-agent baseline gets repeated samples or the same compute budget. The average effect is about 0.04 lower accuracy than the matched baseline, and multi-agent results were at or below baseline in 74 percent of comparable contrasts. The authors say communication adds nothing when agents share the same evidence; gains need partitioned evidence, external verification or error diversity across models. Preprint.",
+    "why": "A counterweight to the parallel-agent-teams note: before adding agents (sy-5, ag-7), check whether the same budget spent on more samples or longer thinking (rs-2) does as well. Teams help mainly when they bring new evidence or independent checks.",
+    "eli5": "Ten students who all read the same page and then chat do not beat one student who tries ten times.",
+    "lessons": [
+      "rs-2",
+      "sy-5",
+      "ag-7"
+    ],
+    "sources": [
+      {
+        "title": "More Agents, More Samples, or More Thinking? Untangling Coordination, Ensembling, and Test-Time Compute in Multi-Agent LLMs (arXiv 2611.17610)",
+        "url": "https://arxiv.org/abs/2611.17610"
+      }
+    ]
+  },
+  {
+    "id": "lazarus-dormant-neuron-agent-backdoor",
+    "date": "2026-11-10",
+    "kind": "paper",
+    "title": "Microsoft Research: backdooring an AI agent by reprogramming a few dormant neurons",
+    "summary": "Microsoft Research reports that editing the weights of fewer than 10 rarely-active (dormant) neurons, with no training, can implant a backdoor in an LLM agent: it behaves normally until a trigger string appears in its context, then emits an attacker's payload such as a shell command. A reported demo edits 7 of more than 12,000 neurons in Nemotron-Terminal-8B. Microsoft says behavioral safety checks alone can miss it and points to weight-level detection. Details are from the blog post and secondary coverage.",
+    "why": "A concrete supply-chain risk for agents with tool or terminal access (sy-7, sy-4): downloaded weights can pass behavior tests yet hide a trigger. It also shows individual neurons can be read and edited (in-2), here for attack rather than understanding.",
+    "eli5": "A sleeper switch hidden in a few quiet brain cells that only wakes up when it sees a secret word.",
+    "lessons": [
+      "sy-7",
+      "sy-4",
+      "in-2"
+    ],
+    "sources": [
+      {
+        "title": "Lazare, veni foras: Reprogramming Dormant Neurons to Backdoor AI Agents (Microsoft Research blog)",
+        "url": "https://www.microsoft.com/en-us/research/blog/lazare-veni-foras-reprogramming-dormant-neurons-to-backdoor-ai-agents/"
+      }
+    ]
+  },
+  {
     "id": "parallel-agent-teams-test-time-compute",
     "date": "2026-11-06",
     "kind": "paper",
